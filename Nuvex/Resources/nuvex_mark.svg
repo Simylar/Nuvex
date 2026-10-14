@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Nuvex">
+  <defs>
+    <linearGradient id="top" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#35C5FA"/><stop offset="1" stop-color="#5278F7"/>
+    </linearGradient>
+    <linearGradient id="right" x1="1" y1="0" x2="0" y2="1">
+      <stop stop-color="#668CFF"/><stop offset="1" stop-color="#7650EC"/>
+    </linearGradient>
+    <linearGradient id="left" x1="0" y1="1" x2="1" y2="0">
+      <stop stop-color="#297EF4"/><stop offset="1" stop-color="#40B8F5"/>
+    </linearGradient>
+  </defs>
+  <g fill="none" stroke-width="13" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M50 10 84 30 84 70" stroke="url(#top)"/>
+    <path d="M84 70 50 90 16 70" stroke="url(#right)"/>
+    <path d="M16 70 16 30 50 10" stroke="url(#left)"/>
+  </g>
+  <circle cx="50" cy="10" r="8" fill="#38BDF8"/>
+  <circle cx="84" cy="70" r="8" fill="#7551EF"/>
+  <circle cx="16" cy="70" r="8" fill="#2C88F5"/>
+</svg>

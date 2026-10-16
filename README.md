@@ -29,12 +29,12 @@ El resultado es `Nuvex/Nuvex.app` dentro del repositorio. Puedes copiarlo a `/Ap
 
 ## Primer uso
 
-1. Abre Nuvex desde la barra de menús y entra en **Configuración**.
-2. Pulsa **Añadir primera conexión**. Escribe el nombre, el servidor Fortinet y su puerto, el usuario y la contraseña VPN. Selecciona la confianza TLS apropiada: certificados del sistema, una huella SHA-256 que hayas verificado o la CA incluida si corresponde a tu servidor.
-3. Pulsa **Guardar y aplicar**. Nuvex guarda el perfil sin contraseña en `~/.config/nuvex/profiles.json`, guarda la contraseña en el Llavero y prepara el ayudante. macOS puede pedir autorización de administrador para instalarlo.
-4. Pulsa **Conectar**. Si la VPN solicita un código por correo o app, Nuvex te lo pedirá en ese momento.
+1. Al abrir Nuvex sin conexiones aparece la ventana de bienvenida. También puedes abrirla con **Añadir conexión…** en el menú de Nuvex.
+2. Pulsa **Añadir primera conexión**. Escribe el nombre, el servidor Fortinet y su puerto, el usuario y la contraseña VPN. Selecciona los certificados del sistema o la CA incluida si corresponde a tu servidor. Si necesitas una huella SHA-256 verificada, configúrala en Ajustes antes de conectar.
+3. Pulsa **Guardar y continuar**. Nuvex guarda el perfil sin contraseña en `~/.config/nuvex/profiles.json`, guarda la contraseña en el Llavero y prepara el ayudante. macOS puede pedir autorización de administrador para instalarlo.
+4. Pulsa **Conectar ahora**, o el círculo de la conexión en el menú de Nuvex. Si la VPN solicita un código por correo o app, Nuvex te lo pedirá en ese momento.
 
-Para más servidores, usa **Añadir conexión** en la barra lateral de Configuración. Puedes cambiar las opciones de rutas y DNS de cada perfil. Si varias VPN anuncian las mismas redes o modifican DNS a la vez, comprueba cuál debe administrar cada recurso. Los perfiles existentes de Nuvex se conservan al actualizar la app.
+Para más servidores, abre **Ajustes de Nuvex…** (⌘,) y pulsa **+** al pie de la barra lateral. Cada conexión se guarda por separado con **Guardar** (⌘S). Puedes cambiar las opciones de rutas y DNS de cada perfil. Si varias VPN anuncian las mismas redes o modifican DNS a la vez, comprueba cuál debe administrar cada recurso. Los perfiles existentes de Nuvex se conservan al actualizar la app.
 
 La confirmación local con Touch ID, cuando está disponible, se configura en **General** para Nuvex completo y se solicita una vez durante la preparación inicial. El diálogo de administrador pertenece a macOS: Nuvex no puede imponer Touch ID allí. Un ayudante vigente se reutiliza al conectar; los cambios de conexión o del motor pueden requerir una nueva autorización.
 
@@ -49,10 +49,13 @@ Nuvex no escribe contraseñas ni códigos en los perfiles o argumentos del proce
 ```sh
 python3 -m unittest discover -s tests -v
 bash tests/test_security_preferences.sh
+bash tests/test_interfaz.sh
 cd Nuvex && ./build.sh
 ```
 
-El código de la app está en `Nuvex/Sources/Nuvex/`; los scripts de configuración y del ayudante están en la raíz; el motor `openfortivpn` está en `vendor/openfortivpn/`. El paquete generado `Nuvex/Nuvex.app` y los datos locales quedan fuera de Git.
+El código de la app está en `Nuvex/Sources/Nuvex/`, separado en modelo, motor, Llavero, panel, Ajustes y bienvenida. Para generar capturas con datos ficticios, ejecuta `bash Nuvex/scripts/capturas.sh` desde la raíz; las imágenes quedan en `.build-cache/capturas/`. Los scripts de configuración y del ayudante están en la raíz; el motor `openfortivpn` está en `vendor/openfortivpn/`. El paquete generado `Nuvex/Nuvex.app` y los datos locales quedan fuera de Git.
+
+Para comprobar una conexión con un servidor real y un recurso interno autorizado, sigue [la guía de validación en vivo](docs/validacion-en-vivo.md). Las pruebas automáticas comprueban la configuración y el código; no establecen túneles contra servidores de terceros.
 
 ## Licencias
 

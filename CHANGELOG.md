@@ -4,21 +4,18 @@ Este archivo sigue el formato de [Keep a Changelog](https://keepachangelog.com/e
 
 ## [3.1.0] - Sin publicar
 
-### Añadido
-- Actualizaciones desde la app con Sparkle: búsqueda diaria, aviso discreto en el panel y canal beta opcional.
-- Copia automática de la configuración antes de cada actualización y restauración desde Ajustes.
-- Comprobación tras actualizar: acceso al Llavero, estado del ayudante y novedades de la versión.
-- `scripts/instalar.sh` y `scripts/revertir.sh` para instalar desde el código sin perder datos.
-- Comando `nuvex` y habilidad para Claude Code y Codex: conectan, desconectan y consultan tus VPN, con permisos en Ajustes › Automatización.
-- Aviso de desconexión con Reconectar, que se queda en pantalla con el estilo «Alertas».
-- Ventana del código de verificación que no bloquea la app.
-- Lectura del código de verificación desde Gmail (solo lectura), configurable por conexión.
-- Exportar e importar conexiones en un archivo .nuvexvpn cifrado con una frase; las contraseñas son opcionales y piden Touch ID.
+### Novedades
+- **Actualización de software**: Nuvex busca versiones nuevas cada día, te muestra qué cambió y se actualiza con un clic. Tus conexiones, contraseñas y ajustes se conservan, y las VPN siguen conectadas mientras se instala.
+- **Conecta con Claude Code o Codex**: pídeles «conéctame a la VPN de la oficina» y lo harán, incluso si no estás frente a la Mac. Tú decides qué pueden hacer en Ajustes › Automatización.
+- **Código por correo automático**: conecta tu cuenta de Gmail (solo lectura) y Nuvex usará el código de FortiToken en cuanto llegue.
+- **Aviso de desconexión con Reconectar**: si una VPN se cae, el aviso se queda en pantalla con el estilo «Alertas» y la reconecta sin abrir la app.
+- **Exportar e importar conexiones** en un archivo cifrado con una frase, para llevarlas a otra Mac. Las contraseñas son opcionales y piden Touch ID.
 
-### Cambiado
-- La versión sale de `Nuvex/VERSION` y el número de compilación del historial de Git.
-- La app se firma con una identidad estable cuando existe, para que el Llavero no vuelva a pedir permiso tras cada actualización.
-- El motor compilado se reutiliza mientras su código no cambie, así actualizar no obliga a reinstalar el ayudante.
+### Mejoras
+- Icono de la barra más claro: verde al estar conectada y con un trazo animado mientras conecta.
+- La ventana del código de verificación ya no bloquea Nuvex y muestra de qué VPN es.
+- Copias automáticas de la configuración antes de cada actualización, con restauración desde Ajustes › General.
+- Comprobación tras actualizar: si macOS necesita volver a autorizar algo, Nuvex lo pide en ese momento.
 
 ## [3.0.0] - 2026-10-16
 

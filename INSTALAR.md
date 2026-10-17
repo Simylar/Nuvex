@@ -45,6 +45,15 @@ El enlace `nuvex://connect/<id>` permite a Codex u otra automatización local so
 
 También puedes consultar `./nuvexctl.sh list` o iniciar `./nuvexctl.sh connect <id>` desde Terminal, dentro de la carpeta del proyecto. Si el servidor solicita un código, se pregunta en Terminal. Ambos usan la misma configuración y muestran el mismo estado que la app.
 
+## Actualizar sin perder datos
+
+Las conexiones, contraseñas y ajustes viven fuera de la app ([docs/datos.md](docs/datos.md)), así que actualizar no los toca.
+
+- **Desde la app**: Ajustes › Actualización de software muestra la versión disponible y sus novedades. Las VPN activas siguen conectadas durante la instalación.
+- **Desde el código**: `Nuvex/scripts/instalar.sh` pasa las pruebas, compila, guarda la versión anterior en `~/Library/Application Support/Nuvex/Versiones` y reemplaza la app. `Nuvex/scripts/revertir.sh` vuelve atrás.
+- Antes de cada versión nueva, Nuvex copia la configuración en `~/Library/Application Support/Nuvex/Copias`. Se restaura desde Ajustes › General › Copias de seguridad.
+- Si una versión cambia el motor, Nuvex pide autorizar el ayudante en ese momento. Si cambió la firma de la app, pide probar el acceso al Llavero: elige «Permitir siempre».
+
 ## Privacidad y límites
 
 Las contraseñas y códigos viajan al ayudante por entrada estándar; no se colocan en argumentos del proceso ni en la configuración. El registro de diagnóstico del motor reside en `/var/run/nuvex/UID/perfil/openfortivpn.log` con permisos de `root`.

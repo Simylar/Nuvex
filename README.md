@@ -12,7 +12,11 @@ Nuvex es una app de barra de menús para macOS con la que puedes configurar y co
 - Varias VPN simultáneas, con avisos cuando sus rutas o DNS pueden entrar en conflicto.
 - Contraseñas en el Llavero de macOS y códigos de verificación solicitados solo cuando el servidor los pide.
 - Instalación del ayudante de red desde la app, con autorización de macOS cuando haga falta.
-- Estado y reconexión desde la barra de menús, avisos de desconexión y acceso opcional desde Terminal o `nuvex://connect/<id>`.
+- Estado y reconexión desde la barra de menús, con un aviso de desconexión que ofrece **Reconectar**.
+- Lectura opcional del código de verificación desde Gmail, con permiso de solo lectura ([guía](docs/gmail.md)).
+- Comando `nuvex` y habilidad para Claude Code y Codex: conectan tus VPN cuando se lo pides, incluso fuera de casa ([guía](docs/asistentes.md)).
+- Exportación e importación de conexiones en un archivo cifrado con una frase.
+- Actualizaciones desde la app con sus novedades, sin perder conexiones, contraseñas ni ajustes ([dónde vive cada dato](docs/datos.md)).
 
 ## Compilar e instalar
 
@@ -25,7 +29,13 @@ cd Nuvex/Nuvex
 ./build.sh
 ```
 
-El resultado es `Nuvex/Nuvex.app` dentro del repositorio. Puedes copiarlo a `/Applications` y abrirlo. El paquete incluye `openfortivpn` y las bibliotecas OpenSSL necesarias; Homebrew se necesita para compilar, no para ejecutar la app. La compilación se firma localmente en modo ad hoc y **no está notarizada** para distribución como binario público.
+El resultado es `Nuvex/Nuvex.app` dentro del repositorio. Para instalarlo o actualizarlo en `/Applications` sin perder datos, usa:
+
+```sh
+Nuvex/scripts/instalar.sh
+```
+
+El script pasa las pruebas, compila, guarda la versión anterior, reemplaza la app sin cortar las VPN activas y la vuelve a abrir. `Nuvex/scripts/revertir.sh` vuelve a la versión anterior. El paquete incluye `openfortivpn` y las bibliotecas OpenSSL necesarias; Homebrew se necesita para compilar, no para ejecutar la app. La compilación **no está notarizada**. Con `Nuvex/scripts/configurar-publicacion.sh` se crea una identidad de firma estable para que el Llavero no vuelva a pedir permiso tras cada actualización; la publicación de versiones se explica en [docs/publicar.md](docs/publicar.md).
 
 ## Primer uso
 
@@ -48,12 +58,11 @@ Nuvex no escribe contraseñas ni códigos en los perfiles o argumentos del proce
 
 ```sh
 python3 -m unittest discover -s tests -v
-bash tests/test_security_preferences.sh
-bash tests/test_interfaz.sh
+for prueba in tests/test_*.sh; do bash "$prueba"; done
 cd Nuvex && ./build.sh
 ```
 
-El código de la app está en `Nuvex/Sources/Nuvex/`, separado en modelo, motor, Llavero, panel, Ajustes y bienvenida. Para generar capturas con datos ficticios, ejecuta `bash Nuvex/scripts/capturas.sh` desde la raíz; las imágenes quedan en `.build-cache/capturas/`. Los scripts de configuración y del ayudante están en la raíz; el motor `openfortivpn` está en `vendor/openfortivpn/`. El paquete generado `Nuvex/Nuvex.app` y los datos locales quedan fuera de Git.
+El código de la app está en `Nuvex/Sources/Nuvex/`; el protocolo del comando `nuvex` en `Nuvex/Sources/NuvexControl/` y el comando en `Nuvex/Sources/nuvex-cli/`. Para generar capturas con datos ficticios, ejecuta `bash Nuvex/scripts/capturas.sh` desde la raíz; las imágenes quedan en `.build-cache/capturas/`. Los scripts de configuración y del ayudante están en la raíz; el motor `openfortivpn` está en `vendor/openfortivpn/`. El paquete generado `Nuvex/Nuvex.app` y los datos locales quedan fuera de Git.
 
 Para comprobar una conexión con un servidor real y un recurso interno autorizado, sigue [la guía de validación en vivo](docs/validacion-en-vivo.md). Las pruebas automáticas comprueban la configuración y el código; no establecen túneles contra servidores de terceros.
 

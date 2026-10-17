@@ -59,6 +59,14 @@ if [ -f "$MOTOR_INSTALADO" ] && ! cmp -s "$MOTOR_INSTALADO" "$NUEVA/Contents/Res
   echo "Aviso: el motor cambió. Al abrir Nuvex, pulsa «Autorizar» para actualizar el ayudante de red."
 fi
 
+# No se reinicia en medio de una conexión o esperando un código.
+NUVEX_INSTALADO="$DESTINO/Contents/Resources/bin/nuvex"
+if ! $FORZAR && [ -x "$NUVEX_INSTALADO" ] && pgrep -f "^$DESTINO/Contents/MacOS/Nuvex$" >/dev/null; then
+  if "$NUVEX_INSTALADO" estado --json 2>/dev/null | grep -qE '"estado":"(conectando|esperando_codigo)"'; then
+    falla "hay una VPN conectándose o esperando un código; espera a que termine o usa --forzar"
+  fi
+fi
+
 paso "Cierre de Nuvex"
 # Todas las copias en ejecución, incluidas las de otras carpetas: dos Nuvex a
 # la vez compiten por el ayudante y los avisos.

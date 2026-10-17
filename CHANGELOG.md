@@ -13,6 +13,7 @@ Este archivo sigue el formato de [Keep a Changelog](https://keepachangelog.com/e
 - Aviso de desconexión con Reconectar, que se queda en pantalla con el estilo «Alertas».
 - Ventana del código de verificación que no bloquea la app.
 - Lectura del código de verificación desde Gmail (solo lectura), configurable por conexión.
+- Exportar e importar conexiones en un archivo .nuvexvpn cifrado con una frase; las contraseñas son opcionales y piden Touch ID.
 
 ### Cambiado
 - La versión sale de `Nuvex/VERSION` y el número de compilación del historial de Git.

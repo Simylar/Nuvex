@@ -64,6 +64,8 @@ enum Captura {
         guardar(PanelCodigoView(solicitud: .muestra(nombre: "Oficina central", codigo: "482913",
                                                     correo: .encontrado(remitente: "noreply@empresa.com"), automatico: true)),
                 nombre: "codigo-recibido-oscuro", en: carpeta, oscuro: true)
+        guardar(VistaExportar(modelo: modelo, cerrar: {}, seleccion: Set(modelo.profiles.prefix(3).map(\.id))),
+                nombre: "exportar-claro", en: carpeta, oscuro: false)
         for oscuro in [false, true] {
             guardar(HojaIconos(), nombre: "iconos-barra-\(oscuro ? "oscuro" : "claro")", en: carpeta, oscuro: oscuro)
         }

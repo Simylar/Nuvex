@@ -76,6 +76,7 @@ final class VPNModel: ObservableObject {
         let control = ControlRemoto(modelo: self)
         control.iniciar()
         self.control = control
+        AppActual.registrar(self)
         // Al salir se retira el socket; si la app termina de golpe, el
         // siguiente arranque lo reemplaza.
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in

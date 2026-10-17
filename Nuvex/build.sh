@@ -149,6 +149,20 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleURLName</key><string>Nuvex</string>
     <key>CFBundleURLSchemes</key><array><string>nuvex</string></array>
   </dict></array>
+  <key>UTExportedTypeDeclarations</key><array><dict>
+    <key>UTTypeIdentifier</key><string>local.gertcode.nuvex.exportacion</string>
+    <key>UTTypeDescription</key><string>Conexiones de Nuvex</string>
+    <key>UTTypeConformsTo</key><array><string>public.data</string></array>
+    <key>UTTypeTagSpecification</key><dict>
+      <key>public.filename-extension</key><array><string>nuvexvpn</string></array>
+    </dict>
+  </dict></array>
+  <key>CFBundleDocumentTypes</key><array><dict>
+    <key>CFBundleTypeName</key><string>Conexiones de Nuvex</string>
+    <key>CFBundleTypeRole</key><string>Viewer</string>
+    <key>LSHandlerRank</key><string>Owner</string>
+    <key>LSItemContentTypes</key><array><string>local.gertcode.nuvex.exportacion</string></array>
+  </dict></array>
   <key>NSUserNotificationAlertStyle</key><string>alert</string>
   <key>NSUserNotificationUsageDescription</key><string>Nuvex te avisa si una VPN activa se desconecta.</string>
   <key>NSFaceIDUsageDescription</key><string>Nuvex confirma tu identidad antes de usar una contraseña VPN guardada.</string>

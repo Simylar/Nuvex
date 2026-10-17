@@ -238,6 +238,17 @@ struct ConfigurationView: View {
                         return !puedeEliminar(id)
                     }())
                     Spacer()
+                    Menu {
+                        Button("Exportar conexiones…") { VentanaExportar.mostrar(modelo: modelo) }
+                            .disabled(modelo.profiles.isEmpty)
+                        Button("Importar conexiones…") { VentanaImportar.mostrar(modelo: modelo) }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("Exportar o importar conexiones")
                 }
                 .buttonStyle(.borderless)
                 .padding(.horizontal, 8)
@@ -287,6 +298,9 @@ struct ConfigurationView: View {
                     .disabled(borradores.tieneCambios(perfil, guardados: modelo.profiles) || busy)
             }
             Divider()
+        }
+        if modelo.profiles.contains(where: { $0.id == perfil.id }) {
+            Button("Exportar…") { VentanaExportar.mostrar(modelo: modelo, preseleccion: perfil.id) }
         }
         Button("Eliminar…", role: .destructive) { pendingDeletion = perfil.id }
             .disabled(!puedeEliminar(perfil.id))
@@ -525,6 +539,8 @@ private struct SeccionCopias: View {
                 }
             }
             HStack {
+                Button("Exportar cifradas…") { VentanaExportar.mostrar(modelo: modelo) }
+                    .disabled(modelo.profiles.isEmpty)
                 Button("Crear copia ahora") {
                     do {
                         _ = try Migraciones.crearCopia(etiqueta: "manual", base: Preferencias.directorio,

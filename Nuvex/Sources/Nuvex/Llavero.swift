@@ -113,6 +113,35 @@ extension VPNModel {
                        fallo: Fallo(titulo: "No se pudo usar la contraseña", detalle: "La contraseña está en el Llavero, pero macOS no permitió usarla (código \(status)). Vuelve a guardarla en Ajustes.", accion: .ajustes("Cambiar…")))
     }
 
+    /// Contraseñas de varias conexiones para exportarlas. Pide una sola
+    /// confirmación de la persona (Touch ID o la contraseña del equipo) para
+    /// todo el lote. Las que no estén guardadas no se incluyen.
+    nonisolated static func leerParaExportar(_ perfiles: [VPNProfile], razon: String) async throws -> [String: String] {
+        let contexto = LAContext()
+        do {
+            try await contexto.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: razon)
+        } catch {
+            throw ErrorVPN(mensaje: "Se canceló la confirmación; no se exportaron contraseñas.")
+        }
+        var resultado: [String: String] = [:]
+        for perfil in perfiles where !perfil.username.isEmpty {
+            let consulta: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                           kSecAttrService as String: "nuvex.\(perfil.id)",
+                                           kSecAttrAccount as String: perfil.username,
+                                           kSecReturnData as String: true,
+                                           kSecUseAuthenticationContext as String: contexto,
+                                           kSecMatchLimit as String: kSecMatchLimitOne]
+            var dato: CFTypeRef?
+            if SecItemCopyMatching(consulta as CFDictionary, &dato) == errSecSuccess,
+               let datos = dato as? Data, let password = String(data: datos, encoding: .utf8), !password.isEmpty {
+                resultado[perfil.id] = password
+            } else if let password = leerConHerramientaDeMacOS(id: perfil.id, username: perfil.username) {
+                resultado[perfil.id] = password
+            }
+        }
+        return resultado
+    }
+
     nonisolated static func leerConHerramientaDeMacOS(id: String, username: String) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/security")

@@ -9,10 +9,17 @@ let package = Package(
         .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.6")
     ],
     targets: [
+        // Protocolo y socket de control, compartidos por la app y el comando nuvex.
+        .target(name: "NuvexControl", path: "Sources/NuvexControl"),
         .executableTarget(
             name: "Nuvex",
-            dependencies: [.product(name: "Sparkle", package: "Sparkle")],
+            dependencies: ["NuvexControl", .product(name: "Sparkle", package: "Sparkle")],
             path: "Sources/Nuvex"
+        ),
+        .executableTarget(
+            name: "nuvex-cli",
+            dependencies: ["NuvexControl"],
+            path: "Sources/nuvex-cli"
         )
     ]
 )

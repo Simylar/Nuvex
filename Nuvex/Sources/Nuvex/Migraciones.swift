@@ -64,7 +64,11 @@ enum Migraciones {
                          perfiles: URL = URL(fileURLWithPath: Paths.perfiles),
                          ahora: Date = Date()) -> Resultado {
         let compilacionAnterior = defaults.object(forKey: claveCompilacion) as? Int
-        let versionAnterior = defaults.string(forKey: claveVersion)
+        var versionAnterior = defaults.string(forKey: claveVersion)
+        // Nuvex 3.0 no registraba su versión: si ya hay conexiones, se viene de ella.
+        if versionAnterior == nil, FileManager.default.fileExists(atPath: perfiles.path) {
+            versionAnterior = "3.0"
+        }
         guard compilacionAnterior != version.compilacion || versionAnterior != version.corta else {
             return Resultado(versionNueva: false, anterior: versionAnterior, copia: nil)
         }

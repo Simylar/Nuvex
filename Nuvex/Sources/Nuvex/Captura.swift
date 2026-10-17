@@ -31,6 +31,9 @@ enum Captura {
         borradores.seleccion = .general
         guardar(ConfigurationView(modelo: modelo, borradores: borradores).frame(width: 820, height: 640),
                 nombre: "ajustes-general-claro", en: carpeta, oscuro: false)
+        borradores.seleccion = .automatizacion
+        guardar(ConfigurationView(modelo: modelo, borradores: borradores).frame(width: 820, height: 720),
+                nombre: "ajustes-automatizacion-claro", en: carpeta, oscuro: false)
         borradores.seleccion = .ayudante
         guardar(ConfigurationView(modelo: modelo, borradores: borradores).frame(width: 820, height: 640),
                 nombre: "ajustes-ayudante-claro", en: carpeta, oscuro: false)

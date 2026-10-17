@@ -4,6 +4,7 @@ import SwiftUI
 enum PaginaAjustes: Hashable {
     case general
     case actualizacion
+    case automatizacion
     case ayudante
     case conexion(String)
 }
@@ -200,6 +201,8 @@ struct ConfigurationView: View {
                 .tag(PaginaAjustes.actualizacion)
             Label { Text("Ayudante de red") } icon: { IconoCuadrado(simbolo: "shield.lefthalf.filled", color: .indigo) }
                 .tag(PaginaAjustes.ayudante)
+            Label { Text("Automatización") } icon: { IconoCuadrado(simbolo: "terminal.fill", color: Color(white: 0.25)) }
+                .tag(PaginaAjustes.automatizacion)
             Section("Conexiones") {
                 ForEach(borradores.drafts) { perfil in
                     filaLateral(perfil)
@@ -310,6 +313,8 @@ struct ConfigurationView: View {
             }
         case .ayudante:
             AjustesAyudante(modelo: modelo)
+        case .automatizacion:
+            AjustesAutomatizacion(modelo: modelo)
         case .general, nil:
             AjustesGenerales(modelo: modelo, borradores: borradores)
         }
@@ -559,6 +564,7 @@ private struct SeccionCopias: View {
         switch copia.etiqueta {
         case "manual": return "Manual · \(conexiones)"
         case "antes-de-restaurar": return "Antes de restaurar · \(conexiones)"
+        case "vanterior": return "Antes de actualizar · \(conexiones)"
         case let etiqueta where etiqueta.hasPrefix("v"): return "Antes de actualizar desde \(etiqueta) · \(conexiones)"
         default: return conexiones
         }

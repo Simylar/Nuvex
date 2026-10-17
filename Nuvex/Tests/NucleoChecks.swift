@@ -57,11 +57,22 @@ struct NucleoChecks {
         let defaults = UserDefaults(suiteName: "NuvexNucleo.\(UUID().uuidString)")!
         let perfiles = base.appendingPathComponent("profiles.json")
         let perfilesJSON = #"{"version":2,"profiles":[{"id":"vpn-a","name":"Oficina","server":"vpn.empresa.com:443","username":"ana","trust":"system","realm":"","manageRoutes":true,"manageDNS":true,"enabled":true}]}"#
-        try Data(perfilesJSON.utf8).write(to: perfiles)
         let v30 = InfoVersion(corta: "3.0.0", compilacion: 3)
         let v31 = InfoVersion(corta: "3.1.0", compilacion: 9)
+        // Instalación nueva, sin conexiones: no es una actualización.
+        let limpia = UserDefaults(suiteName: "NuvexNucleo.\(UUID().uuidString)")!
+        let instalacion = Migraciones.ejecutar(defaults: limpia, version: v31, base: base, perfiles: perfiles)
+        precondition(!instalacion.versionNueva && instalacion.anterior == nil)
+        // Con conexiones y sin registro, se viene de Nuvex 3.0.
+        try Data(perfilesJSON.utf8).write(to: perfiles)
+        let legada = UserDefaults(suiteName: "NuvexNucleo.\(UUID().uuidString)")!
+        let desde30 = Migraciones.ejecutar(defaults: legada, version: v31, base: base, perfiles: perfiles)
+        precondition(desde30.versionNueva && desde30.anterior == "3.0" && desde30.copia != nil)
+        precondition(Migraciones.perfiles(en: desde30.copia!)?.count == 1)
+        for copia in Migraciones.copias(base: base) { try FileManager.default.removeItem(at: copia.url) }
+
         let primera = Migraciones.ejecutar(defaults: defaults, version: v30, base: base, perfiles: perfiles)
-        precondition(!primera.versionNueva && primera.anterior == nil)
+        precondition(primera.versionNueva && primera.anterior == "3.0")
         let repetida = Migraciones.ejecutar(defaults: defaults, version: v30, base: base, perfiles: perfiles)
         precondition(!repetida.versionNueva && repetida.copia == nil, "la misma versión no repite la migración")
         let actualizacion = Migraciones.ejecutar(defaults: defaults, version: v31, base: base, perfiles: perfiles)
@@ -73,6 +84,7 @@ struct NucleoChecks {
             atPath: copia.appendingPathComponent("profiles.json").path)[.posixPermissions] as? Int
         precondition(copiaPermisos == 0o600)
         precondition(Migraciones.copias(base: base).first?.etiqueta == "v3.0.0")
+        precondition(Migraciones.copias(base: base).count == 2)
 
         // Rotación: se conservan las más recientes.
         for n in 0..<12 {

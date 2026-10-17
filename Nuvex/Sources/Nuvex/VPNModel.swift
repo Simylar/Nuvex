@@ -21,6 +21,7 @@ final class VPNModel: ObservableObject {
     @Published private(set) var datosMasNuevos = false
     private(set) var actualizaciones: Actualizaciones?
     private(set) var chequeo: ChequeoActualizacion?
+    private(set) var control: ControlRemoto?
     #if DEBUG
     /// Modelo con datos de ejemplo para capturas: no consulta el motor.
     var esMuestra = false
@@ -65,6 +66,14 @@ final class VPNModel: ObservableObject {
         VPNNotifications.shared.start()
         arrancar()
         cargarConfiguracion()
+        let control = ControlRemoto(modelo: self)
+        control.iniciar()
+        self.control = control
+        // Al salir se retira el socket; si la app termina de golpe, el
+        // siguiente arranque lo reemplaza.
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.control?.detener() }
+        }
     }
 
     /// Idempotente: se llama al crear el modelo y tambien al abrir el panel.

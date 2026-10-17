@@ -110,7 +110,7 @@ private struct HojaIconos: View {
 
     private func icono(_ estado: IconoBarra.Estado) -> some View {
         Image(nsImage: IconoBarra.imagen(estado))
-            .renderingMode(estado == .atencion ? .original : .template)
+            .renderingMode(estado.tieneColor ? .original : .template)
             .foregroundStyle(.primary)
     }
 }

@@ -13,6 +13,8 @@ enum IconoBarra {
         case conectando(Int)
         case conectado
         case atencion
+
+        var tieneColor: Bool { self == .conectado || self == .atencion }
     }
 
     static let fotogramas = 6
@@ -54,8 +56,20 @@ enum IconoBarra {
             (estado == .atencion ? NSColor.labelColor : NSColor.black).set()
             switch estado {
             case .conectado:
+                // Verde con una marca blanca: conectada se reconoce de un vistazo.
+                NSColor.systemGreen.set()
                 hexagono.fill()
                 hexagono.stroke()
+                let centro = NSPoint(x: (vertices[1].x + vertices[4].x) / 2, y: (vertices[0].y + vertices[3].y) / 2)
+                let marca = NSBezierPath()
+                marca.move(to: NSPoint(x: centro.x - 2.6, y: centro.y + 0.1))
+                marca.line(to: NSPoint(x: centro.x - 0.7, y: centro.y + 2.0))
+                marca.line(to: NSPoint(x: centro.x + 2.7, y: centro.y - 1.8))
+                marca.lineWidth = 1.6
+                marca.lineCapStyle = .round
+                marca.lineJoinStyle = .round
+                NSColor.white.set()
+                marca.stroke()
             case .conectando(let fotograma):
                 hexagono.stroke()
                 // Un vértice destacado recorre el hexágono.
@@ -82,8 +96,8 @@ enum IconoBarra {
             }
             return true
         }
-        // La variante de aviso lleva color; las demás se tiñen como plantilla.
-        imagen.isTemplate = estado != .atencion
+        // Conectada y aviso llevan color propio; las demás se tiñen como plantilla.
+        imagen.isTemplate = !estado.tieneColor
         return imagen
     }
 }
@@ -111,7 +125,7 @@ struct EtiquetaBarra: View {
     var body: some View {
         HStack(spacing: 3) {
             Image(nsImage: IconoBarra.imagen(estado))
-                .renderingMode(estado == .atencion ? .original : .template)
+                .renderingMode(estado.tieneColor ? .original : .template)
             if modelo.conectadas > 1 {
                 Text("\(modelo.conectadas)").monospacedDigit()
             }

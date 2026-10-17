@@ -125,7 +125,6 @@ struct AjustesCuentaGoogle: View {
 /// momento en ajustes.json: no cambia la conexión ni reinstala el ayudante.
 struct SeccionCodigoCorreo: View {
     let perfilID: String
-    var remitenteSugerido: String = ""
     @ObservedObject private var preferencias = Preferencias.shared
     @ObservedObject private var cuenta = CuentaGoogle.shared
     @State private var prueba: String?
@@ -145,7 +144,8 @@ struct SeccionCodigoCorreo: View {
     private var usarCorreo: Binding<Bool> {
         Binding(get: { config != nil }, set: { usar in
             preferencias.modificar { ajustes in
-                ajustes.correo[perfilID] = usar ? ConfigCorreo(remitente: remitenteSugerido) : nil
+                // Por defecto, el formato de FortiToken por correo; se puede cambiar.
+                ajustes.correo[perfilID] = usar ? ConfigCorreo.fortinet : nil
             }
             prueba = nil
         })
@@ -169,6 +169,12 @@ struct SeccionCodigoCorreo: View {
                         .font(.callout).foregroundStyle(.orange)
                 }
                 TextField("Asunto contiene", text: campo(\.asunto), prompt: Text("Opcional"))
+                if config.remitente != ConfigCorreo.fortinet.remitente || config.asunto != ConfigCorreo.fortinet.asunto {
+                    Button("Usar el formato de FortiToken (DoNotReply@notification.fortinet.net)") {
+                        cambiar { $0.remitente = ConfigCorreo.fortinet.remitente; $0.asunto = ConfigCorreo.fortinet.asunto }
+                    }
+                    .buttonStyle(.link)
+                }
                 Picker("Esperar el correo", selection: Binding(get: { config.espera }, set: { valor in cambiar { $0.espera = valor } })) {
                     ForEach(Array(Set([60, 120, 180, config.espera])).sorted(), id: \.self) { Text("Hasta \($0) s").tag($0) }
                 }

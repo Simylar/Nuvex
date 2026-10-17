@@ -7,6 +7,9 @@ struct CorreoChecks {
         // Formatos habituales de códigos por correo.
         let casos: [(String, String?)] = [
             ("AuthCode: 123456", "123456"),
+            // Correo real de FortiToken: el asunto y el cuerpo, con un cero inicial.
+            ("AuthCode: 043051\nYour authentication token code is 043051.", "043051"),
+            ("Your authentication token code is 043051.", "043051"),
             ("Tu código de verificación es 654321. Caduca en 5 minutos.", "654321"),
             ("Your FortiToken code is: 482913", "482913"),
             ("Su clave temporal: 4821", "4821"),
@@ -29,6 +32,12 @@ struct CorreoChecks {
         precondition(ExtractorCodigo.patronValido(""))
         precondition(ExtractorCodigo.enmascarar("482913") == "48••13")
         precondition(ExtractorCodigo.enmascarar("1234") == "••••")
+
+        // La configuración de Fortinet que se propone por defecto encuentra ese correo.
+        precondition(ConfigCorreo.fortinet.remitente == "DoNotReply@notification.fortinet.net")
+        precondition(ExtractorCodigo.consultaGmail(remitente: ConfigCorreo.fortinet.remitente,
+                                                   asunto: ConfigCorreo.fortinet.asunto, desde: Date(timeIntervalSince1970: 100))
+                     == "from:(DoNotReply@notification.fortinet.net) after:70 subject:(AuthCode)")
 
         // Búsqueda de Gmail.
         let desde = Date(timeIntervalSince1970: 1_800_000_000)

@@ -11,6 +11,10 @@ struct ConfigCorreo: Codable, Equatable {
     /// Expresión regular con un grupo que captura el código. Vacía: la de serie.
     var patron: String = ""
 
+    /// Correo de FortiToken por email: asunto «AuthCode: 043051» y cuerpo
+    /// «Your authentication token code is 043051.».
+    static let fortinet = ConfigCorreo(remitente: "DoNotReply@notification.fortinet.net", asunto: "AuthCode")
+
     init(remitente: String, asunto: String = "", espera: Int = 120, patron: String = "") {
         self.remitente = remitente
         self.asunto = asunto

@@ -33,9 +33,13 @@ El secreto y el token de la sesión se guardan en el Llavero de macOS.
 
 En **Ajustes de Nuvex › (tu conexión) › Código de verificación**:
 
-1. Elige **Leer de Gmail**.
-2. **Remitente**: la dirección que envía el código, por ejemplo `noreply@empresa.com`. Es obligatoria.
-3. **Asunto contiene** (opcional): palabras del asunto, por ejemplo `AuthCode`, si el remitente envía otros correos.
+1. Elige **Leer de Gmail**. Los campos se rellenan con el formato de FortiToken por correo, que es el habitual:
+   - Remitente: `DoNotReply@notification.fortinet.net`
+   - Asunto contiene: `AuthCode`
+
+   Esos correos llegan con el asunto «AuthCode: 043051» y el texto «Your authentication token code is 043051.».
+2. Si tu servidor envía el código desde otra dirección, cambia el **Remitente**. Es obligatorio.
+3. **Asunto contiene** es opcional: sirve para ignorar otros correos del mismo remitente.
 4. Pulsa **Probar con el último correo**. Nuvex muestra el código enmascarado, por ejemplo `48••13`, si encuentra uno de los últimos 7 días.
 
 Si el código no aparece, abre **Patrón avanzado** y escribe una expresión regular con un grupo que capture el código, por ejemplo `Código: (\d{6})`.

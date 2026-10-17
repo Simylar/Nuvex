@@ -1,20 +1,20 @@
 import AppKit
 import SwiftUI
 
-/// Icono monocromo de la barra de menús. Es una imagen de plantilla para que
-/// macOS lo tiña según la barra; el estado se distingue por la forma: contorno
-/// sin conexión, relleno conectado, un vértice que gira mientras conecta y una
-/// insignia naranja cuando algo requiere atención.
+/// Icono de la barra de menús. Sin conexión es una imagen de plantilla que
+/// macOS tiñe según la barra; los demás estados llevan color: un trazo verde
+/// que recorre el hexágono mientras conecta, el hexágono verde con una marca
+/// al estar conectada y una insignia naranja cuando algo requiere atención.
 @MainActor
 enum IconoBarra {
     enum Estado: Hashable {
         case desconectado
-        /// Fotograma de la animación (0–5): el vértice resaltado.
+        /// Fotograma de la animación (0–5).
         case conectando(Int)
         case conectado
         case atencion
 
-        var tieneColor: Bool { self == .conectado || self == .atencion }
+        var tieneColor: Bool { self != .desconectado }
     }
 
     static let fotogramas = 6
@@ -44,6 +44,24 @@ enum IconoBarra {
         NSBezierPath(ovalIn: NSRect(x: centro.x - radio, y: centro.y - radio, width: radio * 2, height: radio * 2))
     }
 
+    /// Contorno tenue, un tramo verde que avanza por él y los tres puntos del
+    /// logotipo en verde.
+    private static func dibujarConectando(fotograma: Int, hexagono: NSBezierPath) {
+        NSColor.labelColor.withAlphaComponent(0.35).set()
+        hexagono.stroke()
+        let inicio = fotograma % fotogramas
+        let tramo = NSBezierPath()
+        tramo.move(to: vertices[inicio])
+        tramo.line(to: vertices[(inicio + 1) % 6])
+        tramo.line(to: vertices[(inicio + 2) % 6])
+        tramo.lineWidth = 1.7
+        tramo.lineCapStyle = .round
+        tramo.lineJoinStyle = .round
+        NSColor.systemGreen.set()
+        tramo.stroke()
+        for indice in [0, 2, 4] { punto(vertices[indice], radio: 1.5).fill() }
+    }
+
     private static func dibujar(_ estado: Estado) -> NSImage {
         let imagen = NSImage(size: NSSize(width: 18, height: 18), flipped: true) { _ in
             let hexagono = NSBezierPath()
@@ -71,12 +89,7 @@ enum IconoBarra {
                 NSColor.white.set()
                 marca.stroke()
             case .conectando(let fotograma):
-                hexagono.stroke()
-                // Un vértice destacado recorre el hexágono.
-                for (indice, vertice) in vertices.enumerated() {
-                    let activo = indice == fotograma % fotogramas
-                    punto(vertice, radio: activo ? 2.1 : 0.9).fill()
-                }
+                dibujarConectando(fotograma: fotograma, hexagono: hexagono)
             case .desconectado, .atencion:
                 hexagono.stroke()
                 // Los tres puntos del logotipo.

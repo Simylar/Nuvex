@@ -26,6 +26,8 @@ extension VPNModel {
     /// Conecta vigilando la salida del ayudante. Cuando el servidor pide el
     /// código por correo, lo solicita y lo entrega por entrada estándar.
     nonisolated static func conectarProceso(id: String, name: String) async -> Result<Void, ErrorVPN> {
+        // Los correos con el código se buscan a partir de este momento.
+        let inicioIntento = Date()
         let password: String
         do { password = try await leerDelLlavero(id: id, name: name) }
         catch let error as ErrorVPN { return .failure(error) }
@@ -55,8 +57,9 @@ extension VPNModel {
                 let necesitaCodigo = acumulado.anadir(texto)
                 guard necesitaCodigo else { return }
                 Task { @MainActor in
-                    if let codigo = pedirCodigoAlUsuario(nombre: name) {
-                        entrada.fileHandleForWriting.write(Data((codigo + "\n").utf8))
+                    if let codigo = await SolicitudCodigo.obtener(perfilID: id, nombre: name, inicio: inicioIntento) {
+                        // Si el motor ya terminó, escribir falla sin cerrar la app.
+                        try? entrada.fileHandleForWriting.write(contentsOf: Data((codigo + "\n").utf8))
                         // Cerrar es imprescindible, no cortesia: al otro lado
                         // hay un lector alimentando al motor VPN, y sin EOF se
                         // queda bloqueado para siempre esperando mas entrada.
@@ -70,7 +73,7 @@ extension VPNModel {
 
             do {
                 try p.run()
-                entrada.fileHandleForWriting.write(Data((password + "\n").utf8))
+                try? entrada.fileHandleForWriting.write(contentsOf: Data((password + "\n").utf8))
             } catch {
                 cont.resume(returning: .failure(ErrorVPN(mensaje: "no se pudo ejecutar nuvexctl.sh: \(error.localizedDescription)")))
                 return
@@ -79,6 +82,8 @@ extension VPNModel {
             DispatchQueue.global(qos: .userInitiated).async {
                 p.waitUntilExit()
                 errores.fileHandleForReading.readabilityHandler = nil
+                // Si el motor terminó con la ventana del código abierta, se cierra.
+                Task { @MainActor in SolicitudCodigo.abiertas[id]?.cancelar() }
                 try? entrada.fileHandleForWriting.close()
                 if p.terminationStatus == 0 {
                     cont.resume(returning: .success(()))
@@ -129,35 +134,6 @@ final class Acumulador: @unchecked Sendable {
         }
         return false
     }
-}
-
-/// Pide el código de verificación indicando qué VPN lo solicita. El campo es
-/// visible y declara `oneTimeCode`, así macOS puede ofrecer el código recibido
-/// en Mensajes o Mail.
-@MainActor
-func pedirCodigoAlUsuario(nombre: String) -> String? {
-    NSApp.activate(ignoringOtherApps: true)
-    let alerta = NSAlert()
-    alerta.messageText = "Código para «\(nombre)»"
-    alerta.informativeText = "El servidor pidió un código de verificación (correo, SMS o app). Nuvex no lo guarda."
-    alerta.addButton(withTitle: "Conectar")
-    alerta.addButton(withTitle: "Cancelar")
-
-    let campo = NSTextField(frame: NSRect(x: 0, y: 0, width: 230, height: 34))
-    campo.placeholderString = "Código"
-    campo.font = .monospacedSystemFont(ofSize: 20, weight: .medium)
-    campo.alignment = .center
-    campo.contentType = .oneTimeCode
-    campo.setAccessibilityLabel("Código de verificación para \(nombre)")
-    alerta.accessoryView = campo
-    alerta.window.initialFirstResponder = campo
-
-    let respuesta = alerta.runModal()
-    let valor = campo.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        .replacingOccurrences(of: " ", with: "")
-    campo.stringValue = ""
-    guard respuesta == .alertFirstButtonReturn else { return nil }
-    return valor.isEmpty ? nil : valor
 }
 
 // MARK: - Detalles del túnel

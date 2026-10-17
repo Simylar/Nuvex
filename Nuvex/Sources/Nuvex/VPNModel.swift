@@ -39,6 +39,8 @@ final class VPNModel: ObservableObject {
 
     convenience init() {
         self.init(sinArrancar: ())
+        // Escribir en una tubería cuyo lector terminó no debe cerrar la app.
+        signal(SIGPIPE, SIG_IGN)
         // Antes de leer nada: copia de seguridad y migraciones de esta versión.
         let migracion = Migraciones.ejecutar()
         _ = Preferencias.shared

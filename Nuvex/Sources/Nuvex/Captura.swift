@@ -52,6 +52,12 @@ enum Captura {
         guardar(ActualizacionSoftwareView(actualizaciones: Actualizaciones(muestra: .disponible(version))).frame(width: 520, height: 640),
                 nombre: "actualizacion-disponible-oscuro", en: carpeta, oscuro: true)
         guardar(NovedadesView(version: "3.1.0", notas: notas, cerrar: {}), nombre: "novedades", en: carpeta, oscuro: false)
+        guardar(PanelCodigoView(solicitud: .muestra(nombre: "Oficina central",
+                                                    correo: .buscando(desde: Date().addingTimeInterval(-12), cuenta: "samuel@gmail.com"))),
+                nombre: "codigo-buscando", en: carpeta, oscuro: false)
+        guardar(PanelCodigoView(solicitud: .muestra(nombre: "Oficina central", codigo: "482913",
+                                                    correo: .encontrado(remitente: "noreply@empresa.com"), automatico: true)),
+                nombre: "codigo-recibido-oscuro", en: carpeta, oscuro: true)
         for oscuro in [false, true] {
             guardar(HojaIconos(), nombre: "iconos-barra-\(oscuro ? "oscuro" : "claro")", en: carpeta, oscuro: oscuro)
         }

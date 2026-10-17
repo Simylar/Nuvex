@@ -309,7 +309,7 @@ private struct BotonFila: View {
 private struct ElementoMenu: View {
     let titulo: String
     let atajo: String
-    let tecla: KeyEquivalent
+    let tecla: KeyEquivalent?
     let accion: () -> Void
     @State private var hover = false
 
@@ -327,8 +327,15 @@ private struct ElementoMenu: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .keyboardShortcut(tecla, modifiers: .command)
+        .modifier(AtajoOpcional(tecla: tecla))
         .onHover { hover = $0 }
+    }
+}
+
+private struct AtajoOpcional: ViewModifier {
+    let tecla: KeyEquivalent?
+    func body(content: Content) -> some View {
+        if let tecla { content.keyboardShortcut(tecla, modifiers: .command) } else { content }
     }
 }
 
@@ -384,6 +391,16 @@ struct PanelVPN: View {
             if modelo.instalandoAyudante {
                 Nota(simbolo: nil, color: .secondary,
                      texto: "Preparando el ayudante de red. Autoriza el cambio en el diálogo de macOS.")
+            } else if modelo.ayudanteListo == false && !modelo.profiles.isEmpty {
+                NotaConAccion(simbolo: "shield.lefthalf.filled", color: .orange,
+                              texto: "El ayudante de red necesita tu autorización.",
+                              accion: "Autorizar") { modelo.instalarAyudante() }
+            }
+            if let chequeo = modelo.chequeo {
+                AvisosChequeo(chequeo: chequeo, modelo: modelo)
+            }
+            if let actualizaciones = modelo.actualizaciones {
+                AvisoActualizacion(actualizaciones: actualizaciones)
             }
             if let aviso = modelo.avisoConvivencia {
                 Nota(simbolo: "exclamationmark.triangle.fill", color: .orange, texto: aviso)
@@ -393,6 +410,9 @@ struct PanelVPN: View {
             }
 
             Divider().padding(.horizontal, 10).padding(.vertical, 5)
+            if let actualizaciones = modelo.actualizaciones, actualizaciones.configuradas {
+                ElementoMenu(titulo: "Buscar actualizaciones…", atajo: "", tecla: nil) { actualizaciones.buscar() }
+            }
             ElementoMenu(titulo: "Ajustes de Nuvex…", atajo: "⌘,", tecla: ",") { abrirAjustes() }
             ElementoMenu(titulo: "Salir de Nuvex", atajo: "⌘Q", tecla: "q") { NSApp.terminate(nil) }
         }
@@ -426,9 +446,7 @@ struct PanelVPN: View {
                     .multilineTextAlignment(.center).textSelection(.enabled)
                 Button("Mostrar registro") { Log.mostrar() }.controlSize(.small).padding(.top, 4)
             } else if modelo.profiles.isEmpty {
-                if let logo = Paths.logo {
-                    Image(nsImage: logo).resizable().frame(width: 34, height: 34).opacity(0.9)
-                }
+                LogoNuvex(lado: 34)
                 Text("Aún no hay conexiones").fontWeight(.semibold)
                 Text("Añade tu servidor Fortinet para conectarte desde aquí.")
                     .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
@@ -469,6 +487,75 @@ private struct Nota: View {
         .font(.caption)
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
+    }
+}
+
+/// Nota con un botón que resuelve lo que indica.
+private struct NotaConAccion: View {
+    let simbolo: String
+    let color: Color
+    let texto: String
+    let accion: String
+    var ocupado = false
+    let alPulsar: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 7) {
+            Image(systemName: simbolo).foregroundStyle(color)
+            Text(texto)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if ocupado {
+                ProgressView().controlSize(.mini)
+            } else {
+                Button(accion, action: alPulsar)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+        }
+        .font(.caption)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+    }
+}
+
+/// Avisos del primer arranque de una versión nueva.
+private struct AvisosChequeo: View {
+    @ObservedObject var chequeo: ChequeoActualizacion
+    @ObservedObject var modelo: VPNModel
+
+    var body: some View {
+        if chequeo.llaveroPendiente {
+            NotaConAccion(simbolo: "key.fill", color: .orange,
+                          texto: chequeo.firmaEstable
+                            ? "Nuvex cambió de firma. Pruébalo ahora y elige «Permitir siempre» para que el Llavero no vuelva a preguntar."
+                            : "Esta compilación no tiene firma estable: macOS pedirá acceso al Llavero tras cada actualización.",
+                          accion: "Probar", ocupado: chequeo.probandoLlavero) { chequeo.probarLlavero(modelo) }
+            if let error = chequeo.errorLlavero {
+                Nota(simbolo: "exclamationmark.circle.fill", color: .red, texto: error, seleccionable: true)
+            }
+        }
+        if let version = chequeo.novedades {
+            NotaConAccion(simbolo: "sparkles", color: .accentColor,
+                          texto: "Nuvex se actualizó a la versión \(version).", accion: "Novedades") {
+                VentanaNovedades.mostrar(version: version)
+                chequeo.novedadesVistas()
+            }
+        }
+    }
+}
+
+private struct AvisoActualizacion: View {
+    @ObservedObject var actualizaciones: Actualizaciones
+
+    var body: some View {
+        if let version = actualizaciones.disponible {
+            NotaConAccion(simbolo: "arrow.down.circle.fill", color: .accentColor,
+                          texto: "Nuvex \(version) está disponible.", accion: "Ver") {
+                actualizaciones.mostrar()
+            }
+        }
     }
 }
 

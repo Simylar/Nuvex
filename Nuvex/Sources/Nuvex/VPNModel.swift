@@ -17,6 +17,10 @@ final class VPNModel: ObservableObject {
     @Published var mensajeConfiguracion: String?
     @Published var settingsTargetID: String?
     @Published private(set) var configuracionCargada = false
+    /// Los datos los guardó una versión más nueva de Nuvex: no se modifican.
+    @Published private(set) var datosMasNuevos = false
+    private(set) var actualizaciones: Actualizaciones?
+    private(set) var chequeo: ChequeoActualizacion?
     #if DEBUG
     /// Modelo con datos de ejemplo para capturas: no consulta el motor.
     var esMuestra = false
@@ -33,9 +37,17 @@ final class VPNModel: ObservableObject {
 
     convenience init() {
         self.init(sinArrancar: ())
+        // Antes de leer nada: copia de seguridad y migraciones de esta versión.
+        let migracion = Migraciones.ejecutar()
+        _ = Preferencias.shared
+        chequeo = ChequeoActualizacion(migracion: migracion)
+        actualizaciones = Actualizaciones(modelo: self)
         SecurityPreferences.migrate()
         VPNNotifications.shared.reconnect = { [weak self] id in
             Task { @MainActor in self?.conectar(id: id) }
+        }
+        VPNNotifications.shared.abrirActualizacion = { [weak self] in
+            Task { @MainActor in self?.actualizaciones?.mostrar() }
         }
         VPNNotifications.shared.start()
         arrancar()
@@ -63,6 +75,8 @@ final class VPNModel: ObservableObject {
     var hayAlgunaConectada: Bool { vpns.contains { $0.connected } }
     var conectadas: Int { vpns.filter { $0.connected }.count }
     var hayConectando: Bool { estados.values.contains(.conectando) }
+    /// Hay una operación que un reinicio de la app interrumpiría.
+    var ocupado: Bool { hayConectando || guardandoConfiguracion || instalandoAyudante }
     /// Una caída o un fallo de conexión: el icono de la barra lo señala.
     var requiereAtencion: Bool {
         !desconexiones.isEmpty || errorConsulta != nil || estados.values.contains {
@@ -134,6 +148,7 @@ final class VPNModel: ObservableObject {
                 self.errorConsulta = nil
                 self.procesarTransiciones(lista)
                 self.vpns = lista
+                self.chequeo?.revisar(self)
                 if let id = self.conexionPendiente,
                    let vpn = lista.first(where: { $0.id == id }) {
                     self.conexionPendiente = nil
@@ -316,10 +331,19 @@ final class VPNModel: ObservableObject {
         if esMuestra { return }
         #endif
         Task.detached(priority: .utility) {
-            guard let result = try? Self.ejecutar(args: ["config", "list"]), result.codigo == 0,
+            let result = try? Self.ejecutar(args: ["config", "list"])
+            guard let result, result.codigo == 0,
                   let data = result.salida.data(using: .utf8),
                   let profiles = try? JSONDecoder().decode([VPNProfile].self, from: data) else {
-                await MainActor.run { self.ultimoError = "No se pudo leer la configuración." }
+                // nuvexconfig.py rechaza versiones de profiles.json que no conoce:
+                // los guardó una Nuvex más nueva y no deben sobrescribirse.
+                let masNuevos = result?.error.contains("versión de configuración no compatible") == true
+                await MainActor.run {
+                    self.datosMasNuevos = masNuevos
+                    self.ultimoError = masNuevos
+                        ? "Tus conexiones las guardó una versión más nueva de Nuvex. Actualiza Nuvex para usarlas; no se modificarán."
+                        : "No se pudo leer la configuración."
+                }
                 return
             }
             let statuses = Dictionary(uniqueKeysWithValues: profiles.map {
@@ -330,6 +354,8 @@ final class VPNModel: ObservableObject {
                 self.profiles = profiles
                 self.passwordStatuses = statuses
                 self.configuracionCargada = true
+                self.datosMasNuevos = false
+                self.chequeo?.revisar(self)
                 // Una app de barra de menús no abre ventanas por sí sola: sin
                 // conexiones, la bienvenida explica dónde está y qué hacer.
                 if primeraCarga && profiles.isEmpty { Bienvenida.mostrar(modelo: self) }
@@ -351,7 +377,41 @@ final class VPNModel: ObservableObject {
         guardarPerfiles(profiles.filter { $0.id != id }, passwords: [:])
     }
 
+    /// Vuelve a la configuración de una copia de seguridad. Antes guarda una
+    /// copia del estado actual, para poder deshacerlo.
+    func restaurarCopia(_ copia: CopiaSeguridad) {
+        guard let perfiles = Migraciones.perfiles(en: copia.url) else {
+            ultimoError = "La copia no contiene conexiones válidas."
+            return
+        }
+        if let activa = vpns.first(where: \.connected) {
+            ultimoError = "Desconecta «\(activa.name)» antes de restaurar una copia."
+            return
+        }
+        do {
+            _ = try Migraciones.crearCopia(etiqueta: "antes-de-restaurar", base: Preferencias.directorio,
+                                           perfiles: URL(fileURLWithPath: Paths.perfiles))
+        } catch {
+            ultimoError = "No se pudo guardar una copia del estado actual: \(error.localizedDescription)"
+            return
+        }
+        Log.escribir("restaurando la copia \(copia.id)")
+        if let datos = try? Data(contentsOf: copia.url.appendingPathComponent("ajustes.json")) {
+            do {
+                try ArchivoAjustes.guardarAtomico(datos, en: Preferencias.archivo)
+                Preferencias.shared.cargar()
+            } catch {
+                Log.escribir("no se restauraron los ajustes de la copia: \(error.localizedDescription)")
+            }
+        }
+        guardarPerfiles(perfiles, passwords: [:])
+    }
+
     func guardarPerfiles(_ profiles: [VPNProfile], passwords: [String: String]) {
+        guard !datosMasNuevos else {
+            ultimoError = "Tus conexiones las guardó una versión más nueva de Nuvex. Actualiza Nuvex para cambiarlas."
+            return
+        }
         let profiles = profiles.map(\.normalizado)
         let migrations = profiles.compactMap { profile -> (old: VPNProfile, new: VPNProfile)? in
             guard let previous = self.profiles.first(where: { $0.id == profile.id }),
@@ -447,6 +507,9 @@ final class VPNModel: ObservableObject {
                             "Cambios guardados. Nuvex preparará el ayudante al volver a conectar.") :
                             "Cambios guardados.") : nil
                     self.mensajeAyudante = nil
+                    for previo in previousProfiles where !profiles.contains(where: { $0.id == previo.id }) {
+                        Preferencias.shared.olvidarConexion(previo.id)
+                    }
                     self.profiles = profiles
                     self.passwordStatuses = statuses
                     for id in savedPasswordIDs { self.estados.removeValue(forKey: id) }

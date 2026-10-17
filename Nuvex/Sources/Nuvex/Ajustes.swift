@@ -3,6 +3,7 @@ import SwiftUI
 
 enum PaginaAjustes: Hashable {
     case general
+    case actualizacion
     case ayudante
     case conexion(String)
 }
@@ -195,6 +196,8 @@ struct ConfigurationView: View {
         List(selection: $borradores.seleccion) {
             Label { Text("General") } icon: { IconoCuadrado(simbolo: "gearshape.fill", color: .gray) }
                 .tag(PaginaAjustes.general)
+            FilaActualizacionLateral(actualizaciones: modelo.actualizaciones)
+                .tag(PaginaAjustes.actualizacion)
             Label { Text("Ayudante de red") } icon: { IconoCuadrado(simbolo: "shield.lefthalf.filled", color: .indigo) }
                 .tag(PaginaAjustes.ayudante)
             Section("Conexiones") {
@@ -297,6 +300,14 @@ struct ConfigurationView: View {
             } else {
                 AjustesGenerales(modelo: modelo, borradores: borradores)
             }
+        case .actualizacion:
+            if let actualizaciones = modelo.actualizaciones {
+                ActualizacionSoftwareView(actualizaciones: actualizaciones)
+                    .navigationTitle("Actualización de software")
+            } else {
+                Text("Nuvex \(InfoVersion.actual.descripcion)").foregroundStyle(.secondary)
+                    .navigationTitle("Actualización de software")
+            }
         case .ayudante:
             AjustesAyudante(modelo: modelo)
         case .general, nil:
@@ -331,9 +342,7 @@ private struct AjustesGenerales: View {
             if borradores.drafts.isEmpty {
                 Section {
                     HStack(spacing: 12) {
-                        if let logo = Paths.logo {
-                            Image(nsImage: logo).resizable().frame(width: 40, height: 40)
-                        }
+                        LogoNuvex(lado: 40)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Aún no hay conexiones").font(.headline)
                             Text("Añade tu servidor Fortinet SSL VPN, tu usuario y tu contraseña.")
@@ -390,10 +399,119 @@ private struct AjustesGenerales: View {
                 Text("Se pide una sola vez para todo Nuvex antes de usar una contraseña guardada. Si Touch ID no está disponible, macOS pide la contraseña del equipo.")
                     .foregroundStyle(.secondary)
             }
+            SeccionCopias(modelo: modelo)
         }
         .formStyle(.grouped)
         .navigationTitle("General")
         .onAppear(perform: leerInicio)
+    }
+}
+
+// MARK: - Actualizaciones y copias
+
+/// Fila de la barra lateral con un globo cuando hay una versión pendiente.
+private struct FilaActualizacionLateral: View {
+    let actualizaciones: Actualizaciones?
+
+    var body: some View {
+        if let actualizaciones {
+            Contenido(actualizaciones: actualizaciones)
+        } else {
+            etiqueta
+        }
+    }
+
+    private var etiqueta: some View {
+        Label { Text("Actualización de software") } icon: {
+            IconoCuadrado(simbolo: "arrow.triangle.2.circlepath", color: .gray)
+        }
+    }
+
+    private struct Contenido: View {
+        @ObservedObject var actualizaciones: Actualizaciones
+        var body: some View {
+            Label { Text("Actualización de software") } icon: {
+                IconoCuadrado(simbolo: "arrow.triangle.2.circlepath", color: .gray)
+            }
+            .badge(actualizaciones.disponible == nil ? 0 : 1)
+        }
+    }
+}
+
+private struct SeccionCopias: View {
+    @ObservedObject var modelo: VPNModel
+    @State private var copias: [CopiaSeguridad] = []
+    @State private var aRestaurar: CopiaSeguridad?
+    @State private var error: String?
+
+    private func cargar() { copias = Migraciones.copias() }
+
+    var body: some View {
+        Section {
+            if copias.isEmpty {
+                Text("Aún no hay copias. Nuvex guarda una antes de cada actualización.")
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(copias.prefix(5)) { copia in
+                LabeledContent {
+                    Button("Restaurar…") { aRestaurar = copia }
+                        .disabled(modelo.hayAlgunaConectada || modelo.guardandoConfiguracion || modelo.instalandoAyudante)
+                } label: {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(copia.fecha.formatted(date: .abbreviated, time: .shortened))
+                        Text(descripcion(copia)).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            HStack {
+                Button("Crear copia ahora") {
+                    do {
+                        _ = try Migraciones.crearCopia(etiqueta: "manual", base: Preferencias.directorio,
+                                                       perfiles: URL(fileURLWithPath: Paths.perfiles))
+                        Migraciones.rotar(base: Preferencias.directorio)
+                        error = nil
+                    } catch {
+                        self.error = "No se pudo crear la copia: \(error.localizedDescription)"
+                    }
+                    cargar()
+                }
+                Spacer()
+                Button("Mostrar en Finder") {
+                    let carpeta = Migraciones.carpetaCopias(Preferencias.directorio)
+                    NSWorkspace.shared.open(FileManager.default.fileExists(atPath: carpeta.path) ? carpeta : Preferencias.directorio)
+                }
+                .disabled(!FileManager.default.fileExists(atPath: Preferencias.directorio.path))
+            }
+            if let error {
+                Text(error).foregroundStyle(.red).textSelection(.enabled)
+            }
+        } header: {
+            Text("Copias de seguridad")
+        } footer: {
+            Text("Guardan conexiones y ajustes, sin contraseñas. Para una copia completa, exporta tus conexiones cifradas.")
+                .foregroundStyle(.secondary)
+        }
+        .onAppear(perform: cargar)
+        .confirmationDialog("¿Restaurar esta copia?", isPresented: Binding(
+            get: { aRestaurar != nil }, set: { if !$0 { aRestaurar = nil } })) {
+            Button("Restaurar", role: .destructive) {
+                if let copia = aRestaurar { modelo.restaurarCopia(copia) }
+                aRestaurar = nil
+                cargar()
+            }
+        } message: {
+            Text("Las conexiones volverán a como estaban en la copia. Las que no estén en ella se eliminarán junto con su contraseña. Antes se guarda una copia del estado actual.")
+        }
+    }
+
+    private func descripcion(_ copia: CopiaSeguridad) -> String {
+        let conexiones = copia.conexiones == 1 ? "1 conexión" : "\(copia.conexiones) conexiones"
+        switch copia.etiqueta {
+        case "manual": return "Manual · \(conexiones)"
+        case "antes-de-restaurar": return "Antes de restaurar · \(conexiones)"
+        case let etiqueta where etiqueta.hasPrefix("v"): return "Antes de actualizar desde \(etiqueta) · \(conexiones)"
+        default: return conexiones
+        }
     }
 }
 

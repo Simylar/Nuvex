@@ -36,11 +36,32 @@ enum Captura {
                 nombre: "ajustes-ayudante-claro", en: carpeta, oscuro: false)
         guardar(BienvenidaView(modelo: modelo, cerrar: {}).background(.background),
                 nombre: "bienvenida-claro", en: carpeta, oscuro: false)
+        let notas = ChequeoActualizacion.notas(de: "3.1.0", en: (try? String(contentsOfFile: carpetaProyecto + "/CHANGELOG.md", encoding: .utf8))) ?? ""
+        let version = VersionDisponible(version: "3.1.0", compilacion: "42", tamano: 12_400_000,
+                                        fecha: Date(), notas: notas)
+        let estados: [(String, EstadoActualizacion)] = [
+            ("aldia", .alDia),
+            ("disponible", .disponible(version)),
+            ("descargando", .descargando(version, recibido: 5_100_000, total: 12_400_000)),
+            ("lista", .lista(version)),
+        ]
+        for (nombre, estado) in estados {
+            guardar(ActualizacionSoftwareView(actualizaciones: Actualizaciones(muestra: estado)).frame(width: 520, height: 640),
+                    nombre: "actualizacion-\(nombre)", en: carpeta, oscuro: false)
+        }
+        guardar(ActualizacionSoftwareView(actualizaciones: Actualizaciones(muestra: .disponible(version))).frame(width: 520, height: 640),
+                nombre: "actualizacion-disponible-oscuro", en: carpeta, oscuro: true)
+        guardar(NovedadesView(version: "3.1.0", notas: notas, cerrar: {}), nombre: "novedades", en: carpeta, oscuro: false)
         for estado in [IconoBarra.Estado.desconectado, .conectando, .conectado, .atencion] {
             guardar(Image(nsImage: IconoBarra.imagen(estado)).padding(4).background(.background),
                     nombre: "icono-\(estado)", en: carpeta, oscuro: false)
         }
     }
+
+    /// Raíz del repositorio a partir de este archivo fuente.
+    private static let carpetaProyecto = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        .deletingLastPathComponent().path
 
     private static func guardar<V: View>(_ vista: V, nombre: String, en carpeta: String, oscuro: Bool) {
         let host = NSHostingView(rootView: vista)

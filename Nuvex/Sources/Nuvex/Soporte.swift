@@ -53,10 +53,6 @@ enum Paths {
         Bundle.main.resourceURL?.appendingPathComponent("nuvexctl.sh").path ?? ""
     }()
     static let perfiles = userHome + "/.config/nuvex/profiles.json"
-    static let logo: NSImage? = {
-        guard let path = Bundle.main.resourceURL?.appendingPathComponent("nuvex_mark.svg").path else { return nil }
-        return NSImage(contentsOfFile: path)
-    }()
 }
 
 /// Abrir al iniciar sesión mediante el registro de ítems de inicio de macOS.

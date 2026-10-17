@@ -31,6 +31,8 @@ final class VPNModel: ObservableObject {
     private var desconexionSolicitada: Set<String> = []
     private var faltas: [String: Int] = [:]
     private var conexionPendiente: String?
+    /// Reconexiones pedidas desde el aviso: si fallan, el aviso lo dice.
+    private var reconexionesDesdeAviso: Set<String> = []
 
     /// Estado vacío sin consultar el motor; lo usan las capturas de depuración.
     init(sinArrancar: Void) {}
@@ -44,7 +46,16 @@ final class VPNModel: ObservableObject {
         actualizaciones = Actualizaciones(modelo: self)
         SecurityPreferences.migrate()
         VPNNotifications.shared.reconnect = { [weak self] id in
-            Task { @MainActor in self?.conectar(id: id) }
+            Task { @MainActor in self?.reconectarDesdeAviso(id) }
+        }
+        VPNNotifications.shared.ignorar = { [weak self] id in
+            Task { @MainActor in self?.descartarAviso(id) }
+        }
+        VPNNotifications.shared.abrirAjustes = { [weak self] id in
+            Task { @MainActor in
+                guard let self else { return }
+                AperturaAjustes.abrir(self, conexion: id)
+            }
         }
         VPNNotifications.shared.abrirActualizacion = { [weak self] in
             Task { @MainActor in self?.actualizaciones?.mostrar() }
@@ -178,9 +189,10 @@ final class VPNModel: ObservableObject {
             if anteriores[vpn.id]?.connected == true || faltas[vpn.id] != nil {
                 faltas[vpn.id, default: 0] += 1
                 if faltas[vpn.id] == 2 {
-                    desconexiones[vpn.id] = Date()
+                    let fecha = Date()
+                    desconexiones[vpn.id] = fecha
                     if UserDefaults.standard.object(forKey: "avisarDesconexion") as? Bool ?? true {
-                        VPNNotifications.shared.disconnected(id: vpn.id, name: vpn.name)
+                        VPNNotifications.shared.disconnected(id: vpn.id, name: vpn.name, fecha: fecha)
                     }
                 }
             }
@@ -224,11 +236,27 @@ final class VPNModel: ObservableObject {
                 switch resultado {
                 case .success:
                     self.estados[vpn.id] = .conectada
+                    self.reconexionesDesdeAviso.remove(vpn.id)
                 case .failure(let e):
                     self.estados[vpn.id] = .error(e.falloParaFila)
+                    if self.reconexionesDesdeAviso.remove(vpn.id) != nil {
+                        VPNNotifications.shared.reconexionFallida(id: vpn.id, name: vpn.name, fallo: e.falloParaFila)
+                    }
                 }
                 self.refrescar()
             }
+        }
+    }
+
+    func reconectarDesdeAviso(_ id: String) {
+        guard let vpn = vpns.first(where: { $0.id == id }) else { return }
+        reconexionesDesdeAviso.insert(id)
+        conectar(vpn)
+        // conectar(_:) puede rechazarlo sin intentarlo (por ejemplo, sin servidor).
+        let enCurso = estados[id] == .conectando || instalandoAyudante
+        if !enCurso, case .error(let fallo) = estados[id] {
+            reconexionesDesdeAviso.remove(id)
+            VPNNotifications.shared.reconexionFallida(id: id, name: vpn.name, fallo: fallo)
         }
     }
 

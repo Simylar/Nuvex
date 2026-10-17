@@ -1,33 +1,86 @@
+import AppKit
 import Foundation
 import UserNotifications
 
-/// Los avisos de macOS quedan en el Centro de notificaciones. La presentación
-/// como banner persistente depende de la preferencia del usuario en macOS.
+/// Avisos de macOS. Que un aviso se quede en pantalla hasta cerrarlo depende
+/// del estilo «Alertas», que elige el usuario en Ajustes del Sistema; Nuvex lo
+/// pide por defecto (NSUserNotificationAlertStyle) y ayuda a activarlo.
 final class VPNNotifications: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
     static let shared = VPNNotifications()
+    static let ajustesDelSistema = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=local.gertcode.nuvex")!
+
     var reconnect: ((String) -> Void)?
+    var ignorar: ((String) -> Void)?
+    var abrirAjustes: ((String?) -> Void)?
     var abrirActualizacion: (() -> Void)?
 
+    private enum Categoria {
+        static let desconexion = "VPN_DISCONNECTED"
+        static let reconexionFallida = "VPN_RECONEXION_FALLIDA"
+        static let actualizacion = "ACTUALIZACION"
+        static let ayudante = "AYUDANTE"
+        static let asistente = "ASISTENTE"
+    }
+
+    private enum Accion {
+        static let reconectar = "RECONNECT"
+        static let ignorar = "IGNORAR"
+        static let ajustes = "AJUSTES"
+        static let ver = "VER"
+    }
+
+    /// Sin paquete .app (compilaciones de depuración) el centro de avisos no existe.
+    private var disponible: Bool { Bundle.main.bundleIdentifier != nil }
+
     func start() {
-        let action = UNNotificationAction(identifier: "RECONNECT", title: "Reconectar", options: [.foreground])
-        let category = UNNotificationCategory(identifier: "VPN_DISCONNECTED", actions: [action], intentIdentifiers: [])
+        guard disponible else { return }
+        // Reconectar no trae la app al frente: si el servidor pide un código,
+        // la ventana del código aparece por sí sola.
+        let reconectar = UNNotificationAction(identifier: Accion.reconectar, title: "Reconectar", options: [])
+        let reintentar = UNNotificationAction(identifier: Accion.reconectar, title: "Reintentar", options: [])
+        let ignorar = UNNotificationAction(identifier: Accion.ignorar, title: "Ignorar", options: [])
+        let ajustes = UNNotificationAction(identifier: Accion.ajustes, title: "Abrir Ajustes", options: [.foreground])
+        let ver = UNNotificationAction(identifier: Accion.ver, title: "Ver novedades", options: [.foreground])
         let center = UNUserNotificationCenter.current()
         center.delegate = self
-        center.setNotificationCategories([category])
+        center.setNotificationCategories([
+            UNNotificationCategory(identifier: Categoria.desconexion, actions: [reconectar, ignorar], intentIdentifiers: []),
+            UNNotificationCategory(identifier: Categoria.reconexionFallida, actions: [reintentar, ajustes], intentIdentifiers: []),
+            UNNotificationCategory(identifier: Categoria.actualizacion, actions: [ver], intentIdentifiers: []),
+            UNNotificationCategory(identifier: Categoria.ayudante, actions: [], intentIdentifiers: []),
+            UNNotificationCategory(identifier: Categoria.asistente, actions: [], intentIdentifiers: []),
+        ])
         center.getNotificationSettings { settings in
             guard settings.authorizationStatus == .notDetermined else { return }
             UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
         }
     }
 
-    func disconnected(id: String, name: String) {
+    // MARK: Avisos
+
+    func disconnected(id: String, name: String, fecha: Date = Date()) {
         let content = UNMutableNotificationContent()
-        content.title = "VPN desconectada"
-        content.body = "\(name) perdió la conexión. Pulsa Reconectar para intentarlo de nuevo."
-        content.categoryIdentifier = "VPN_DISCONNECTED"
+        content.title = "«\(name)» se desconectó"
+        content.body = "Perdió la conexión a las \(fecha.formatted(date: .omitted, time: .shortened)). Pulsa Reconectar para volver a conectarla."
+        content.categoryIdentifier = Categoria.desconexion
+        content.threadIdentifier = "vpn"
         content.userInfo = ["profile": id]
         content.sound = .default
-        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "drop-\(id)", content: content, trigger: nil))
+        content.interruptionLevel = .active
+        publicar(content, id: "drop-\(id)")
+    }
+
+    /// Sustituye al aviso de desconexión cuando reconectar desde él falla.
+    func reconexionFallida(id: String, name: String, fallo: Fallo) {
+        let content = UNMutableNotificationContent()
+        content.title = "No se pudo reconectar «\(name)»"
+        content.body = "\(fallo.titulo). \(fallo.detalle)"
+        content.categoryIdentifier = Categoria.reconexionFallida
+        content.threadIdentifier = "vpn"
+        content.userInfo = ["profile": id]
+        content.sound = .default
+        content.interruptionLevel = .active
+        publicar(content, id: "drop-\(id)")
     }
 
     /// Tras actualizar Nuvex, si el ayudante necesita autorización: así se da
@@ -36,8 +89,9 @@ final class VPNNotifications: NSObject, UNUserNotificationCenterDelegate, @unche
         let content = UNMutableNotificationContent()
         content.title = "Nuvex necesita tu autorización"
         content.body = "Esta versión actualiza el ayudante de red. Ábrelo desde el menú de Nuvex y pulsa Autorizar."
+        content.categoryIdentifier = Categoria.ayudante
         content.sound = .default
-        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "ayudante-pendiente", content: content, trigger: nil))
+        publicar(content, id: "ayudante-pendiente")
     }
 
     /// Aviso discreto de una versión nueva, como en iOS.
@@ -45,22 +99,87 @@ final class VPNNotifications: NSObject, UNUserNotificationCenterDelegate, @unche
         let content = UNMutableNotificationContent()
         content.title = "Nuvex \(version) está disponible"
         content.body = "Abre Actualización de software para ver las novedades e instalarla."
-        content.categoryIdentifier = "ACTUALIZACION"
-        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "actualizacion-\(version)", content: content, trigger: nil))
+        content.categoryIdentifier = Categoria.actualizacion
+        publicar(content, id: "actualizacion-\(version)")
+    }
+
+    /// Informa de lo que hizo un asistente o la Terminal.
+    func accionAsistente(titulo: String, cuerpo: String) {
+        let content = UNMutableNotificationContent()
+        content.title = titulo
+        content.body = cuerpo
+        content.categoryIdentifier = Categoria.asistente
+        content.threadIdentifier = "asistentes"
+        content.interruptionLevel = .passive
+        publicar(content, id: "asistente-\(UUID().uuidString)")
+    }
+
+    /// Ejemplo para ver cómo se presentan los avisos con el estilo actual.
+    func prueba() {
+        let content = UNMutableNotificationContent()
+        content.title = "«Oficina» se desconectó"
+        content.body = "Así se verá el aviso cuando una VPN pierda la conexión. Este es solo un ejemplo."
+        content.categoryIdentifier = Categoria.ayudante
+        content.sound = .default
+        publicar(content, id: "prueba")
     }
 
     func clear(id: String) {
+        guard disponible else { return }
         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ["drop-\(id)"])
     }
+
+    private func publicar(_ content: UNMutableNotificationContent, id: String) {
+        guard disponible else { return }
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: nil)) { error in
+            if let error { Log.escribir("no se pudo mostrar un aviso: \(error.localizedDescription)") }
+        }
+    }
+
+    // MARK: Estilo
+
+    enum Estilo: Equatable {
+        case desactivados
+        case alertas
+        case banners
+        case sinPresentacion
+    }
+
+    func estilo() async -> Estilo {
+        guard disponible else { return .banners }
+        let ajustes = await UNUserNotificationCenter.current().notificationSettings()
+        switch ajustes.authorizationStatus {
+        case .denied: return .desactivados
+        case .notDetermined: return .banners
+        default: break
+        }
+        switch ajustes.alertStyle {
+        case .alert: return .alertas
+        case .banner: return .banners
+        default: return .sinPresentacion
+        }
+    }
+
+    // MARK: Respuestas
 
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
-        if response.notification.request.content.categoryIdentifier == "ACTUALIZACION" {
+        let contenido = response.notification.request.content
+        let id = contenido.userInfo["profile"] as? String
+        switch (contenido.categoryIdentifier, response.actionIdentifier) {
+        case (Categoria.actualizacion, _):
             abrirActualizacion?()
-        } else if response.actionIdentifier == "RECONNECT" || response.actionIdentifier == UNNotificationDefaultActionIdentifier,
-           let id = response.notification.request.content.userInfo["profile"] as? String {
-            reconnect?(id)
+        case (_, Accion.ignorar):
+            if let id { ignorar?(id) }
+        case (_, Accion.ajustes):
+            abrirAjustes?(id)
+        case (Categoria.desconexion, _), (Categoria.reconexionFallida, Accion.reconectar):
+            if let id { reconnect?(id) }
+        case (Categoria.reconexionFallida, _):
+            abrirAjustes?(id)
+        default:
+            break
         }
         completionHandler()
     }

@@ -52,9 +52,8 @@ enum Captura {
         guardar(ActualizacionSoftwareView(actualizaciones: Actualizaciones(muestra: .disponible(version))).frame(width: 520, height: 640),
                 nombre: "actualizacion-disponible-oscuro", en: carpeta, oscuro: true)
         guardar(NovedadesView(version: "3.1.0", notas: notas, cerrar: {}), nombre: "novedades", en: carpeta, oscuro: false)
-        for estado in [IconoBarra.Estado.desconectado, .conectando, .conectado, .atencion] {
-            guardar(Image(nsImage: IconoBarra.imagen(estado)).padding(4).background(.background),
-                    nombre: "icono-\(estado)", en: carpeta, oscuro: false)
+        for oscuro in [false, true] {
+            guardar(HojaIconos(), nombre: "iconos-barra-\(oscuro ? "oscuro" : "claro")", en: carpeta, oscuro: oscuro)
         }
     }
 
@@ -78,6 +77,41 @@ enum Captura {
         let url = URL(fileURLWithPath: carpeta).appendingPathComponent(nombre + ".png")
         try? rep.representation(using: .png, properties: [:])?.write(to: url)
         ventana.orderOut(nil)
+    }
+}
+
+/// Estados del icono sobre una barra de menús, a 1x y ampliados.
+private struct HojaIconos: View {
+    private let estados: [(String, IconoBarra.Estado)] = [
+        ("Sin conexión", .desconectado), ("Conectando", .conectando(0)), ("", .conectando(2)),
+        ("", .conectando(4)), ("Conectada", .conectado), ("Atención", .atencion),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 18) {
+                ForEach(Array(estados.enumerated()), id: \.offset) { _, par in icono(par.1) }
+                HStack(spacing: 3) { icono(.conectado); Text("2").monospacedDigit() }
+            }
+            .padding(.horizontal, 12).frame(height: 24)
+            .background(.bar)
+            HStack(alignment: .top, spacing: 20) {
+                ForEach(Array(estados.enumerated()), id: \.offset) { _, par in
+                    VStack(spacing: 6) {
+                        icono(par.1).scaleEffect(4).frame(width: 72, height: 72)
+                        Text(par.0).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .padding(20)
+        .background(.background)
+    }
+
+    private func icono(_ estado: IconoBarra.Estado) -> some View {
+        Image(nsImage: IconoBarra.imagen(estado))
+            .renderingMode(estado == .atencion ? .original : .template)
+            .foregroundStyle(.primary)
     }
 }
 

@@ -379,6 +379,8 @@ private struct AjustesGenerales: View {
             }
             Section {
                 Toggle("Avisar cuando una VPN se desconecte", isOn: $avisarDesconexion)
+                EstiloAvisos()
+                    .disabled(!avisarDesconexion)
                 Picker("Comprobar el estado", selection: $intervaloRevision) {
                     ForEach(intervalos, id: \.self) { segundos in
                         Text("Cada \(segundos) s").tag(segundos)
@@ -388,7 +390,7 @@ private struct AjustesGenerales: View {
             } header: {
                 Text("Avisos")
             } footer: {
-                Text("Los avisos quedan en el Centro de notificaciones. Su estilo se elige en Ajustes del Sistema › Notificaciones.")
+                Text("Con el estilo «Alertas», el aviso de desconexión se queda en pantalla hasta que lo cierres o pulses Reconectar.")
                     .foregroundStyle(.secondary)
             }
             Section {
@@ -404,6 +406,54 @@ private struct AjustesGenerales: View {
         .formStyle(.grouped)
         .navigationTitle("General")
         .onAppear(perform: leerInicio)
+    }
+}
+
+/// Estilo actual de los avisos de Nuvex y cómo cambiarlo.
+private struct EstiloAvisos: View {
+    @State private var estilo: VPNNotifications.Estilo?
+
+    var body: some View {
+        LabeledContent {
+            HStack(spacing: 8) {
+                Button("Probar") { VPNNotifications.shared.prueba() }
+                    .disabled(estilo == .desactivados)
+                if estilo != .alertas {
+                    Button(estilo == .desactivados ? "Activar…" : "Cambiar a Alertas…") {
+                        NSWorkspace.shared.open(VPNNotifications.ajustesDelSistema)
+                    }
+                }
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Estilo de los avisos")
+                switch estilo {
+                case .alertas?:
+                    Label("Alertas: se quedan hasta que los cierras", systemImage: "checkmark.circle.fill")
+                        .font(.caption).foregroundStyle(.green)
+                case .banners?:
+                    Label("Banners: desaparecen a los pocos segundos", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(.orange)
+                case .sinPresentacion?:
+                    Label("Solo en el Centro de notificaciones", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(.orange)
+                case .desactivados?:
+                    Label("Desactivados en Ajustes del Sistema", systemImage: "xmark.octagon.fill")
+                        .font(.caption).foregroundStyle(.red)
+                case nil:
+                    Text("Comprobando…").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .task { await leer() }
+        // Al volver de Ajustes del Sistema se refleja el cambio.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await leer() }
+        }
+    }
+
+    private func leer() async {
+        estilo = await VPNNotifications.shared.estilo()
     }
 }
 

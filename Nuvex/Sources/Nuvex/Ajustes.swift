@@ -5,6 +5,7 @@ enum PaginaAjustes: Hashable {
     case general
     case actualizacion
     case automatizacion
+    case cuentaGoogle
     case ayudante
     case conexion(String)
 }
@@ -58,6 +59,7 @@ final class BorradoresAjustes: ObservableObject {
 
     func descartar(_ id: String) {
         drafts.removeAll { $0.id == id }
+        Preferencias.shared.olvidarConexion(id)
         limpiar(id)
         if seleccion == .conexion(id) { seleccion = drafts.first.map { .conexion($0.id) } ?? .general }
     }
@@ -203,6 +205,8 @@ struct ConfigurationView: View {
                 .tag(PaginaAjustes.ayudante)
             Label { Text("Automatización") } icon: { IconoCuadrado(simbolo: "terminal.fill", color: Color(white: 0.25)) }
                 .tag(PaginaAjustes.automatizacion)
+            Label { Text("Cuenta de Google") } icon: { IconoCuadrado(simbolo: "envelope.fill", color: .red) }
+                .tag(PaginaAjustes.cuentaGoogle)
             Section("Conexiones") {
                 ForEach(borradores.drafts) { perfil in
                     filaLateral(perfil)
@@ -315,6 +319,8 @@ struct ConfigurationView: View {
             AjustesAyudante(modelo: modelo)
         case .automatizacion:
             AjustesAutomatizacion(modelo: modelo)
+        case .cuentaGoogle:
+            AjustesCuentaGoogle()
         case .general, nil:
             AjustesGenerales(modelo: modelo, borradores: borradores)
         }
@@ -807,9 +813,10 @@ private struct DetalleConexion: View {
             } header: {
                 Text("Cuenta")
             } footer: {
-                Text("La contraseña se guarda en el Llavero de macOS. Si el servidor pide un código de verificación, Nuvex lo solicitará al conectar.")
+                Text("La contraseña se guarda en el Llavero de macOS.")
                     .foregroundStyle(.secondary)
             }
+            SeccionCodigoCorreo(perfilID: id)
             Section {
                 Picker("Confianza TLS", selection: seleccionConfianza) {
                     Text("Certificados del sistema").tag("system")

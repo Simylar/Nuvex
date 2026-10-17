@@ -66,6 +66,13 @@ final class VPNModel: ObservableObject {
         VPNNotifications.shared.start()
         arrancar()
         cargarConfiguracion()
+        // El panel del código busca en Gmail si la conexión lo tiene configurado.
+        SolicitudCodigo.lector = { perfilID, desde in
+            guard let config = Preferencias.shared.ajustes.correo[perfilID],
+                  !config.remitente.trimmingCharacters(in: .whitespaces).isEmpty,
+                  let cuenta = CuentaGoogle.shared.correo else { return nil }
+            return (cuenta, Task { await LectorGmail.esperar(config, desde: desde) })
+        }
         let control = ControlRemoto(modelo: self)
         control.iniciar()
         self.control = control

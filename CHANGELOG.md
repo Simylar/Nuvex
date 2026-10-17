@@ -12,6 +12,7 @@ Este archivo sigue el formato de [Keep a Changelog](https://keepachangelog.com/e
 - Comando `nuvex` y habilidad para Claude Code y Codex: conectan, desconectan y consultan tus VPN, con permisos en Ajustes › Automatización.
 - Aviso de desconexión con Reconectar, que se queda en pantalla con el estilo «Alertas».
 - Ventana del código de verificación que no bloquea la app.
+- Lectura del código de verificación desde Gmail (solo lectura), configurable por conexión.
 
 ### Cambiado
 - La versión sale de `Nuvex/VERSION` y el número de compilación del historial de Git.

@@ -129,3 +129,17 @@ struct EtiquetaBarra: View {
         .accessibilityLabel(descripcion + (modelo.requiereAtencion ? ", requiere atención" : ""))
     }
 }
+
+/// Abre la ventana de Ajustes desde código AppKit (avisos, enlaces). SwiftUI
+/// solo ofrece openSettings dentro de las vistas; la etiqueta de la barra, que
+/// siempre está activa, la deja aquí al aparecer.
+@MainActor
+enum AperturaAjustes {
+    static var accion: OpenSettingsAction?
+
+    static func abrir(_ modelo: VPNModel, conexion id: String? = nil) {
+        if let id { modelo.settingsTargetID = id }
+        NSApp.activate(ignoringOtherApps: true)
+        accion?()
+    }
+}

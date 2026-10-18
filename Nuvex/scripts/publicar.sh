@@ -93,12 +93,13 @@ if [ -n "$ANTERIOR" ] && git diff --quiet "$ANTERIOR" HEAD -- vendor/openfortivp
   MOTOR_PREVIO="$(gh release download "$ANTERIOR" --repo "$REPO" --pattern motor.sha256 --output - 2>/dev/null | head -1 || true)"
   OPENSSL_ACTUAL="$(brew list --versions openssl@3 | awk '{print $2}')"
   if [ -n "$MOTOR_PREVIO" ] && [ "${MOTOR_PREVIO#* }" = "openssl-$OPENSSL_ACTUAL" ]; then
-    mkdir -p "$SALIDA"
-    ls "$SALIDA"/Nuvex-"${ANTERIOR#v}".zip >/dev/null 2>&1 \
-      || gh release download "$ANTERIOR" --repo "$REPO" --pattern "Nuvex-${ANTERIOR#v}.zip" --dir "$SALIDA" \
-      || falla "no se pudo descargar Nuvex-${ANTERIOR#v}.zip para reutilizar su motor"
+    # Siempre el zip publicado, nunca una copia local que pueda ser distinta.
     MOTOR_EXTRAIDO="$(mktemp -d)"
-    ditto -x -k "$SALIDA/Nuvex-${ANTERIOR#v}.zip" "$MOTOR_EXTRAIDO"
+    gh release download "$ANTERIOR" --repo "$REPO" --pattern "Nuvex-${ANTERIOR#v}.zip" --dir "$MOTOR_EXTRAIDO" \
+      || falla "no se pudo descargar Nuvex-${ANTERIOR#v}.zip para reutilizar su motor"
+    mkdir -p "$SALIDA"
+    cp "$MOTOR_EXTRAIDO/Nuvex-${ANTERIOR#v}.zip" "$SALIDA/"
+    ditto -x -k "$MOTOR_EXTRAIDO/Nuvex-${ANTERIOR#v}.zip" "$MOTOR_EXTRAIDO"
     export NUVEX_MOTOR_PUBLICADO="$MOTOR_EXTRAIDO/Nuvex.app/Contents/Resources"
     [ "$(shasum -a 256 "$NUVEX_MOTOR_PUBLICADO/openfortivpn" | cut -d' ' -f1)" = "${MOTOR_PREVIO%% *}" ] \
       || falla "el motor de Nuvex-${ANTERIOR#v}.zip no coincide con su motor.sha256"
@@ -151,7 +152,11 @@ mkdir -p "$SALIDA"
 # Se parte del appcast publicado y del archivo de la versión anterior, para
 # conservar el historial y generar la actualización delta.
 [ -f "$SALIDA/appcast.xml" ] || curl -fsSL "$FEED" -o "$SALIDA/appcast.xml" 2>/dev/null || rm -f "$SALIDA/appcast.xml"
-if [ -n "$ANTERIOR" ] && ! ls "$SALIDA"/Nuvex-"${ANTERIOR#v}".zip >/dev/null 2>&1; then
+# Para el delta hace falta el zip publicado exacto, no una compilación local.
+if [ -n "$ANTERIOR" ] && [ "$MODO" != simular ] && [ -z "${NUVEX_MOTOR_PUBLICADO:-}" ]; then
+  rm -f "$SALIDA/Nuvex-${ANTERIOR#v}.zip"
+  gh release download "$ANTERIOR" --repo "$REPO" --pattern "Nuvex-${ANTERIOR#v}.zip" --dir "$SALIDA" 2>/dev/null || true
+elif [ -n "$ANTERIOR" ] && ! ls "$SALIDA"/Nuvex-"${ANTERIOR#v}".zip >/dev/null 2>&1; then
   gh release download "$ANTERIOR" --repo "$REPO" --pattern "Nuvex-${ANTERIOR#v}.zip" --dir "$SALIDA" 2>/dev/null || true
 fi
 ZIP="$SALIDA/Nuvex-$VERSION.zip"

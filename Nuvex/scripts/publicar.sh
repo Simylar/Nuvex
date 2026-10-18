@@ -70,6 +70,8 @@ if [ "$MODO" = etiqueta ]; then
     || falla "sube antes la rama $RAMA (git push); la etiqueta debe apuntar a un commit publicado"
   gh secret list --repo "$REPO" 2>/dev/null | grep -q SPARKLE_ED_PRIVATE_KEY \
     || falla "faltan los secretos en GitHub; ejecuta scripts/configurar-publicacion.sh"
+  paso "Compilación de Nuvex para preparar las bibliotecas de prueba"
+  NUVEX_CANAL=publicada "$RAIZ_APP/build.sh"
   paso "Pruebas"
   python3 -m unittest discover -s tests >/dev/null 2>&1 || falla "fallaron las pruebas de Python"
   for prueba in tests/test_*.sh; do bash "$prueba" >/dev/null || falla "falló $(basename "$prueba")"; done
@@ -89,6 +91,8 @@ if [ "$MODO" != ci ]; then
     || falla "falta la identidad «$IDENTIDAD»; ejecuta scripts/configurar-publicacion.sh"
   [ "$("$SPARKLE_BIN/generate_keys" -p 2>/dev/null)" = "$CLAVE" ] \
     || falla "la clave EdDSA del llavero no coincide con Resources/sparkle_ed_public_key"
+  paso "Compilación de Nuvex para preparar las bibliotecas de prueba"
+  NUVEX_CANAL=publicada "$RAIZ_APP/build.sh"
   paso "Pruebas"
   python3 -m unittest discover -s tests >/dev/null 2>&1 || falla "fallaron las pruebas de Python"
   for prueba in tests/test_*.sh; do bash "$prueba" >/dev/null || falla "falló $(basename "$prueba")"; done

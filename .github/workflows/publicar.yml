@@ -29,11 +29,6 @@ jobs:
       - name: Herramientas
         run: brew install autoconf automake pkgconf openssl@3
 
-      - name: Pruebas
-        run: |
-          python3 -m unittest discover -s tests
-          for prueba in tests/test_*.sh; do bash "$prueba"; done
-
       - name: Certificado de firma
         env:
           CERTIFICADO_P12: ${{ secrets.NUVEX_CERTIFICADO_P12 }}
@@ -49,6 +44,14 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k "$CLAVE_LLAVERO" "$LLAVERO" >/dev/null
           security list-keychains -d user -s "$LLAVERO" $(security list-keychains -d user | tr -d '"')
           security find-identity -p codesigning "$LLAVERO" | grep -q "Nuvex Release"
+
+      - name: Compilar para preparar las bibliotecas de prueba
+        run: NUVEX_CANAL=publicada Nuvex/build.sh
+
+      - name: Pruebas
+        run: |
+          python3 -m unittest discover -s tests
+          for prueba in tests/test_*.sh; do bash "$prueba"; done
 
       - name: Compilar y publicar
         env:

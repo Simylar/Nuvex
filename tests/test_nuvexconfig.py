@@ -41,6 +41,19 @@ class NuvexConfigurationTests(unittest.TestCase):
         path.write_text(json.dumps({"version": 2, "profiles": profiles}))
         path.chmod(0o600)
 
+    def write_control(self, replacements):
+        """Copia nuvexctl.sh con rutas de prueba; la ruta de producción no cambia."""
+        source = CONTROL.read_text()
+        replacements = {'SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"':
+                            f'SCRIPT_DIR={shlex.quote(str(ROOT))}', **replacements}
+        for original, replacement in replacements.items():
+            self.assertEqual(source.count(original), 1, original)
+            source = source.replace(original, replacement)
+        control = Path(self.tmp.name) / "control-test.sh"
+        control.write_text(source)
+        control.chmod(0o700)
+        return control
+
     def run_config(self, *args, expected=0):
         result = subprocess.run(["/usr/bin/python3", str(CONFIG), *args],
                                 env=self.env, text=True, input="", capture_output=True)
@@ -175,9 +188,29 @@ class NuvexConfigurationTests(unittest.TestCase):
         self.assertIn("__all__) [ \"$ACTION\" = list-status ]", source)
         syntax = subprocess.run(["/bin/bash", "-n", str(helper)], capture_output=True)
         self.assertEqual(syntax.returncode, 0, syntax.stderr)
-        staged = subprocess.run([str(CONTROL), "install-helper", "--dry-run"], env=self.env,
+        # El ayudante instalado en /Library y las VPN reales no deben influir:
+        # se consulta un ayudante falso sin túneles a través de un sudo falso.
+        fake_helper = Path(self.tmp.name) / "engine" / f"helper-{os.getuid()}"
+        fake_helper.parent.mkdir()
+        fake_helper.write_text("#!/bin/bash\nexit 0\n")
+        fake_helper.chmod(0o700)
+        control = self.write_control({
+            'HELPER="${ENGINE_DIR}/helper-$(id -u)"': f'HELPER={shlex.quote(str(fake_helper))}',
+        })
+        bin_dir = Path(self.tmp.name) / "bin"
+        bin_dir.mkdir()
+        sudo_log = Path(self.tmp.name) / "sudo.log"
+        sudo = bin_dir / "sudo"
+        sudo.write_text("#!/bin/bash\n[ \"$1\" = -n ] && shift\n"
+                        f"printf '%s\\n' \"$*\" >> {shlex.quote(str(sudo_log))}\n"
+                        f"case \"$1\" in {shlex.quote(self.tmp.name)}/*) exec \"$@\" ;; esac\n"
+                        "exit 1\n")
+        sudo.chmod(0o700)
+        env = dict(self.env, PATH=f"{bin_dir}:{os.environ['PATH']}")
+        staged = subprocess.run([str(control), "install-helper", "--dry-run"], env=env,
                                 text=True, capture_output=True)
         self.assertEqual(staged.returncode, 0, staged.stderr)
+        self.assertIn(f"{fake_helper} __all__ list-status", sudo_log.read_text())
         installer = Path(staged.stdout.strip())
         self.addCleanup(lambda: __import__("shutil").rmtree(installer.parent, ignore_errors=True))
         self.assertEqual(subprocess.run(["/bin/bash", "-n", str(installer)]).returncode, 0)
@@ -192,23 +225,14 @@ class NuvexConfigurationTests(unittest.TestCase):
             self.skipTest("Build Nuvex before running installer test")
         self.run_config("set", "sicert", "username", "test.sicert")
         self.run_config("set", "prepa", "username", "test.prepa")
-        source = CONTROL.read_text()
-        replacements = {
-            'SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"':
-                f'SCRIPT_DIR={shlex.quote(str(ROOT))}',
+        control = self.write_control({
             'ENGINE_DIR="/Library/PrivilegedHelperTools/Nuvex"':
                 f'ENGINE_DIR={shlex.quote(str(Path(self.tmp.name) / "engine"))}',
             '/usr/bin/osascript "$INSTALLER_SCRIPT" "$temp/install.sh" "$installer_digest" || die "se canceló o falló la autorización de macOS"':
                 'true # Simula una autorización exitosa sin instalar nada como root.',
             'helper_is_current || die "el ayudante no quedó instalado correctamente"':
                 'true # La copia privilegiada se omite en esta prueba.',
-        }
-        for original, replacement in replacements.items():
-            self.assertEqual(source.count(original), 1, original)
-            source = source.replace(original, replacement)
-        control = Path(self.tmp.name) / "control-test.sh"
-        control.write_text(source)
-        control.chmod(0o700)
+        })
         env = dict(self.env, TMPDIR=self.tmp.name)
         result = subprocess.run([str(control), "install-helper"], env=env,
                                 text=True, capture_output=True)
@@ -217,17 +241,11 @@ class NuvexConfigurationTests(unittest.TestCase):
         self.assertFalse(list(Path(self.tmp.name).glob("nuvex-install.*")))
 
     def test_active_tunnel_blocks_connection_changes_but_allows_unchanged_save(self):
-        source = CONTROL.read_text()
-        original = 'SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"'
-        self.assertEqual(source.count(original), 1)
-        source = source.replace(original, f'SCRIPT_DIR={shlex.quote(str(ROOT))}')
-        original = 'ENGINE_DIR="/Library/PrivilegedHelperTools/Nuvex"'
-        self.assertEqual(source.count(original), 1)
         engine_dir = Path(self.tmp.name) / "engine"
-        source = source.replace(original, f'ENGINE_DIR={shlex.quote(str(engine_dir))}')
-        control = Path(self.tmp.name) / "control-test.sh"
-        control.write_text(source)
-        control.chmod(0o700)
+        control = self.write_control({
+            'ENGINE_DIR="/Library/PrivilegedHelperTools/Nuvex"':
+                f'ENGINE_DIR={shlex.quote(str(engine_dir))}',
+        })
 
         engine_dir.mkdir()
         helper = engine_dir / f"helper-{os.getuid()}"

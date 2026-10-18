@@ -101,7 +101,14 @@ fi
 paso "Compilación de Nuvex $VERSION"
 NUVEX_CANAL=publicada "$RAIZ_APP/build.sh"
 APP="$RAIZ_APP/Nuvex.app"
-codesign -dvv "$APP" 2>&1 | grep -qF "Authority=$IDENTIDAD" || falla "la app no quedó firmada con «$IDENTIDAD»"
+IDENTIDAD_HASH="$(security find-identity -p codesigning | awk -v identidad="$IDENTIDAD" 'index($0, "\"" identidad "\"") { print $2; exit }')"
+[ -n "$IDENTIDAD_HASH" ] || falla "no se encontró la identidad de firma «${IDENTIDAD}»"
+REQUISITO_FIRMA="$(codesign -d -r- "$APP" 2>&1)"
+IDENTIDAD_HASH="$(printf '%s' "$IDENTIDAD_HASH" | tr '[:upper:]' '[:lower:]')"
+case "$REQUISITO_FIRMA" in
+  *"certificate leaf = H\"$IDENTIDAD_HASH\""*) ;;
+  *) falla "la app no quedó firmada con «${IDENTIDAD}»" ;;
+esac
 COMPILACION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")"
 OPENSSL_VERSION="$(brew list --versions openssl@3 | awk '{print $2}')"
 MOTOR="$(shasum -a 256 "$APP/Contents/Resources/openfortivpn" | cut -d' ' -f1) openssl-$OPENSSL_VERSION"

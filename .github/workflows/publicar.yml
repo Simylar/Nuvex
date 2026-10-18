@@ -19,8 +19,6 @@ jobs:
   publicar:
     runs-on: macos-26
     timeout-minutes: 45
-    env:
-      LLAVERO: ${{ runner.temp }}/nuvex-firma.keychain-db
     steps:
       - uses: actions/checkout@v4
         with:
@@ -32,6 +30,7 @@ jobs:
 
       - name: Certificado de firma
         env:
+          LLAVERO: ${{ runner.temp }}/nuvex-firma.keychain-db
           CERTIFICADO_P12: ${{ secrets.NUVEX_CERTIFICADO_P12 }}
           CERTIFICADO_FRASE: ${{ secrets.NUVEX_CERTIFICADO_FRASE }}
         run: |
@@ -67,4 +66,6 @@ jobs:
 
       - name: Retirar el llavero temporal
         if: always()
+        env:
+          LLAVERO: ${{ runner.temp }}/nuvex-firma.keychain-db
         run: security delete-keychain "$LLAVERO" 2>/dev/null || true

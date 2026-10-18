@@ -75,9 +75,7 @@ struct BienvenidaView: View {
 
     private var inicio: some View {
         VStack(spacing: 14) {
-            if let logo = Paths.logo {
-                Image(nsImage: logo).resizable().frame(width: 64, height: 64)
-            }
+            LogoNuvex(lado: 72)
             Text("Te damos la bienvenida a Nuvex")
                 .font(.title2).fontWeight(.bold)
             Text("Conecta tus VPN Fortinet desde la barra de menús. Configurarlo lleva un par de minutos.")

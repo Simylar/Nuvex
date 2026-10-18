@@ -1,7 +1,41 @@
+import AppKit
 import SwiftUI
+
+/// Recibe enlaces nuvex:// y archivos .nuvexvpn aunque el panel no esté abierto.
+final class DelegadoApp: NSObject, NSApplicationDelegate {
+    func application(_ application: NSApplication, open urls: [URL]) {
+        MainActor.assumeIsolated { urls.forEach(AppActual.abrir) }
+    }
+}
+
+/// Punto de acceso al modelo para lo que llega desde AppKit (archivos, enlaces).
+@MainActor
+enum AppActual {
+    static weak var modelo: VPNModel?
+    /// Lo que llega antes de que el modelo exista se atiende al crearlo.
+    private static var pendientes: [URL] = []
+
+    static func abrir(_ url: URL) {
+        guard let modelo else { pendientes.append(url); return }
+        if url.isFileURL {
+            guard url.pathExtension.lowercased() == "nuvexvpn" else { return }
+            VentanaImportar.mostrar(modelo: modelo, archivo: url)
+        } else if url.scheme == "nuvex" {
+            modelo.solicitarDesdeEnlace(url)
+        }
+    }
+
+    static func registrar(_ modelo: VPNModel) {
+        self.modelo = modelo
+        let anteriores = pendientes
+        pendientes.removeAll()
+        anteriores.forEach(abrir)
+    }
+}
 
 @main
 struct NuvexApp: App {
+    @NSApplicationDelegateAdaptor(DelegadoApp.self) private var delegado
     @StateObject private var modelo = VPNModel()
     @StateObject private var borradores = BorradoresAjustes()
 
@@ -19,7 +53,6 @@ struct NuvexApp: App {
         MenuBarExtra {
             PanelVPN(modelo: modelo)
                 .onAppear { modelo.arrancar() }
-                .onOpenURL { modelo.solicitarDesdeEnlace($0) }
         } label: {
             EtiquetaBarra(modelo: modelo)
         }

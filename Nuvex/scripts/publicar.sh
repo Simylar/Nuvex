@@ -181,8 +181,19 @@ else
   "$SPARKLE_BIN/generate_appcast" "${OPCIONES[@]}" "$SALIDA"
 fi
 grep -q "sparkle:edSignature" "$SALIDA/appcast.xml" || falla "el appcast no quedó firmado"
+# generate_appcast pone el prefijo de esta versión a todos los zip; los de
+# versiones anteriores viven en la publicación de su propia etiqueta.
+for anterior_zip in "$SALIDA"/Nuvex-*.zip; do
+  v="$(basename "$anterior_zip" .zip)"; v="${v#Nuvex-}"
+  [ "$v" = "$VERSION" ] && continue
+  sed -i '' "s|releases/download/$ETIQUETA/Nuvex-$v.zip|releases/download/v$v/Nuvex-$v.zip|g" "$SALIDA/appcast.xml"
+done
+# Los delta se llaman Nuvex<nueva>-<anterior>.delta y se suben con esta versión.
 DELTAS=()
-while IFS= read -r delta; do DELTAS+=("$delta"); done < <(find "$SALIDA" -maxdepth 1 -name "*-$COMPILACION.delta")
+while IFS= read -r delta; do DELTAS+=("$delta"); done < <(find "$SALIDA" -maxdepth 1 -name "Nuvex$COMPILACION-*.delta")
+for delta in ${DELTAS[@]+"${DELTAS[@]}"}; do
+  grep -q "$(basename "$delta")" "$SALIDA/appcast.xml" || falla "el appcast no menciona $(basename "$delta")"
+done
 
 if [ "$MODO" = simular ]; then
   printf '\nSimulación completa. Se publicaría:\n  %s\n  %s\n' "$ZIP" "$SALIDA/appcast.xml"

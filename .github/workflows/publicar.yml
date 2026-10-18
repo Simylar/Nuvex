@@ -4,6 +4,7 @@
 name: Publicar versión
 
 on:
+  workflow_dispatch:
   push:
     tags: ["v*"]
 

@@ -130,6 +130,7 @@ struct ConfigurationView: View {
         .onAppear {
             borradores.sincronizar(con: modelo.profiles)
             aplicarDestino(modelo.settingsTargetID)
+            aplicarPagina(modelo.paginaDestino)
             if borradores.seleccion == nil {
                 borradores.seleccion = borradores.drafts.first.map { .conexion($0.id) } ?? .general
             }
@@ -142,6 +143,7 @@ struct ConfigurationView: View {
         }
         .onChange(of: modelo.profiles) { _, nuevos in borradores.sincronizar(con: nuevos) }
         .onChange(of: modelo.settingsTargetID) { _, id in aplicarDestino(id) }
+        .onChange(of: modelo.paginaDestino) { _, pagina in aplicarPagina(pagina) }
         .onChange(of: modelo.mensajeConfiguracion) { _, mensaje in
             if mensaje != nil, let id = borradores.guardandoID {
                 borradores.limpiar(id)
@@ -165,6 +167,12 @@ struct ConfigurationView: View {
         guard let id else { return }
         if borradores.drafts.contains(where: { $0.id == id }) { borradores.seleccion = .conexion(id) }
         modelo.settingsTargetID = nil
+    }
+
+    private func aplicarPagina(_ pagina: PaginaAjustes?) {
+        guard let pagina else { return }
+        borradores.seleccion = pagina
+        modelo.paginaDestino = nil
     }
 
     private var tituloEliminacion: String {
@@ -985,6 +993,8 @@ private struct DetalleConexion: View {
                     .foregroundStyle(.secondary)
             } else if borradores.intentos.contains(id), let motivo {
                 Label(motivo, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            } else if !hayCambios, let resumen = modelo.resumenGuardado, resumen.hayProblemas {
+                BarraResumenGuardado(modelo: modelo, resumen: resumen)
             } else if let error = modelo.ultimoError {
                 Label(error, systemImage: "xmark.octagon.fill").foregroundStyle(.red).textSelection(.enabled)
             } else if hayCambios, let bloqueo = bloqueoPorConexion {
@@ -1006,6 +1016,87 @@ private struct DetalleConexion: View {
         }
         .font(.callout)
         .lineLimit(2)
+    }
+}
+
+/// Línea de la barra de guardado cuando algo quedó pendiente, con el
+/// detalle de cada paso a un clic.
+private struct BarraResumenGuardado: View {
+    @ObservedObject var modelo: VPNModel
+    let resumen: ResumenGuardado
+    @State private var detalles = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Label(resumen.resumen, systemImage: grave ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
+                .foregroundStyle(grave ? .red : .orange)
+                .lineLimit(1)
+            Button("Detalles") { detalles = true }
+                .buttonStyle(.link)
+                .popover(isPresented: $detalles, arrowEdge: .top) {
+                    ListaResumenGuardado(modelo: modelo, resumen: resumen)
+                        .padding(16)
+                        .frame(width: 380)
+                }
+        }
+    }
+
+    private var grave: Bool { if case .fallo = resumen.conexiones { return true }; return false }
+}
+
+/// Cada paso del guardado con su estado y, si quedó algo pendiente, cómo
+/// resolverlo. La usan Ajustes y la bienvenida.
+struct ListaResumenGuardado: View {
+    @ObservedObject var modelo: VPNModel
+    let resumen: ResumenGuardado
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(resumen.pasos, id: \.titulo) { titulo, paso in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    icono(paso).frame(width: 16)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(titulo).fontWeight(.medium)
+                        if let detalle = detalle(paso) {
+                            Text(detalle).font(.caption).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+            }
+            if puedeAutorizar {
+                Button("Autorizar el ayudante ahora") { modelo.instalarAyudante(desdeGuardado: true) }
+                    .disabled(modelo.instalandoAyudante || modelo.guardandoConfiguracion)
+            }
+        }
+    }
+
+    private var puedeAutorizar: Bool {
+        switch resumen.ayudante {
+        case .fallo, .pendiente: return !modelo.hayAlgunaConectada
+        default: return false
+        }
+    }
+
+    @ViewBuilder
+    private func icono(_ paso: ResumenGuardado.Paso) -> some View {
+        switch paso {
+        case .hecho: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+        case .enCurso: ProgressView().controlSize(.mini)
+        case .pendiente: Image(systemName: "clock.fill").foregroundStyle(.orange)
+        case .fallo: Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+        case .noAplica: EmptyView()
+        }
+    }
+
+    private func detalle(_ paso: ResumenGuardado.Paso) -> String? {
+        switch paso {
+        case .hecho: return "Hecho."
+        case .enCurso: return "En curso…"
+        case .pendiente(let texto), .fallo(let texto): return texto
+        case .noAplica: return nil
+        }
     }
 }
 

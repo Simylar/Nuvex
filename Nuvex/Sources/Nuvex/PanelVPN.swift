@@ -10,11 +10,15 @@ struct FilaVPN: View {
     let estado: EstadoUI
     let passwordStatus: PasswordStatus?
     let caidaEn: Date?
+    /// Inicio del intento en curso y si espera el código, para mostrar el avance.
+    var conectandoDesde: Date? = nil
+    var esperandoCodigo = false
     let atajo: Int?
     let bloqueada: Bool
     let alAlternar: () -> Void
     let alConfigurar: () -> Void
     let alDescartar: () -> Void
+    var alCancelar: () -> Void = {}
 
     @State private var hover = false
     @State private var expandida = false
@@ -68,7 +72,11 @@ struct FilaVPN: View {
         case .conectada:
             guard let inicio = vpn.inicio else { return "Conectada" }
             return "Conectada · \(Formato.duracion(desde: inicio))"
-        case .conectando: return "Conectando…"
+        case .conectando:
+            let base = esperandoCodigo ? "Esperando el código" : "Conectando"
+            guard let conectandoDesde else { return base + "…" }
+            let segundos = max(0, Int(Date().timeIntervalSince(conectandoDesde)))
+            return "\(base)… \(segundos / 60):\(String(format: "%02d", segundos % 60))"
         case .caida(let fecha): return "Se desconectó a las \(fecha.formatted(date: .omitted, time: .shortened))"
         case .error(let fallo): return fallo.titulo
         case .faltaConfigurar: return "Falta el servidor o el usuario"
@@ -110,7 +118,7 @@ struct FilaVPN: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(vpn.name)
                         .lineLimit(1)
-                    TimelineView(.periodic(from: .now, by: 30)) { _ in
+                    TimelineView(.periodic(from: .now, by: estado == .conectando ? 1 : 30)) { _ in
                         Text(descripcion)
                             .font(.caption)
                             .foregroundStyle(colorDescripcion)
@@ -188,7 +196,8 @@ struct FilaVPN: View {
         case .conectada:
             chevron
         case .conectando:
-            EmptyView()
+            BotonFila(titulo: "Cancelar", accion: alCancelar)
+                .help("Detiene este intento de conexión. Las demás VPN no se tocan.")
         case .desconectada:
             if let atajo, atajo <= 9 {
                 Text("⌘\(atajo)")
@@ -411,7 +420,7 @@ struct PanelVPN: View {
 
             Divider().padding(.horizontal, 10).padding(.vertical, 5)
             if let actualizaciones = modelo.actualizaciones, actualizaciones.configuradas {
-                ElementoMenu(titulo: "Buscar actualizaciones…", atajo: "", tecla: nil) { actualizaciones.buscar() }
+                ElementoMenu(titulo: "Buscar actualizaciones…", atajo: "", tecla: nil) { actualizaciones.mostrar() }
             }
             ElementoMenu(titulo: "Ajustes de Nuvex…", atajo: "⌘,", tecla: ",") { abrirAjustes() }
             ElementoMenu(titulo: "Salir de Nuvex", atajo: "⌘Q", tecla: "q") { NSApp.terminate(nil) }
@@ -427,11 +436,14 @@ struct PanelVPN: View {
                         estado: modelo.estado(vpn),
                         passwordStatus: modelo.passwordStatuses[vpn.id],
                         caidaEn: modelo.desconexiones[vpn.id],
+                        conectandoDesde: modelo.inicioConexion[vpn.id],
+                        esperandoCodigo: modelo.esperandoCodigo.contains(vpn.id),
                         atajo: indice + 1,
                         bloqueada: modelo.instalandoAyudante,
                         alAlternar: { modelo.alternar(vpn) },
                         alConfigurar: { abrirAjustes(vpn.id) },
-                        alDescartar: { modelo.descartarAviso(vpn.id) })
+                        alDescartar: { modelo.descartarAviso(vpn.id) },
+                        alCancelar: { modelo.cancelarConexion(vpn.id) })
             }
         }
     }

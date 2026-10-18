@@ -99,6 +99,31 @@ struct NucleoChecks {
         precondition(NotasCambios.seccion(de: "3.1.0", en: changelog) == "### Añadido\n- Algo nuevo.")
         precondition(NotasCambios.seccion(de: "9.9.9", en: changelog) == nil)
 
+        // Resumen del guardado: qué se hizo y qué quedó pendiente.
+        let todoBien = ResumenGuardado(conexiones: .hecho, contrasenas: .hecho, ayudante: .hecho)
+        precondition(!todoBien.hayProblemas && todoBien.resumen == "Cambios guardados y aplicados.")
+        let sinAyudante = ResumenGuardado(conexiones: .hecho, ayudante: .pendiente("al conectar"))
+        precondition(sinAyudante.hayProblemas && sinAyudante.pasos.count == 2)
+        precondition(sinAyudante.resumen.contains("al volver a conectar"))
+        let sinLlavero = ResumenGuardado(conexiones: .hecho, contrasenas: .fallo("x"), ayudante: .enCurso)
+        precondition(sinLlavero.hayProblemas && sinLlavero.enCurso && sinLlavero.resumen.contains("Llavero"))
+        precondition(ResumenGuardado(conexiones: .fallo("x")).resumen == "No se guardaron los cambios")
+
+        // Procesos: mucha salida de error no bloquea la lectura de la normal.
+        let mucho = try Proceso.ejecutar("/bin/sh", args: ["-c", "head -c 300000 /dev/zero | tr '\\0' e >&2; echo listo"],
+                                         limite: 10)
+        precondition(mucho.codigo == 0 && mucho.salida == "listo\n" && mucho.error.utf8.count == 300_000,
+                     "la salida y los errores deben leerse a la vez")
+        // Un proceso que no termina se detiene al agotarse el tiempo.
+        let inicio = Date()
+        do {
+            _ = try Proceso.ejecutar("/bin/sleep", args: ["30"], limite: 1)
+            preconditionFailure("debió agotarse el tiempo")
+        } catch let error as ErrorVPN {
+            precondition(error.fallo?.titulo == "El motor no respondió")
+        }
+        precondition(Date().timeIntervalSince(inicio) < 6, "el tiempo límite debe cortar la espera")
+
         print("Núcleo: comprobaciones superadas")
     }
 }

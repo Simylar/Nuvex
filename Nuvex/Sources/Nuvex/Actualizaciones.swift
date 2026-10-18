@@ -124,19 +124,30 @@ final class Actualizaciones: NSObject, ObservableObject {
     }
     #endif
 
+    /// Pantallas de «Actualización de software» abiertas ahora mismo. Mientras
+    /// haya alguna, lo nuevo se muestra ahí y no como aviso.
+    private var pantallasAbiertas = 0
+    var pantallaVisible: Bool { pantallasAbiertas > 0 }
+
+    func pantallaAparecio() { pantallasAbiertas += 1 }
+    func pantallaDesaparecio() { pantallasAbiertas = max(0, pantallasAbiertas - 1) }
+
     // MARK: Acciones
 
-    /// Busca ahora y muestra la ventana de actualización.
+    /// Busca ahora. El resultado aparece en la pantalla que ya está abierta;
+    /// no abre ninguna ventana.
     func buscar() {
-        VentanaActualizacion.mostrar(self)
+        // Con una versión ya anunciada o descargada, no se pierde de vista.
+        guard responderVersion == nil, responderLista == nil else { return }
         guard let updater, updater.canCheckForUpdates else { return }
         estado = .buscando
         updater.checkForUpdates()
     }
 
-    /// Abre la ventana con la versión ya anunciada.
+    /// Lleva a Ajustes › Actualización de software (una sola ventana, la de
+    /// Ajustes) y busca si no hay ya una versión anunciada.
     func mostrar() {
-        VentanaActualizacion.mostrar(self)
+        if let modelo { AperturaAjustes.abrir(modelo, pagina: .actualizacion) }
         if responderVersion == nil && responderLista == nil, estado.version == nil || estado == .inactivo {
             buscar()
         }
@@ -275,7 +286,7 @@ extension Actualizaciones: SPUUserDriver {
                 responderVersion = reply
             }
         }
-        if !state.userInitiated && !VentanaActualizacion.visible {
+        if !state.userInitiated && !pantallaVisible {
             // Comprobación programada: aviso discreto, sin abrir ventanas.
             disponible = version.version
             VPNNotifications.shared.actualizacionDisponible(version: version.version)
@@ -353,7 +364,7 @@ extension Actualizaciones: SPUUserDriver {
     }
 
     func showUpdateInFocus() {
-        VentanaActualizacion.mostrar(self)
+        if let modelo { AperturaAjustes.abrir(modelo, pagina: .actualizacion) }
     }
 
     func dismissUpdateInstallation() {

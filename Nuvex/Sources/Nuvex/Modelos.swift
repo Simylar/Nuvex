@@ -60,6 +60,10 @@ struct Fallo: Equatable {
     let detalle: String
     let accion: Accion
 
+    /// La persona canceló el intento; no es un error que mostrar.
+    static let canceladaPorPersona = Fallo(titulo: "Conexión cancelada", detalle: "Cancelaste el intento de conexión.",
+                                           accion: .reintentar("Conectar"))
+
     /// Clasifica la salida del motor (openfortivpn y nuvexctl). La salida
     /// original queda en el registro para diagnóstico.
     static func interpretar(_ salida: String, codigoCancelado: Bool = false) -> Fallo {
@@ -135,6 +139,44 @@ enum EstadoUI: Equatable {
     case conectando
     case conectada
     case error(Fallo)
+}
+
+/// Qué se guardó y qué quedó pendiente al guardar conexiones. Guardar tiene
+/// tres pasos independientes y cualquiera puede fallar por separado.
+struct ResumenGuardado: Equatable {
+    enum Paso: Equatable {
+        case hecho
+        case enCurso
+        /// Se hará más adelante; el texto dice cuándo.
+        case pendiente(String)
+        case fallo(String)
+        case noAplica
+    }
+
+    var conexiones: Paso
+    var contrasenas: Paso = .noAplica
+    var ayudante: Paso = .noAplica
+
+    var pasos: [(titulo: String, paso: Paso)] {
+        [("Conexiones", conexiones), ("Contraseñas en el Llavero", contrasenas), ("Ayudante de red", ayudante)]
+            .filter { $0.paso != .noAplica }
+    }
+
+    var hayProblemas: Bool {
+        pasos.contains { if case .fallo = $0.paso { return true }; if case .pendiente = $0.paso { return true }; return false }
+    }
+
+    var enCurso: Bool { pasos.contains { $0.paso == .enCurso } }
+
+    /// Una línea para la barra de guardado.
+    var resumen: String {
+        if case .fallo = conexiones { return "No se guardaron los cambios" }
+        if case .fallo = contrasenas { return "Conexión guardada, pero falta una contraseña en el Llavero" }
+        if case .fallo = ayudante { return "Conexión guardada; falta autorizar el ayudante de red" }
+        if case .pendiente = ayudante { return "Conexión guardada; el ayudante se preparará al volver a conectar" }
+        if enCurso { return "Cambios guardados. Aplicando…" }
+        return ayudante == .hecho ? "Cambios guardados y aplicados." : "Cambios guardados."
+    }
 }
 
 // MARK: - Validación compartida por Ajustes y la bienvenida

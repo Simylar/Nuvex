@@ -59,6 +59,21 @@ struct CorreoChecks {
         precondition(ExtractorCodigo.correoDeIDToken("no-es-un-token") == nil)
         precondition(String(decoding: ExtractorCodigo.decodificarBase64URL("SG9sYQ")!, as: UTF8.self) == "Hola")
 
+        // Errores de Gmail: cada uno con su explicación y su salida.
+        func cuerpo(_ json: String) -> Data { Data(json.utf8) }
+        precondition(ProblemaGmail.clasificar(estado: 403, cuerpo: cuerpo(#"{"error":{"code":403,"message":"Gmail API has not been used in project 123 before or it is disabled.","status":"PERMISSION_DENIED","details":[{"reason":"SERVICE_DISABLED"}]}}"#)) == .apiDesactivada)
+        precondition(ProblemaGmail.clasificar(estado: 403, cuerpo: cuerpo(#"{"error":{"code":403,"errors":[{"reason":"accessNotConfigured"}]}}"#)) == .apiDesactivada)
+        precondition(ProblemaGmail.clasificar(estado: 403, cuerpo: cuerpo(#"{"error":{"code":403,"message":"Request had insufficient authentication scopes.","status":"PERMISSION_DENIED","details":[{"reason":"ACCESS_TOKEN_SCOPE_INSUFFICIENT"}]}}"#)) == .sinPermiso)
+        precondition(ProblemaGmail.clasificar(estado: 429, cuerpo: cuerpo("{}")) == .limite)
+        precondition(ProblemaGmail.clasificar(estado: 403, cuerpo: cuerpo(#"{"error":{"errors":[{"reason":"userRateLimitExceeded"}]}}"#)) == .limite)
+        precondition(ProblemaGmail.clasificar(estado: 500, cuerpo: cuerpo("no es json")) == .servidor(500))
+        precondition(ProblemaGmail.clasificarToken("invalid_grant") == .sesionCaducada)
+        precondition(ProblemaGmail.clasificarToken("invalid_client") == .clienteNoValido)
+        precondition(ProblemaGmail.clasificar(URLError(.notConnectedToInternet)) == .sinRed)
+        precondition(ProblemaGmail.apiDesactivada.definitivo && ProblemaGmail.sesionCaducada.definitivo)
+        precondition(!ProblemaGmail.sinRed.definitivo && !ProblemaGmail.limite.definitivo)
+        precondition(ProblemaGmail.servidor(0).detalle.hasPrefix("Google devolvió un error inesperado."))
+
         print("Correo: comprobaciones superadas")
     }
 }

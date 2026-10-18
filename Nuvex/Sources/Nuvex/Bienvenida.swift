@@ -194,16 +194,22 @@ struct BienvenidaView: View {
 
     private var listo: some View {
         VStack(spacing: 14) {
-            Image(systemName: avisoAyudante == nil ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+            let conAviso = avisoAyudante != nil || modelo.resumenGuardado?.hayProblemas == true
+            Image(systemName: conAviso ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
                 .font(.system(size: 48))
-                .foregroundStyle(avisoAyudante == nil ? Color.green : Color.orange)
-            Text(avisoAyudante == nil ? "Todo listo" : "Conexión guardada")
+                .foregroundStyle(conAviso ? Color.orange : Color.green)
+            Text(conAviso ? "Conexión guardada" : "Todo listo")
                 .font(.title2).fontWeight(.bold)
             Text("Encontrarás Nuvex en la barra de menús, arriba a la derecha. Desde ahí conectas y desconectas con un clic.")
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-            if let avisoAyudante {
+            if let resumen = modelo.resumenGuardado, resumen.hayProblemas {
+                ListaResumenGuardado(modelo: modelo, resumen: resumen)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            } else if let avisoAyudante {
                 Text("\(avisoAyudante) Nuvex lo intentará de nuevo al conectar.")
                     .font(.callout)
                     .foregroundStyle(.orange)

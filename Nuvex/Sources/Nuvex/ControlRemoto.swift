@@ -105,6 +105,9 @@ final class ControlRemoto {
                                   conexiones: conexiones().filter { $0.id == vpn.id })
             case .error(let fallo):
                 return .resultado(salida(de: fallo), vpn: vpn.id, estado: "error", titulo: fallo.titulo, detalle: fallo.detalle)
+            case .desconectada where modelo.canceladas.contains(vpn.id):
+                return .resultado(.error, vpn: vpn.id, estado: "desconectada",
+                                  titulo: "Se canceló la conexión desde la Mac")
             case .desconectada where Date().timeIntervalSince(inicio) > 3 && !modelo.instalandoAyudante
                                      && SolicitudCodigo.abiertas[vpn.id] == nil:
                 return .resultado(.error, vpn: vpn.id, estado: "desconectada", titulo: "La conexión no llegó a iniciarse")

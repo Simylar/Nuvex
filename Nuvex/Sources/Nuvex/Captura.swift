@@ -64,6 +64,22 @@ enum Captura {
         guardar(PanelCodigoView(solicitud: .muestra(nombre: "Oficina central", codigo: "482913",
                                                     correo: .encontrado(remitente: "noreply@empresa.com"), automatico: true)),
                 nombre: "codigo-recibido-oscuro", en: carpeta, oscuro: true)
+        guardar(PanelCodigoView(solicitud: .muestra(nombre: "Oficina central",
+                                                    correo: .buscando(desde: Date().addingTimeInterval(-40), cuenta: "samuel@gmail.com",
+                                                                      aviso: .sinRed))),
+                nombre: "codigo-sin-red", en: carpeta, oscuro: false)
+        guardar(PanelCodigoView(solicitud: .muestra(nombre: "Oficina central", correo: .problema(.apiDesactivada))),
+                nombre: "codigo-api-desactivada", en: carpeta, oscuro: false)
+        guardar(PanelCodigoView(solicitud: .muestra(nombre: "Oficina central", correo: .problema(.sesionCaducada))),
+                nombre: "codigo-sesion-caducada-oscuro", en: carpeta, oscuro: true)
+        modelo.resumenGuardado = ResumenGuardado(conexiones: .hecho, contrasenas: .hecho,
+                                                 ayudante: .fallo("No se pudo instalar el ayudante: se canceló la autorización de macOS. Nuvex volverá a pedirlo al conectar."))
+        guardar(ListaResumenGuardado(modelo: modelo, resumen: modelo.resumenGuardado!).padding(16).frame(width: 380).background(.background),
+                nombre: "guardado-resumen", en: carpeta, oscuro: false)
+        borradores.seleccion = .conexion("oficina")
+        guardar(ConfigurationView(modelo: modelo, borradores: borradores).frame(width: 820, height: 640),
+                nombre: "ajustes-guardado-pendiente", en: carpeta, oscuro: false)
+        modelo.resumenGuardado = nil
         guardar(VistaExportar(modelo: modelo, cerrar: {}, seleccion: Set(modelo.profiles.prefix(3).map(\.id))),
                 nombre: "exportar-claro", en: carpeta, oscuro: false)
         for oscuro in [false, true] {
@@ -159,7 +175,8 @@ extension VPNModel {
             perfil("sur", "Sucursal Sur", "sur.example:443", "usuario.demo"),
         ]
         passwordStatuses = ["oficina": .saved, "prepa": .saved, "norte": .saved, "lab": .saved, "sur": .missing]
-        estados = ["norte": .error(Fallo.interpretar("Could not authenticate to gateway"))]
+        estados = ["norte": .error(Fallo.interpretar("Could not authenticate to gateway")), "prepa": .conectando]
+        inicioConexion = ["prepa": Date().addingTimeInterval(-14)]
         desconexiones = ["lab": Calendar.current.date(bySettingHour: 10, minute: 31, second: 0, of: Date()) ?? Date()]
     }
 }

@@ -4,23 +4,27 @@ import Darwin
 // MARK: - Ejecucion del motor
 
 extension VPNModel {
-    struct Resultado { let salida: String; let error: String; let codigo: Int32 }
+    typealias Resultado = Proceso.Resultado
 
+    /// Tiempo máximo de cada orden del motor. `install-helper` no tiene límite:
+    /// espera al diálogo de administrador de macOS, que controla la persona.
+    nonisolated static func limite(para args: [String]) -> TimeInterval? {
+        switch args.first {
+        case "list": return 20
+        case "stop": return 30
+        case "config": return args.dropFirst().first == "set-all" ? 45 : 15
+        case "install-helper": return nil
+        default: return 30
+        }
+    }
+
+    /// Ejecuta una orden del motor con su tiempo límite.
     nonisolated static func ejecutar(args: [String]) throws -> Resultado {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: Paths.nuvexctl)
-        p.arguments = args
-        p.environment = Paths.environment
-        let out = Pipe(), err = Pipe()
-        p.standardOutput = out
-        p.standardError = err
-        try p.run()
-        let o = out.fileHandleForReading.readDataToEndOfFile()
-        let e = err.fileHandleForReading.readDataToEndOfFile()
-        p.waitUntilExit()
-        return Resultado(salida: String(data: o, encoding: .utf8) ?? "",
-                         error: String(data: e, encoding: .utf8) ?? "",
-                         codigo: p.terminationStatus)
+        try ejecutar(args: args, limite: limite(para: args))
+    }
+
+    nonisolated static func ejecutar(args: [String], limite: TimeInterval?) throws -> Resultado {
+        try Proceso.ejecutar(Paths.nuvexctl, args: args, entorno: Paths.environment, limite: limite)
     }
 
     /// Conecta vigilando la salida del ayudante. Cuando el servidor pide el
@@ -28,22 +32,32 @@ extension VPNModel {
     nonisolated static func conectarProceso(id: String, name: String) async -> Result<Void, ErrorVPN> {
         // Los correos con el código se buscan a partir de este momento.
         let inicioIntento = Date()
+        let acumulado = Acumulador()
+        // Registrado desde ya: se puede cancelar mientras se lee el Llavero.
+        IntentosConexion.registrar(id, proceso: nil, acumulado: acumulado)
         let password: String
         do { password = try await leerDelLlavero(id: id, name: name) }
-        catch let error as ErrorVPN { return .failure(error) }
-        catch { return .failure(ErrorVPN(mensaje: error.localizedDescription)) }
+        catch let error as ErrorVPN { IntentosConexion.retirar(id, acumulado: acumulado); return .failure(error) }
+        catch {
+            IntentosConexion.retirar(id, acumulado: acumulado)
+            return .failure(ErrorVPN(mensaje: error.localizedDescription))
+        }
+        if acumulado.detenidoPorPersona {
+            IntentosConexion.retirar(id, acumulado: acumulado)
+            return .failure(ErrorVPN(mensaje: "Conexión cancelada.", fallo: .canceladaPorPersona))
+        }
         return await withCheckedContinuation { cont in
             let p = Process()
             p.executableURL = URL(fileURLWithPath: Paths.nuvexctl)
             p.arguments = ["connect", id, "--password-stdin"]
             p.environment = Paths.environment
 
-            let entrada = Pipe(), salida = Pipe(), errores = Pipe()
+            // La salida normal va a la misma tubería que los errores: así se
+            // lee entera y no puede llenarse sin que nadie la vacíe.
+            let entrada = Pipe(), errores = Pipe()
             p.standardInput = entrada
-            p.standardOutput = salida
+            p.standardOutput = errores
             p.standardError = errores
-
-            let acumulado = Acumulador()
 
             errores.fileHandleForReading.readabilityHandler = { fh in
                 let d = fh.availableData
@@ -75,18 +89,44 @@ extension VPNModel {
                 try p.run()
                 try? entrada.fileHandleForWriting.write(contentsOf: Data((password + "\n").utf8))
             } catch {
+                IntentosConexion.retirar(id, acumulado: acumulado)
                 cont.resume(returning: .failure(ErrorVPN(mensaje: "no se pudo ejecutar nuvexctl.sh: \(error.localizedDescription)")))
                 return
+            }
+            IntentosConexion.registrar(id, proceso: p, acumulado: acumulado)
+            // Cancelado justo mientras arrancaba.
+            if acumulado.detenidoPorPersona {
+                DispatchQueue.global(qos: .userInitiated).async { IntentosConexion.detener(id, proceso: p) }
+            }
+
+            // El ayudante abandona el intento a los 300 s. Si por lo que sea el
+            // proceso sigue vivo después, se detiene para no quedar «conectando».
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + IntentosConexion.limite) {
+                guard p.isRunning else { return }
+                Log.escribir("el intento de conectar \(id) superó \(Int(IntentosConexion.limite)) s; se detiene")
+                acumulado.marcarAgotado()
+                IntentosConexion.detener(id, proceso: p)
             }
 
             DispatchQueue.global(qos: .userInitiated).async {
                 p.waitUntilExit()
+                IntentosConexion.retirar(id, acumulado: acumulado)
                 errores.fileHandleForReading.readabilityHandler = nil
                 // Si el motor terminó con la ventana del código abierta, se cierra.
                 Task { @MainActor in SolicitudCodigo.abiertas[id]?.cancelar() }
                 try? entrada.fileHandleForWriting.close()
-                if p.terminationStatus == 0 {
+                // Primero la cancelación: si el túnel subió justo al cancelar,
+                // `stop` ya lo detuvo y no debe darse por conectado.
+                if acumulado.detenidoPorPersona {
+                    Log.escribir("intento de conectar \(id) cancelado")
+                    cont.resume(returning: .failure(ErrorVPN(mensaje: "Conexión cancelada.", fallo: .canceladaPorPersona)))
+                } else if p.terminationStatus == 0 {
                     cont.resume(returning: .success(()))
+                } else if acumulado.agotado {
+                    cont.resume(returning: .failure(ErrorVPN(mensaje: "La conexión tardó demasiado.", fallo: Fallo(
+                        titulo: "La conexión tardó demasiado",
+                        detalle: "El servidor no completó la conexión en \(Int(IntentosConexion.limite / 60)) minutos y Nuvex detuvo el intento.",
+                        accion: .reintentar("Reintentar")))))
                 } else {
                     let output = acumulado.texto
                     Log.escribir("fallo al conectar \(id) (código \(p.terminationStatus)): \(output.split(separator: "\n").suffix(8).joined(separator: " | "))")
@@ -106,6 +146,8 @@ final class Acumulador: @unchecked Sendable {
     private var buffer = ""
     private var yaPedido = false
     private var codigoCancelado = false
+    private var porPersona = false
+    private var porTiempo = false
 
     var texto: String {
         cerrojo.lock(); defer { cerrojo.unlock() }
@@ -122,6 +164,27 @@ final class Acumulador: @unchecked Sendable {
         codigoCancelado = true
     }
 
+    /// La persona pulsó «Cancelar» mientras se conectaba.
+    var detenidoPorPersona: Bool {
+        cerrojo.lock(); defer { cerrojo.unlock() }
+        return porPersona
+    }
+
+    func marcarDetenidoPorPersona() {
+        cerrojo.lock(); defer { cerrojo.unlock() }
+        porPersona = true
+    }
+
+    var agotado: Bool {
+        cerrojo.lock(); defer { cerrojo.unlock() }
+        return porTiempo
+    }
+
+    func marcarAgotado() {
+        cerrojo.lock(); defer { cerrojo.unlock() }
+        porTiempo = true
+    }
+
     /// Devuelve true la primera vez que aparece el prompt del codigo.
     func anadir(_ s: String) -> Bool {
         cerrojo.lock(); defer { cerrojo.unlock() }
@@ -133,6 +196,59 @@ final class Acumulador: @unchecked Sendable {
             return true
         }
         return false
+    }
+}
+
+/// Intentos de conexión en marcha, para poder cancelarlos. Cancelar es
+/// seguro: `stop` detiene el motor del túnel a medio establecer y el proceso
+/// que lo vigila termina solo.
+enum IntentosConexion {
+    /// Algo más que los 300 s del ayudante, que es quien decide primero.
+    static let limite: TimeInterval = 330
+
+    private static let cerrojo = NSLock()
+    nonisolated(unsafe) private static var enCurso: [String: (proceso: Process?, acumulado: Acumulador)] = [:]
+
+    /// Cancelaciones pedidas antes de que el intento llegara a registrarse.
+    nonisolated(unsafe) private static var pendientes: Set<String> = []
+
+    /// Se llama justo antes de lanzar un intento nuevo.
+    static func preparar(_ id: String) {
+        cerrojo.lock(); defer { cerrojo.unlock() }
+        pendientes.remove(id)
+    }
+
+    static func registrar(_ id: String, proceso: Process?, acumulado: Acumulador) {
+        cerrojo.lock(); defer { cerrojo.unlock() }
+        enCurso[id] = (proceso, acumulado)
+        if pendientes.remove(id) != nil { acumulado.marcarDetenidoPorPersona() }
+    }
+
+    static func retirar(_ id: String, acumulado: Acumulador) {
+        cerrojo.lock(); defer { cerrojo.unlock() }
+        if enCurso[id]?.acumulado === acumulado { enCurso[id] = nil }
+    }
+
+    /// Cancela el intento de una conexión.
+    static func cancelar(_ id: String) {
+        cerrojo.lock()
+        let intento = enCurso[id]
+        if intento == nil { pendientes.insert(id) }
+        cerrojo.unlock()
+        guard let intento else { return }
+        intento.acumulado.marcarDetenidoPorPersona()
+        // Si aún no arrancó el proceso, el intento se detiene antes de lanzarlo.
+        if let proceso = intento.proceso {
+            DispatchQueue.global(qos: .userInitiated).async { detener(id, proceso: proceso) }
+        }
+    }
+
+    /// Detiene el túnel a medio establecer y, si hace falta, el proceso que lo vigila.
+    static func detener(_ id: String, proceso: Process) {
+        _ = try? VPNModel.ejecutar(args: ["stop", id])
+        // Sin el motor, el vigilante termina en un segundo; si no, se le ayuda.
+        for _ in 0..<5 where proceso.isRunning { Thread.sleep(forTimeInterval: 1) }
+        if proceso.isRunning { proceso.terminate() }
     }
 }
 

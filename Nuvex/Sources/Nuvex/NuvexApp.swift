@@ -25,6 +25,11 @@ enum AppActual {
         }
     }
 
+    static func abrirAjustes(pagina: PaginaAjustes) {
+        guard let modelo else { return }
+        AperturaAjustes.abrir(modelo, pagina: pagina)
+    }
+
     static func registrar(_ modelo: VPNModel) {
         self.modelo = modelo
         let anteriores = pendientes

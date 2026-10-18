@@ -218,7 +218,8 @@ struct SeccionCodigoCorreo: View {
                     prueba = "No hay correos de ese remitente con un código en los últimos 7 días."
                 }
             } catch {
-                prueba = error.localizedDescription
+                let problema = LectorGmail.problema(de: error)
+                prueba = "\(problema.titulo). \(problema.detalle)"
             }
         }
     }

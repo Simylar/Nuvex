@@ -15,14 +15,19 @@ struct CodigoRecibido: Equatable, Sendable {
 final class SolicitudCodigo: ObservableObject, Identifiable {
     enum EstadoCorreo: Equatable {
         case noConfigurado
-        case buscando(desde: Date, cuenta: String)
+        /// `aviso`: un problema pasajero mientras se sigue buscando.
+        case buscando(desde: Date, cuenta: String, aviso: ProblemaGmail? = nil)
         case encontrado(remitente: String)
         case sinResultado(String)
+        /// No se pudo leer el correo; la persona puede resolverlo y reintentar.
+        case problema(ProblemaGmail)
     }
 
     /// Fuente automática de códigos (la añade la lectura de Gmail).
     /// Devuelve nil si no hay nada configurado para esa conexión.
-    typealias Lector = @MainActor (_ perfilID: String, _ desde: Date) -> (cuenta: String, tarea: Task<CodigoRecibido?, Never>)?
+    typealias Lector = @MainActor (_ perfilID: String, _ desde: Date,
+                                   _ alCambiar: @escaping @MainActor (ProblemaGmail?) -> Void)
+        -> (cuenta: String, tarea: Task<LectorGmail.Resultado, Never>)?
     static var lector: Lector?
 
     /// Solicitudes abiertas, por conexión, para que `nuvex code` pueda responder.
@@ -39,7 +44,8 @@ final class SolicitudCodigo: ObservableObject, Identifiable {
 
     private var continuacion: CheckedContinuation<String?, Never>?
     private var tareas: [Task<Void, Never>] = []
-    private var lectura: Task<CodigoRecibido?, Never>?
+    private var lectura: Task<LectorGmail.Resultado, Never>?
+    private var tareaLectura: Task<Void, Never>?
 
     /// Espera el código. Devuelve nil si se cancela o se agota el tiempo.
     static func obtener(perfilID: String, nombre: String, inicio: Date, limite: Duration = .seconds(280)) async -> String? {
@@ -70,19 +76,7 @@ final class SolicitudCodigo: ObservableObject, Identifiable {
     }
 
     private func empezar(limite: Duration) {
-        if let (cuenta, tarea) = Self.lector?(perfilID, inicio) {
-            estadoCorreo = .buscando(desde: Date(), cuenta: cuenta)
-            tareas.append(Task { [weak self] in
-                let recibido = await tarea.value
-                guard let self, !Task.isCancelled else { return }
-                if let recibido {
-                    self.usarDelCorreo(recibido)
-                } else {
-                    self.estadoCorreo = .sinResultado("No llegó el correo con el código. Escríbelo a mano.")
-                }
-            })
-            lectura = tarea
-        }
+        empezarLectura()
         // El ayudante abandona el intento a los 300 s; se cierra un poco antes.
         tareas.append(Task { [weak self] in
             try? await Task.sleep(for: limite)
@@ -91,6 +85,38 @@ final class SolicitudCodigo: ObservableObject, Identifiable {
             self?.resolver(nil)
         })
         VentanaCodigo.mostrar(self)
+    }
+
+    /// Busca el código en el correo. Se puede repetir tras resolver un problema.
+    private func empezarLectura() {
+        lectura?.cancel()
+        tareaLectura?.cancel()
+        let alCambiar: @MainActor (ProblemaGmail?) -> Void = { [weak self] aviso in
+            guard let self, case .buscando(let desde, let cuenta, _) = self.estadoCorreo else { return }
+            self.estadoCorreo = .buscando(desde: desde, cuenta: cuenta, aviso: aviso)
+        }
+        guard let (cuenta, tarea) = Self.lector?(perfilID, inicio, alCambiar) else { return }
+        estadoCorreo = .buscando(desde: Date(), cuenta: cuenta)
+        lectura = tarea
+        tareaLectura = Task { [weak self] in
+            let resultado = await tarea.value
+            guard let self, !Task.isCancelled, self.continuacion != nil else { return }
+            switch resultado {
+            case .codigo(let recibido):
+                self.usarDelCorreo(recibido)
+            case .sinCorreo:
+                self.estadoCorreo = .sinResultado("No llegó el correo con el código. Escríbelo a mano o vuelve a buscar.")
+            case .problema(let problema):
+                self.estadoCorreo = .problema(problema)
+            }
+        }
+    }
+
+    /// Vuelve a buscar en el correo (tras iniciar sesión, activar la API…).
+    func reintentarCorreo() {
+        guard continuacion != nil else { return }
+        envioAutomatico = nil
+        empezarLectura()
     }
 
     private func usarDelCorreo(_ recibido: CodigoRecibido) {
@@ -134,6 +160,8 @@ final class SolicitudCodigo: ObservableObject, Identifiable {
         tareas.removeAll()
         lectura?.cancel()
         lectura = nil
+        tareaLectura?.cancel()
+        tareaLectura = nil
         codigo = ""
         envioAutomatico = nil
         if Self.abiertas[perfilID] === self { Self.abiertas[perfilID] = nil }
@@ -249,16 +277,24 @@ struct PanelCodigoView: View {
         switch solicitud.estadoCorreo {
         case .noConfigurado:
             EmptyView()
-        case .buscando(let desde, let cuenta):
-            TimelineView(.periodic(from: desde, by: 1)) { contexto in
-                let segundos = max(0, Int(contexto.date.timeIntervalSince(desde)))
-                HStack(spacing: 6) {
-                    ProgressView().controlSize(.small)
-                    Text("Buscando en \(cuenta)… \(segundos / 60):\(String(format: "%02d", segundos % 60))")
-                        .monospacedDigit()
+        case .buscando(let desde, let cuenta, let aviso):
+            VStack(spacing: 4) {
+                TimelineView(.periodic(from: desde, by: 1)) { contexto in
+                    let segundos = max(0, Int(contexto.date.timeIntervalSince(desde)))
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text("Buscando en \(cuenta)… \(segundos / 60):\(String(format: "%02d", segundos % 60))")
+                            .monospacedDigit()
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                if let aviso {
+                    Text("\(aviso.titulo). Reintentando…")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .help(aviso.detalle)
+                }
             }
         case .encontrado(let remitente):
             if solicitud.envioAutomatico != nil {
@@ -274,8 +310,34 @@ struct PanelCodigoView: View {
                     .font(.caption).foregroundStyle(.green)
             }
         case .sinResultado(let mensaje):
-            Label(mensaje, systemImage: "envelope.badge")
-                .font(.caption).foregroundStyle(.orange)
+            VStack(spacing: 4) {
+                Label(mensaje, systemImage: "envelope.badge")
+                    .font(.caption).foregroundStyle(.orange)
+                    .multilineTextAlignment(.center)
+                Button("Volver a buscar") { solicitud.reintentarCorreo() }
+                    .buttonStyle(.link).font(.caption)
+            }
+        case .problema(let problema):
+            VStack(spacing: 4) {
+                Label(problema.titulo, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption.weight(.semibold)).foregroundStyle(.orange)
+                Text(problema.detalle + " Mientras tanto, puedes escribir el código.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 12) {
+                    switch problema.accion {
+                    case .cuentaGoogle:
+                        Button("Abrir Cuenta de Google") { AppActual.abrirAjustes(pagina: .cuentaGoogle) }
+                    case .activarAPI:
+                        Button("Activar la Gmail API") { NSWorkspace.shared.open(ProblemaGmail.consolaGmailAPI) }
+                    case .reintentar:
+                        EmptyView()
+                    }
+                    Button("Volver a buscar") { solicitud.reintentarCorreo() }
+                }
+                .buttonStyle(.link).font(.caption)
+            }
         }
     }
 }

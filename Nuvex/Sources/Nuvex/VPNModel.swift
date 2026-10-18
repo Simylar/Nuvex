@@ -15,7 +15,11 @@ final class VPNModel: ObservableObject {
     @Published var instalandoAyudante = false
     @Published var guardandoConfiguracion = false
     @Published var mensajeConfiguracion: String?
+    /// Resultado del último guardado, paso a paso.
+    @Published var resumenGuardado: ResumenGuardado?
     @Published var settingsTargetID: String?
+    /// Página de Ajustes que debe mostrarse al abrir la ventana.
+    @Published var paginaDestino: PaginaAjustes?
     @Published private(set) var configuracionCargada = false
     /// Los datos los guardó una versión más nueva de Nuvex: no se modifican.
     @Published private(set) var datosMasNuevos = false
@@ -34,6 +38,12 @@ final class VPNModel: ObservableObject {
     private var conexionPendiente: String?
     /// Reconexiones pedidas desde el aviso: si fallan, el aviso lo dice.
     private var reconexionesDesdeAviso: Set<String> = []
+    /// Cuándo empezó cada intento de conexión en curso, para mostrar el avance.
+    @Published var inicioConexion: [String: Date] = [:]
+    /// Conexiones que esperan el código de verificación.
+    @Published private(set) var esperandoCodigo: Set<String> = []
+    /// Intentos que la persona canceló (hasta el siguiente intento).
+    private(set) var canceladas: Set<String> = []
 
     /// Estado vacío sin consultar el motor; lo usan las capturas de depuración.
     init(sinArrancar: Void) {}
@@ -64,14 +74,19 @@ final class VPNModel: ObservableObject {
             Task { @MainActor in self?.actualizaciones?.mostrar() }
         }
         VPNNotifications.shared.start()
+        NotificationCenter.default.addObserver(forName: .solicitudCodigoCambio, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.esperandoCodigo = Set(SolicitudCodigo.abiertas.keys)
+            }
+        }
         arrancar()
         cargarConfiguracion()
         // El panel del código busca en Gmail si la conexión lo tiene configurado.
-        SolicitudCodigo.lector = { perfilID, desde in
+        SolicitudCodigo.lector = { perfilID, desde, alCambiar in
             guard let config = Preferencias.shared.ajustes.correo[perfilID],
                   !config.remitente.trimmingCharacters(in: .whitespaces).isEmpty,
                   let cuenta = CuentaGoogle.shared.correo else { return nil }
-            return (cuenta, Task { await LectorGmail.esperar(config, desde: desde) })
+            return (cuenta, Task { await LectorGmail.esperar(config, desde: desde, alCambiar: alCambiar) })
         }
         let control = ControlRemoto(modelo: self)
         control.iniciar()
@@ -238,6 +253,7 @@ final class VPNModel: ObservableObject {
         }
         guard estado(vpn) != .conectando else { return }
         desconexiones.removeValue(forKey: vpn.id)
+        canceladas.remove(vpn.id)
         if !vpn.helperReady {
             instalarAyudante(conectarDespues: vpn)
             return
@@ -248,14 +264,22 @@ final class VPNModel: ObservableObject {
     private func iniciarConexion(_ vpn: VPNStatus) {
         guard estado(vpn) != .conectando else { return }
         estados[vpn.id] = .conectando
+        inicioConexion[vpn.id] = Date()
+        canceladas.remove(vpn.id)
         ultimoError = nil
+        IntentosConexion.preparar(vpn.id)
         Task.detached(priority: .userInitiated) {
             let resultado = await Self.conectarProceso(id: vpn.id, name: vpn.name)
             await MainActor.run {
+                self.inicioConexion.removeValue(forKey: vpn.id)
                 switch resultado {
                 case .success:
                     self.estados[vpn.id] = .conectada
                     self.reconexionesDesdeAviso.remove(vpn.id)
+                case .failure(let e) where e.fallo == .canceladaPorPersona:
+                    self.estados.removeValue(forKey: vpn.id)
+                    self.reconexionesDesdeAviso.remove(vpn.id)
+                    self.canceladas.insert(vpn.id)
                 case .failure(let e):
                     self.estados[vpn.id] = .error(e.falloParaFila)
                     if self.reconexionesDesdeAviso.remove(vpn.id) != nil {
@@ -265,6 +289,15 @@ final class VPNModel: ObservableObject {
                 self.refrescar()
             }
         }
+    }
+
+    /// Cancela un intento de conexión en curso. Detiene el túnel a medio
+    /// establecer; las VPN ya conectadas no se tocan.
+    func cancelarConexion(_ id: String) {
+        guard estados[id] == .conectando else { return }
+        Log.escribir("cancelando el intento de conectar \(id)")
+        IntentosConexion.cancelar(id)
+        SolicitudCodigo.abiertas[id]?.cancelar()
     }
 
     func reconectarDesdeAviso(_ id: String) {
@@ -304,7 +337,10 @@ final class VPNModel: ObservableObject {
 
     func instalarAyudante(desdeGuardado: Bool = false, conectarDespues vpn: VPNStatus? = nil,
                          errorPrevio: String? = nil) {
-        guard !instalandoAyudante else { return }
+        guard !instalandoAyudante else {
+            if desdeGuardado { resumenGuardado?.ayudante = .pendiente("Nuvex lo preparará la próxima vez que conectes.") }
+            return
+        }
         instalandoAyudante = true
         mensajeAyudante = nil
         ultimoError = errorPrevio
@@ -325,6 +361,8 @@ final class VPNModel: ObservableObject {
                     if desdeGuardado {
                         self.mensajeConfiguracion = result.codigo == 0 ? "Cambios guardados y aplicados." :
                             "La configuración se guardó; el ayudante se actualizará al conectar."
+                        self.resumenGuardado?.ayudante = result.codigo == 0 ? .hecho
+                            : .fallo(installError + " Nuvex volverá a pedirlo al conectar.")
                     }
                     if result.codigo != 0, let vpn {
                         self.estados[vpn.id] = .error(Fallo(titulo: "No se preparó el ayudante",
@@ -343,6 +381,7 @@ final class VPNModel: ObservableObject {
                         .compactMap { $0 }.joined(separator: " ")
                     if desdeGuardado {
                         self.mensajeConfiguracion = "La configuración se guardó; el ayudante se actualizará al conectar."
+                        self.resumenGuardado?.ayudante = .fallo(error.localizedDescription)
                     }
                 }
             }
@@ -489,6 +528,7 @@ final class VPNModel: ObservableObject {
         let canInstallNow = !hayAlgunaConectada
         guardandoConfiguracion = true
         mensajeConfiguracion = nil
+        resumenGuardado = ResumenGuardado(conexiones: .enCurso)
         ultimoError = nil
         Task.detached(priority: .userInitiated) {
             var stagedMigrations: [VPNProfile] = []
@@ -544,8 +584,16 @@ final class VPNModel: ObservableObject {
                         keychainErrors.append("No se pudo confirmar la contraseña de \(profile.name) en el Llavero.")
                     }
                 }
+                let pasoContrasenas: ResumenGuardado.Paso = !keychainErrors.isEmpty
+                    ? .fallo(keychainErrors.joined(separator: " ") + " Vuelve a pulsar Guardar para reintentarlo.")
+                    : savedPasswordIDs.isEmpty ? .noAplica : .hecho
+                let pasoAyudante: ResumenGuardado.Paso = !shouldInstall ? .noAplica
+                    : canInstallNow ? .enCurso
+                    : .pendiente("Hay una VPN conectada; Nuvex lo preparará la próxima vez que conectes.")
                 await MainActor.run {
                     self.guardandoConfiguracion = false
+                    self.resumenGuardado = ResumenGuardado(conexiones: .hecho, contrasenas: pasoContrasenas,
+                                                           ayudante: pasoAyudante)
                     let keychainError = keychainErrors.isEmpty ? nil :
                         "Se guardaron las conexiones, pero hubo errores en el Llavero: \(keychainErrors.joined(separator: " "))"
                     self.ultimoError = keychainError
@@ -578,6 +626,7 @@ final class VPNModel: ObservableObject {
                 await MainActor.run {
                     self.guardandoConfiguracion = false
                     self.mensajeConfiguracion = nil
+                    self.resumenGuardado = ResumenGuardado(conexiones: .fallo(failure))
                     self.ultimoError = "No se guardaron los cambios: \(failure)"
                 }
             }

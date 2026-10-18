@@ -164,8 +164,9 @@ struct EtiquetaBarra: View {
 enum AperturaAjustes {
     static var accion: OpenSettingsAction?
 
-    static func abrir(_ modelo: VPNModel, conexion id: String? = nil) {
+    static func abrir(_ modelo: VPNModel, conexion id: String? = nil, pagina: PaginaAjustes? = nil) {
         if let id { modelo.settingsTargetID = id }
+        if let pagina { modelo.paginaDestino = pagina }
         NSApp.activate(ignoringOtherApps: true)
         accion?()
     }

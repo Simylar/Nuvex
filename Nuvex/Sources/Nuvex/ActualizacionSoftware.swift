@@ -1,31 +1,6 @@
 import AppKit
 import SwiftUI
 
-/// Ventana «Actualización de software». Se abre desde el panel, el aviso de
-/// macOS o el menú, y también está en Ajustes.
-@MainActor
-enum VentanaActualizacion {
-    private static var ventana: NSWindow?
-
-    static var visible: Bool { ventana?.isVisible == true }
-
-    static func mostrar(_ actualizaciones: Actualizaciones) {
-        let ventana = ventana ?? {
-            let v = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 600),
-                             styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
-            v.title = "Actualización de software"
-            v.isReleasedWhenClosed = false
-            v.contentMinSize = NSSize(width: 480, height: 460)
-            v.contentViewController = NSHostingController(rootView: ActualizacionSoftwareView(actualizaciones: actualizaciones))
-            v.center()
-            return v
-        }()
-        Self.ventana = ventana
-        NSApp.activate(ignoringOtherApps: true)
-        ventana.makeKeyAndOrderFront(nil)
-    }
-}
-
 /// Logotipo de Nuvex en las pantallas de actualización y novedades.
 struct IconoNuvex: View {
     var lado: CGFloat = 64
@@ -34,6 +9,8 @@ struct IconoNuvex: View {
     }
 }
 
+/// «Actualización de software», en Ajustes. Es el único sitio donde se
+/// muestra: el menú, el panel y los avisos llevan aquí.
 struct ActualizacionSoftwareView: View {
     @ObservedObject var actualizaciones: Actualizaciones
 
@@ -68,6 +45,8 @@ struct ActualizacionSoftwareView: View {
         }
         .formStyle(.grouped)
         .animation(.snappy(duration: 0.25), value: actualizaciones.estado)
+        .onAppear { actualizaciones.pantallaAparecio() }
+        .onDisappear { actualizaciones.pantallaDesaparecio() }
     }
 
     // MARK: Tarjeta principal

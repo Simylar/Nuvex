@@ -86,6 +86,28 @@ fi
 
 # MARK: Compilación y publicación (local, simulada o en GitHub Actions)
 
+# Motor: si su código y OpenSSL no cambiaron desde la versión anterior, se
+# reutilizan los bytes ya publicados. Compilarlo en otra máquina daría otro
+# hash y obligaría a todos a volver a autorizar el ayudante.
+if [ -n "$ANTERIOR" ] && git diff --quiet "$ANTERIOR" HEAD -- vendor/openfortivpn; then
+  MOTOR_PREVIO="$(gh release download "$ANTERIOR" --repo "$REPO" --pattern motor.sha256 --output - 2>/dev/null | head -1 || true)"
+  OPENSSL_ACTUAL="$(brew list --versions openssl@3 | awk '{print $2}')"
+  if [ -n "$MOTOR_PREVIO" ] && [ "${MOTOR_PREVIO#* }" = "openssl-$OPENSSL_ACTUAL" ]; then
+    mkdir -p "$SALIDA"
+    ls "$SALIDA"/Nuvex-"${ANTERIOR#v}".zip >/dev/null 2>&1 \
+      || gh release download "$ANTERIOR" --repo "$REPO" --pattern "Nuvex-${ANTERIOR#v}.zip" --dir "$SALIDA" \
+      || falla "no se pudo descargar Nuvex-${ANTERIOR#v}.zip para reutilizar su motor"
+    MOTOR_EXTRAIDO="$(mktemp -d)"
+    ditto -x -k "$SALIDA/Nuvex-${ANTERIOR#v}.zip" "$MOTOR_EXTRAIDO"
+    export NUVEX_MOTOR_PUBLICADO="$MOTOR_EXTRAIDO/Nuvex.app/Contents/Resources"
+    [ "$(shasum -a 256 "$NUVEX_MOTOR_PUBLICADO/openfortivpn" | cut -d' ' -f1)" = "${MOTOR_PREVIO%% *}" ] \
+      || falla "el motor de Nuvex-${ANTERIOR#v}.zip no coincide con su motor.sha256"
+    codesign --verify --strict "$NUVEX_MOTOR_PUBLICADO/openfortivpn" \
+      || falla "la firma del motor de Nuvex-${ANTERIOR#v}.zip no es válida"
+    paso "Motor reutilizado de $ANTERIOR (${MOTOR_PREVIO%% *})"
+  fi
+fi
+
 if [ "$MODO" != ci ]; then
   security find-identity -p codesigning | grep -qF "\"$IDENTIDAD\"" \
     || falla "falta la identidad «$IDENTIDAD»; ejecuta scripts/configurar-publicacion.sh"

@@ -45,7 +45,15 @@ MOTOR_CLAVE="$({
 } | shasum -a 256 | cut -c1-16)"
 MOTOR_CACHE="$ROOT/.build-cache/motor/$MOTOR_CLAVE"
 
-if [ -f "$MOTOR_CACHE/openfortivpn" ] && [ -f "$MOTOR_CACHE/libssl.3.dylib" ] && [ -f "$MOTOR_CACHE/libcrypto.3.dylib" ]; then
+if [ -n "${NUVEX_MOTOR_PUBLICADO:-}" ]; then
+  # Al publicar se reutiliza el motor de la versión anterior (mismos bytes),
+  # compile quien compile: así el ayudante instalado sigue siendo válido.
+  for archivo in openfortivpn libssl.3.dylib libcrypto.3.dylib; do
+    [ -f "$NUVEX_MOTOR_PUBLICADO/$archivo" ] || { echo "Falta $archivo en $NUVEX_MOTOR_PUBLICADO" >&2; exit 1; }
+  done
+  printf '==> Motor Fortinet de la versión publicada anterior\n'
+  MOTOR_CACHE="$NUVEX_MOTOR_PUBLICADO"
+elif [ -f "$MOTOR_CACHE/openfortivpn" ] && [ -f "$MOTOR_CACHE/libssl.3.dylib" ] && [ -f "$MOTOR_CACHE/libcrypto.3.dylib" ]; then
   printf '==> Motor Fortinet sin cambios (%s)\n' "$MOTOR_CLAVE"
 else
   printf '==> Compilando motor Fortinet incluido\n'

@@ -76,8 +76,9 @@ struct ActualizacionSoftwareView: View {
     private var tarjeta: some View {
         if !actualizaciones.configuradas {
             centrado(titulo: "Nuvex \(InfoVersion.actual.descripcion)",
-                     detalle: "Esta compilación no busca actualizaciones. Para actualizarla desde el código, usa scripts/instalar.sh.") {
-                EmptyView()
+                     detalle: "Esta compilación se hizo antes de activar las actualizaciones automáticas. Instala la versión publicada una vez y, desde ahí, Nuvex se actualizará sola.") {
+                Link("Ver versiones publicadas", destination: URL(string: "https://github.com/Simylar/Nuvex/releases/latest")!)
+                    .padding(.top, 6)
             }
         } else {
             switch actualizaciones.estado {

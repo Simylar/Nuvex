@@ -3,6 +3,7 @@
 #   1. Identidad de firma estable «Nuvex Release» (certificado autofirmado de
 #      10 años). Mantiene los permisos del Llavero entre versiones.
 #   2. Clave EdDSA de Sparkle, que firma cada actualización.
+#   3. Los secretos de GitHub Actions para publicar automáticamente.
 # Ambas quedan en tu llavero de inicio de sesión. El script deja una copia de
 # cada una en el Escritorio para que la guardes en tu gestor de contraseñas.
 # Si se pierden, las actualizaciones dejan de poder firmarse con la misma
@@ -45,6 +46,7 @@ else
   security import "$TEMPORAL/nuvex-release.p12" -k "$LLAVERO" -T /usr/bin/codesign >/dev/null
   COPIA="$HOME/Desktop/Nuvex-Release-certificado.p12"
   install -m 600 "$TEMPORAL/nuvex-release.p12" "$COPIA"
+  FRASE_CERTIFICADO="$FRASE"
   unset FRASE FRASE2
   echo "   Creada e importada. Copia protegida con tu frase: $COPIA"
 fi
@@ -62,11 +64,39 @@ fi
 printf '%s\n' "$PUBLICA" > "$CLAVE_PUBLICA"
 echo "   Clave pública guardada en Resources/sparkle_ed_public_key (se publica con el código)."
 
+printf '\n3. Secretos para publicar con GitHub Actions\n'
+REPO="Simylar/Nuvex"
+if ! gh auth status >/dev/null 2>&1; then
+  echo "   Omitido: inicia sesión con «gh auth login» y vuelve a ejecutar este script."
+else
+  CERTIFICADO="${COPIA:-$HOME/Desktop/Nuvex-Release-certificado.p12}"
+  if [ ! -f "$CERTIFICADO" ]; then
+    read -r -p "   Ruta de la copia del certificado (.p12): " CERTIFICADO
+  fi
+  [ -f "$CERTIFICADO" ] || { echo "No se encontró el certificado .p12." >&2; exit 1; }
+  if [ -z "${FRASE_CERTIFICADO:-}" ]; then
+    read -r -s -p "   Frase de la copia del certificado: " FRASE_CERTIFICADO; echo
+  fi
+  # Los valores pasan a gh por la entrada estándar: no quedan en pantalla ni en ps.
+  base64 -i "$CERTIFICADO" | gh secret set NUVEX_CERTIFICADO_P12 --repo "$REPO"
+  printf '%s' "$FRASE_CERTIFICADO" | gh secret set NUVEX_CERTIFICADO_FRASE --repo "$REPO"
+  unset FRASE_CERTIFICADO
+  TEMPORAL_CLAVE="$(mktemp -d)"
+  (umask 077; "$GENERATE_KEYS" -x "$TEMPORAL_CLAVE/clave" >/dev/null)
+  gh secret set SPARKLE_ED_PRIVATE_KEY --repo "$REPO" < "$TEMPORAL_CLAVE/clave"
+  rm -P "$TEMPORAL_CLAVE/clave" 2>/dev/null || rm -f "$TEMPORAL_CLAVE/clave"
+  rmdir "$TEMPORAL_CLAVE"
+  echo "   Guardados en GitHub: NUVEX_CERTIFICADO_P12, NUVEX_CERTIFICADO_FRASE y SPARKLE_ED_PRIVATE_KEY."
+fi
+
 cat <<'FIN'
 
 Siguiente paso:
   - Guarda las copias del Escritorio en tu gestor de contraseñas y bórralas
     del Escritorio. Sin ellas no podrás publicar desde otra Mac.
   - Haz commit de Nuvex/Resources/sparkle_ed_public_key.
-  - Compila con build.sh: la app quedará firmada con «Nuvex Release».
+  - Instala con scripts/instalar.sh: la app quedará firmada con «Nuvex Release»
+    y buscará actualizaciones sola.
+  - Para publicar una versión: scripts/publicar.sh (sube la etiqueta y
+    GitHub Actions hace el resto).
 FIN

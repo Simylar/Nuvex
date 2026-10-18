@@ -1,0 +1,66 @@
+# Publica una versión de Nuvex al subir una etiqueta vX.Y.Z:
+# pruebas, compilación firmada, GitHub Release y appcast de Sparkle.
+# La etiqueta la crea Nuvex/scripts/publicar.sh tras sus comprobaciones.
+name: Publicar versión
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publicar
+  cancel-in-progress: false
+
+jobs:
+  publicar:
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      LLAVERO: ${{ runner.temp }}/nuvex-firma.keychain-db
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # El número de compilación sale del historial completo.
+          fetch-depth: 0
+
+      - name: Herramientas
+        run: brew install autoconf automake pkgconf openssl@3
+
+      - name: Pruebas
+        run: |
+          python3 -m unittest discover -s tests
+          for prueba in tests/test_*.sh; do bash "$prueba"; done
+
+      - name: Certificado de firma
+        env:
+          CERTIFICADO_P12: ${{ secrets.NUVEX_CERTIFICADO_P12 }}
+          CERTIFICADO_FRASE: ${{ secrets.NUVEX_CERTIFICADO_FRASE }}
+        run: |
+          CLAVE_LLAVERO="$(uuidgen)"
+          security create-keychain -p "$CLAVE_LLAVERO" "$LLAVERO"
+          security set-keychain-settings -lut 3600 "$LLAVERO"
+          security unlock-keychain -p "$CLAVE_LLAVERO" "$LLAVERO"
+          printf '%s' "$CERTIFICADO_P12" | base64 --decode > "$RUNNER_TEMP/nuvex.p12"
+          security import "$RUNNER_TEMP/nuvex.p12" -k "$LLAVERO" -P "$CERTIFICADO_FRASE" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/nuvex.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$CLAVE_LLAVERO" "$LLAVERO" >/dev/null
+          security list-keychains -d user -s "$LLAVERO" $(security list-keychains -d user | tr -d '"')
+          security find-identity -p codesigning "$LLAVERO" | grep -q "Nuvex Release"
+
+      - name: Compilar y publicar
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          CANAL=""
+          case "$(git tag -l --format='%(contents:subject)' "$GITHUB_REF_NAME")" in *beta*) CANAL=--beta ;; esac
+          Nuvex/scripts/publicar.sh --ci $CANAL
+
+      - name: Retirar el llavero temporal
+        if: always()
+        run: security delete-keychain "$LLAVERO" 2>/dev/null || true

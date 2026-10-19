@@ -3,8 +3,8 @@ import SwiftUI
 
 // MARK: - Fila de una VPN
 
-/// Fila compacta al estilo del Centro de control: el círculo de la izquierda
-/// conecta o desconecta y el texto secundario explica el estado.
+/// Fila compacta al estilo del Centro de control: cuando está desconectada,
+/// toda la cabecera conecta; en los demás estados conserva controles separados.
 struct FilaVPN: View {
     let vpn: VPNStatus
     let estado: EstadoUI
@@ -113,26 +113,7 @@ struct FilaVPN: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) {
-                circulo
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(vpn.name)
-                        .lineLimit(1)
-                    TimelineView(.periodic(from: .now, by: estado == .conectando ? 1 : 30)) { _ in
-                        Text(descripcion)
-                            .font(.caption)
-                            .foregroundStyle(colorDescripcion)
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-                .onTapGesture { if puedeExpandir { withAnimation(.snappy(duration: 0.2)) { expandida.toggle() } } }
-                accesorio
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
+            encabezado
 
             if expandida && puedeExpandir {
                 detalles
@@ -148,6 +129,63 @@ struct FilaVPN: View {
         .accessibilityElement(children: .contain)
     }
 
+    @ViewBuilder
+    private var encabezado: some View {
+        if conectaDesdeFila {
+            Button(action: accionCirculo) {
+                contenidoEncabezado
+            }
+            .buttonStyle(.plain)
+            .disabled(bloqueada)
+            .accessibilityLabel(etiquetaCirculo)
+            .accessibilityValue(descripcion)
+            .modifier(AtajoNumerico(numero: atajo))
+        } else {
+            contenidoEncabezado
+        }
+    }
+
+    private var contenidoEncabezado: some View {
+        HStack(spacing: 10) {
+            circulo
+            textos
+            accesorio
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private var textos: some View {
+        if puedeExpandir {
+            contenidoTextos
+                .contentShape(Rectangle())
+                .onTapGesture { alternarDetalles() }
+        } else {
+            contenidoTextos
+        }
+    }
+
+    private var contenidoTextos: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(vpn.name)
+                .lineLimit(1)
+            TimelineView(.periodic(from: .now, by: estado == .conectando ? 1 : 30)) { _ in
+                Text(descripcion)
+                    .font(.caption)
+                    .foregroundStyle(colorDescripcion)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func alternarDetalles() {
+        withAnimation(.snappy(duration: 0.2)) { expandida.toggle() }
+    }
+
     private var ayuda: String {
         if case .error(let fallo) = situacion { return fallo.detalle }
         return ""
@@ -160,23 +198,37 @@ struct FilaVPN: View {
         }
     }
 
+    private var conectaDesdeFila: Bool {
+        if case .desconectada = situacion { return true }
+        return false
+    }
+
+    @ViewBuilder
     private var circulo: some View {
-        Button(action: accionCirculo) {
-            ZStack {
-                Circle().fill(fondoCirculo)
-                Image(systemName: simbolo)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(estado == .conectada ? Color.white : tinte)
-                if case .conectando = situacion { AnilloGiratorio() }
+        if conectaDesdeFila {
+            contenidoCirculo
+        } else {
+            Button(action: accionCirculo) {
+                contenidoCirculo
             }
-            .frame(width: 26, height: 26)
-            .contentShape(Circle())
+            .buttonStyle(.plain)
+            .disabled(bloqueada || estado == .conectando)
+            .accessibilityLabel(etiquetaCirculo)
+            .accessibilityValue(descripcion)
+            .modifier(AtajoNumerico(numero: atajo))
         }
-        .buttonStyle(.plain)
-        .disabled(bloqueada || estado == .conectando)
-        .accessibilityLabel(etiquetaCirculo)
-        .accessibilityValue(descripcion)
-        .modifier(AtajoNumerico(numero: atajo))
+    }
+
+    private var contenidoCirculo: some View {
+        ZStack {
+            Circle().fill(fondoCirculo)
+            Image(systemName: simbolo)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(estado == .conectada ? Color.white : tinte)
+            if case .conectando = situacion { AnilloGiratorio() }
+        }
+        .frame(width: 26, height: 26)
+        .contentShape(Circle())
     }
 
     @ViewBuilder
@@ -210,7 +262,7 @@ struct FilaVPN: View {
 
     private var chevron: some View {
         Button {
-            withAnimation(.snappy(duration: 0.2)) { expandida.toggle() }
+            alternarDetalles()
         } label: {
             Image(systemName: "chevron.right")
                 .font(.system(size: 10, weight: .semibold))

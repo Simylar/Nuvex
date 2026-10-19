@@ -66,5 +66,10 @@ struct NuvexApp: App {
         Settings {
             ConfigurationView(modelo: modelo, borradores: borradores)
         }
+        .commands {
+            // La navegación de Ajustes depende de esta columna y no tiene una
+            // alternativa cuando se oculta, así que se mantiene siempre visible.
+            CommandGroup(replacing: .sidebar) {}
+        }
     }
 }

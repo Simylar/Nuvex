@@ -2,19 +2,30 @@
 
 Este archivo sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y Nuvex usa [versionado semántico](https://semver.org/lang/es/). Cada sección `## [X.Y.Z]` se muestra en la app como «Novedades» y se publica como notas de la versión.
 
+## [3.1.2] - 2026-10-18
+
+### Mejoras
+- **Conectar desde toda la fila**: cuando una VPN está desconectada, ya no hace falta acertar en el candado; pulsar cualquier parte de la fila inicia la conexión. Las conexiones activas conservan sus detalles desplegables.
+- **Automatización más fácil de comprobar**: Ajustes revisa permisos, ayudante, Llavero, conexiones, comando y habilidades sin intentar conectar una VPN.
+- **Control remoto más robusto**: valida el comando y la versión del protocolo, e impide que dos órdenes modifiquen la misma conexión al mismo tiempo.
+- **Ajustes siempre navegables**: la barra lateral se mantiene visible porque contiene la navegación principal de la ventana.
+- **Versiones anteriores sin duplicados**: el instalador guarda los respaldos como ZIP para que macOS no los muestre como copias adicionales de Nuvex.
+
+### Correcciones
+- Al quitar una habilidad, Nuvex conserva cualquier otro archivo que exista en su carpeta y no sigue enlaces simbólicos.
+- La herramienta de control puede reutilizar el motor y las bibliotecas de la app instalada cuando no hay una compilación local.
+- La publicación conserva las URL correctas de versiones anteriores al generar actualizaciones delta.
+
 ## [3.1.1] - 2026-10-18
 
 ### Mejoras
 - **Cancelar una conexión en curso**: mientras una VPN conecta, su fila muestra el tiempo transcurrido y un botón «Cancelar». Las demás VPN no se tocan.
 - **Errores de Gmail que se entienden**: si no se puede leer el código del correo, el panel dice por qué (sesión caducada, permiso que falta, Gmail API desactivada o sin conexión), cómo resolverlo y ofrece «Volver a buscar».
 - **Qué se guardó y qué quedó pendiente**: al guardar una conexión, Nuvex indica por separado las conexiones, las contraseñas del Llavero y el ayudante de red, con «Autorizar el ayudante ahora» si hace falta.
-- **Diagnóstico visible de automatización**: Ajustes puede comprobar permisos, ayudante, Llavero, conexiones, comando y habilidades sin intentar conectar una VPN.
-- **Automatización más robusta**: valida el comando y la versión del protocolo, y evita operaciones simultáneas sobre una misma conexión.
 
 ### Correcciones
 - «Buscar actualizaciones» ya no abre una segunda ventana: todo ocurre en Ajustes › Actualización de software.
 - Las consultas al motor tienen tiempo límite y ya no pueden quedarse esperando para siempre; un intento de conexión que no termina se detiene a los 5½ minutos.
-- Al quitar una habilidad, Nuvex ya no elimina otros archivos que estén en su carpeta.
 
 ## [3.1.0] - 2026-10-17
 

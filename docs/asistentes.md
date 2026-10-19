@@ -13,6 +13,7 @@ En **Ajustes de Nuvex › Automatización**:
 2. En **Conexiones disponibles para asistentes**, desactiva las que no quieras que usen.
 3. Pulsa **Instalar** en **Comando nuvex**. Se crea `~/.local/bin/nuvex`.
 4. Pulsa **Instalar** en **Claude Code** y **Codex**. Así aprenden cuándo y cómo usar `nuvex`.
+5. Pulsa **Comprobar preparación** para revisar permisos, ayudante, Llavero, conexiones, comando y habilidades sin iniciar una VPN.
 
 ## Comandos
 
@@ -49,6 +50,7 @@ Ejecuta `nuvex diagnostico`. Para conectar a distancia hace falta:
 
 ## Seguridad
 
-- El socket de control está en `~/Library/Application Support/Nuvex/control.sock`, con permisos 0600, y solo atiende a procesos de tu usuario.
+- El socket de control está en `~/Library/Application Support/Nuvex/control.sock`, con permisos 0600. Además de comprobar que el proceso pertenece a tu usuario, Nuvex solo acepta órdenes del comando incluido en esa misma copia de la app y valida la versión del protocolo.
 - `nuvex` nunca recibe ni muestra contraseñas. Los códigos de verificación llegan por la entrada estándar, así no quedan en el historial ni en la lista de procesos.
 - Cada conexión o desconexión hecha por un asistente queda en el registro y, si lo eliges, en un aviso que dice quién la pidió.
+- Si llegan dos órdenes para la misma conexión, Nuvex conserva la primera y rechaza la segunda para que no se crucen.

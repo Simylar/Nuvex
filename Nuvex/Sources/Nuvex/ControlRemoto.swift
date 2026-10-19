@@ -8,6 +8,8 @@ import NuvexControl
 final class ControlRemoto {
     private unowned let modelo: VPNModel
     private var servidor: ServidorSocket?
+    private var operaciones = CoordinadorOperacionesRemotas()
+    private(set) var disponible = false
 
     init(modelo: VPNModel) {
         self.modelo = modelo
@@ -15,21 +17,36 @@ final class ControlRemoto {
 
     func iniciar() {
         let servidor = ServidorSocket(ruta: RutaControl.socket(home: Paths.userHome),
-                                      registro: { Log.escribir($0) }) { [weak self] peticion, cliente, emisor in
+                                      registro: { Log.escribir($0) },
+                                      autorizarCliente: Self.esClienteOficial) { [weak self] peticion, cliente, emisor in
             guard let self else { return .resultado(.sinApp, titulo: "Nuvex se está cerrando") }
             return await self.atender(peticion, cliente, emisor)
         }
         do {
             try servidor.iniciar()
             self.servidor = servidor
+            disponible = true
         } catch {
+            disponible = false
             Log.escribir("no se inició el control por Terminal: \(error)")
         }
     }
 
-    func detener() { servidor?.detener() }
+    func detener() {
+        servidor?.detener()
+        servidor = nil
+        disponible = false
+    }
 
     private var preferencias: AjustesApp { Preferencias.shared.ajustes }
+
+    nonisolated private static func esClienteOficial(_ cliente: InfoCliente) -> Bool {
+        guard !cliente.ejecutable.isEmpty,
+              let incluido = Bundle.main.resourceURL?.appendingPathComponent("bin/nuvex") else { return false }
+        let ejecutable = URL(fileURLWithPath: cliente.ejecutable).resolvingSymlinksInPath().standardizedFileURL.path
+        let esperado = incluido.resolvingSymlinksInPath().standardizedFileURL.path
+        return ejecutable == esperado
+    }
 
     // MARK: Peticiones
 
@@ -72,12 +89,20 @@ final class ControlRemoto {
                               conexiones: conexiones().filter { $0.id == vpn.id })
         }
         if let impedimento = impedimento(vpn) { return impedimento }
+        let ids = Set([vpn.id])
+        guard operaciones.reservar(ids) else {
+            return .resultado(.error, vpn: vpn.id, estado: "conectando",
+                              titulo: "Ya hay una operación en curso para «\(vpn.name)»")
+        }
 
         emisor.enviar(.evento("estado", vpn: vpn.id, titulo: "Conectando «\(vpn.name)»…"))
         modelo.conectar(vpn)
         guard peticion.esperar ?? true else {
+            liberarCuandoTermine(ids, limite: 600)
             return .resultado(.ok, vpn: vpn.id, estado: "conectando", titulo: "Conectando «\(vpn.name)»")
         }
+        var liberarAlSalir = true
+        defer { if liberarAlSalir { operaciones.liberar(ids) } }
 
         let limite = Date().addingTimeInterval(TimeInterval(min(max(peticion.limite ?? 180, 10), 600)))
         var avisoCodigo = false, avisoCorreo = false
@@ -115,6 +140,10 @@ final class ControlRemoto {
                 continue
             }
         }
+        // El límite solo deja de esperar al cliente; el intento continúa en
+        // Nuvex, así que la conexión sigue reservada hasta que realmente acabe.
+        liberarAlSalir = false
+        liberarCuandoTermine(ids, limite: 600)
         return .resultado(.tiempoAgotado, vpn: vpn.id, estado: "conectando",
                           titulo: "«\(vpn.name)» aún no termina de conectar",
                           detalle: SolicitudCodigo.abiertas[vpn.id] != nil
@@ -176,6 +205,11 @@ final class ControlRemoto {
             }
         }
         guard !objetivo.isEmpty else { return .resultado(.ok, titulo: "No había VPN conectadas") }
+        let ids = Set(objetivo.map(\.id))
+        guard operaciones.reservar(ids) else {
+            return .resultado(.error, titulo: "Ya hay una operación en curso para una de las conexiones")
+        }
+        defer { operaciones.liberar(ids) }
         objetivo.forEach { modelo.desconectar($0) }
         let limite = Date().addingTimeInterval(20)
         while Date() < limite, modelo.vpns.contains(where: { vpn in vpn.connected && objetivo.contains { $0.id == vpn.id } }) {
@@ -209,14 +243,14 @@ final class ControlRemoto {
     // MARK: Permisos
 
     private func permiso(_ info: ConexionInfo, _ cliente: InfoCliente, accion: String) async -> Mensaje? {
-        switch preferencias.politicaAsistentes {
-        case .noPermitir:
+        switch preferencias.decisionParaAsistente(conexion: info.id) {
+        case .rechazarGlobal:
             return .resultado(.noPermitido, vpn: info.id, titulo: "Nuvex no permite \(accion) desde la Terminal ni los asistentes",
                               detalle: "Se activa en Ajustes de Nuvex › Automatización.")
-        case _ where !info.permitida:
+        case .rechazarConexion:
             return .resultado(.noPermitido, vpn: info.id, titulo: "«\(info.nombre)» no está disponible para los asistentes",
                               detalle: "Se cambia en Ajustes de Nuvex › Automatización.")
-        case .preguntar:
+        case .confirmar:
             NSApp.activate(ignoringOtherApps: true)
             let alerta = NSAlert()
             alerta.messageText = "\(cliente.origen) quiere \(accion) «\(info.nombre)»"
@@ -229,6 +263,24 @@ final class ControlRemoto {
             return nil
         case .permitir:
             return nil
+        }
+    }
+
+    /// `--no-esperar` devuelve el control al cliente, pero conserva la reserva
+    /// hasta que la conexión deje de estar arrancando o expire el límite.
+    private func liberarCuandoTermine(_ ids: Set<String>, limite: TimeInterval) {
+        Task { [weak self] in
+            guard let self else { return }
+            let fin = Date().addingTimeInterval(limite)
+            while Date() < fin, ids.contains(where: { id in
+                switch self.modelo.estado(id: id) {
+                case .conectando: return true
+                default: return SolicitudCodigo.abiertas[id] != nil
+                }
+            }) {
+                try? await Task.sleep(for: .milliseconds(300))
+            }
+            self.operaciones.liberar(ids)
         }
     }
 
@@ -282,9 +334,11 @@ final class ControlRemoto {
         }
     }
 
-    private func diagnostico() -> [Comprobacion] {
+    func diagnostico() -> [Comprobacion] {
         var lista = [
             Comprobacion(nombre: "Nuvex", ok: true, detalle: "Versión \(InfoVersion.actual.descripcion)"),
+            Comprobacion(nombre: "Control remoto", ok: disponible,
+                         detalle: disponible ? "Disponible" : "No pudo iniciar; cierra otras copias de Nuvex y vuelve a abrir la app"),
             Comprobacion(nombre: "Ayudante de red", ok: modelo.ayudanteListo == true,
                          detalle: modelo.ayudanteListo == true ? "Al día" : "Necesita autorización en la Mac"),
             Comprobacion(nombre: "Permiso para asistentes", ok: preferencias.politicaAsistentes == .permitir,

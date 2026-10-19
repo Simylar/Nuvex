@@ -39,6 +39,13 @@ enum PoliticaAsistentes: String, Codable, CaseIterable {
     case permitir
 }
 
+enum DecisionPermisoAsistente: Equatable {
+    case rechazarGlobal
+    case rechazarConexion
+    case confirmar
+    case permitir
+}
+
 /// Ajustes propios de la app. Viven fuera de profiles.json porque el
 /// ayudante firma ese archivo: cambiarlo obligaría a reinstalarlo.
 struct AjustesApp: Equatable {
@@ -49,6 +56,12 @@ struct AjustesApp: Equatable {
     /// Conexiones que los asistentes no pueden conectar aunque la política lo permita.
     var bloqueadasParaAsistentes: Set<String> = []
     var avisarAccionesAsistentes = true
+
+    func decisionParaAsistente(conexion id: String) -> DecisionPermisoAsistente {
+        guard politicaAsistentes != .noPermitir else { return .rechazarGlobal }
+        guard !bloqueadasParaAsistentes.contains(id) else { return .rechazarConexion }
+        return politicaAsistentes == .preguntar ? .confirmar : .permitir
+    }
 }
 
 extension AjustesApp: Codable {

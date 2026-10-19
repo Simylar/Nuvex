@@ -1,4 +1,5 @@
 import AppKit
+import NuvexControl
 import SwiftUI
 
 /// Instala el comando `nuvex` y la habilidad para Claude Code y Codex sin
@@ -33,11 +34,14 @@ enum IntegracionAsistentes {
     static func estado(_ destino: Destino) -> Estado {
         let archivos = FileManager.default
         guard archivos.fileExists(atPath: destino.raiz.path) else { return .sinHerramienta }
-        guard archivos.fileExists(atPath: destino.carpeta.path) else { return .ausente }
-        guard let actual = try? String(contentsOf: destino.archivo, encoding: .utf8), actual.contains(marca) else {
+        switch ArchivoGestionado.estado(carpeta: destino.carpeta, archivo: destino.archivo, marca: marca) {
+        case .ausente:
+            return .ausente
+        case .gestionado(let actual):
+            return actual == plantilla ? .instalada : .desactualizada
+        case .ajeno:
             return .ajena
         }
-        return actual == plantilla ? .instalada : .desactualizada
     }
 
     static func instalar(_ destino: Destino) throws {
@@ -48,8 +52,7 @@ enum IntegracionAsistentes {
     }
 
     static func quitar(_ destino: Destino) throws {
-        guard estado(destino) == .instalada || estado(destino) == .desactualizada else { return }
-        try FileManager.default.removeItem(at: destino.carpeta)
+        try ArchivoGestionado.quitar(carpeta: destino.carpeta, archivo: destino.archivo, marca: marca)
     }
 
     // MARK: Comando
@@ -108,6 +111,7 @@ struct AjustesAutomatizacion: View {
     @ObservedObject private var preferencias = Preferencias.shared
     @State private var estadoComando = IntegracionAsistentes.estadoComando()
     @State private var estados: [String: IntegracionAsistentes.Estado] = [:]
+    @State private var comprobaciones: [Comprobacion]?
     @State private var error: String?
 
     private var politica: Binding<PoliticaAsistentes> {
@@ -123,6 +127,17 @@ struct AjustesAutomatizacion: View {
     private func intentar(_ accion: () throws -> Void) {
         do { try accion(); error = nil } catch { self.error = "No se pudo completar: \(error.localizedDescription)" }
         refrescar()
+    }
+
+    private func comprobarPreparacion() {
+        refrescar()
+        var resultado = modelo.control?.diagnostico() ?? [
+            Comprobacion(nombre: "Control remoto", ok: false,
+                         detalle: "El servicio de automatización todavía no está disponible."),
+        ]
+        resultado.append(comprobacionComando())
+        resultado.append(contentsOf: IntegracionAsistentes.destinos.compactMap(comprobacionHabilidad))
+        comprobaciones = resultado
     }
 
     var body: some View {
@@ -218,6 +233,28 @@ struct AjustesAutomatizacion: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section {
+                Button("Comprobar preparación") { comprobarPreparacion() }
+                if let comprobaciones {
+                    ForEach(Array(comprobaciones.enumerated()), id: \.offset) { _, comprobacion in
+                        Label {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(comprobacion.nombre)
+                                Text(comprobacion.detalle).font(.caption).foregroundStyle(.secondary)
+                            }
+                        } icon: {
+                            Image(systemName: comprobacion.ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                .foregroundStyle(comprobacion.ok ? .green : .orange)
+                        }
+                    }
+                }
+            } header: {
+                Text("Diagnóstico")
+            } footer: {
+                Text("Comprueba localmente permisos, ayudante, Llavero, conexiones, comando y habilidades. No intenta conectar ninguna VPN.")
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Ejemplos") {
                 ForEach(["nuvex estado", "nuvex conectar oficina", "nuvex desconectar --todas", "nuvex diagnostico"], id: \.self) { ejemplo in
                     HStack {
@@ -257,5 +294,17 @@ struct AjustesAutomatizacion: View {
         case .desactualizada: return "Hay una versión más nueva de la habilidad."
         case .ajena: return "Ya existe una habilidad nuvex-vpn que no creó Nuvex; no se modifica."
         }
+    }
+
+    private func comprobacionComando() -> Comprobacion {
+        let estado = IntegracionAsistentes.estadoComando()
+        return Comprobacion(nombre: "Comando nuvex", ok: estado == .instalado, detalle: descripcion(estado))
+    }
+
+    private func comprobacionHabilidad(_ destino: IntegracionAsistentes.Destino) -> Comprobacion? {
+        let estado = IntegracionAsistentes.estado(destino)
+        guard estado != .sinHerramienta else { return nil }
+        return Comprobacion(nombre: "Habilidad para \(destino.nombre)", ok: estado == .instalada,
+                            detalle: descripcion(estado, destino))
     }
 }

@@ -35,6 +35,52 @@ struct NucleoChecks {
         let v1 = try ArchivoAjustes.leer(Data(#"{"version":1}"#.utf8))
         precondition(v2.esMasNuevo && !v1.esMasNuevo)
 
+        // Permisos: se conserva «Conectar sin preguntar» como valor inicial y
+        // las exclusiones por conexión prevalecen sobre la política global.
+        var permisosAsistentes = AjustesApp()
+        precondition(permisosAsistentes.decisionParaAsistente(conexion: "vpn-a") == .permitir)
+        permisosAsistentes.politicaAsistentes = .preguntar
+        precondition(permisosAsistentes.decisionParaAsistente(conexion: "vpn-a") == .confirmar)
+        permisosAsistentes.bloqueadasParaAsistentes.insert("vpn-a")
+        precondition(permisosAsistentes.decisionParaAsistente(conexion: "vpn-a") == .rechazarConexion)
+        permisosAsistentes.politicaAsistentes = .noPermitir
+        precondition(permisosAsistentes.decisionParaAsistente(conexion: "vpn-b") == .rechazarGlobal)
+
+        // Un archivo gestionado se retira sin borrar archivos vecinos. Los
+        // enlaces simbólicos y el contenido sin marca nunca se modifican.
+        let marca = "<!-- gestionado -->"
+        let habilidad = base.appendingPathComponent("habilidad", isDirectory: true)
+        let skill = habilidad.appendingPathComponent("SKILL.md")
+        try FileManager.default.createDirectory(at: habilidad, withIntermediateDirectories: true)
+        try Data((marca + "\n").utf8).write(to: skill)
+        let vecino = habilidad.appendingPathComponent("notas.txt")
+        try Data("conservar".utf8).write(to: vecino)
+        precondition(ArchivoGestionado.estado(carpeta: habilidad, archivo: skill, marca: marca)
+                     == .gestionado(marca + "\n"))
+        try ArchivoGestionado.quitar(carpeta: habilidad, archivo: skill, marca: marca)
+        precondition(!FileManager.default.fileExists(atPath: skill.path))
+        precondition(FileManager.default.fileExists(atPath: vecino.path))
+        precondition(FileManager.default.fileExists(atPath: habilidad.path))
+
+        let vaciable = base.appendingPathComponent("vaciable", isDirectory: true)
+        let vaciableSkill = vaciable.appendingPathComponent("SKILL.md")
+        try FileManager.default.createDirectory(at: vaciable, withIntermediateDirectories: true)
+        try Data((marca + "\n").utf8).write(to: vaciableSkill)
+        try ArchivoGestionado.quitar(carpeta: vaciable, archivo: vaciableSkill, marca: marca)
+        precondition(!FileManager.default.fileExists(atPath: vaciable.path))
+
+        let ajena = base.appendingPathComponent("ajena", isDirectory: true)
+        let ajenaSkill = ajena.appendingPathComponent("SKILL.md")
+        try FileManager.default.createDirectory(at: ajena, withIntermediateDirectories: true)
+        try Data("contenido ajeno".utf8).write(to: ajenaSkill)
+        try ArchivoGestionado.quitar(carpeta: ajena, archivo: ajenaSkill, marca: marca)
+        precondition(FileManager.default.fileExists(atPath: ajenaSkill.path))
+
+        let enlace = base.appendingPathComponent("enlace", isDirectory: true)
+        try FileManager.default.createSymbolicLink(at: enlace, withDestinationURL: habilidad)
+        precondition(ArchivoGestionado.estado(carpeta: enlace,
+                                              archivo: enlace.appendingPathComponent("SKILL.md"), marca: marca) == .ajeno)
+
         // Almacén: permisos privados y solo lectura ante datos más nuevos.
         let url = base.appendingPathComponent("ajustes.json")
         let preferencias = Preferencias(url: url)

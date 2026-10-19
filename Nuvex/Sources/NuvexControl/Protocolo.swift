@@ -13,7 +13,9 @@ public enum Comando: String, Codable, Sendable {
 }
 
 public struct Peticion: Codable, Sendable, Equatable {
-    public var version = 1
+    public static let versionActual = 1
+
+    public var version = Peticion.versionActual
     public var comando: Comando
     /// Nombre, id o prefijo único de la conexión.
     public var vpn: String?
@@ -34,6 +36,28 @@ public struct Peticion: Codable, Sendable, Equatable {
         self.esperar = esperar
         self.limite = limite
         self.codigo = codigo
+    }
+}
+
+/// Evita que dos peticiones remotas modifiquen la misma conexión al mismo
+/// tiempo. La reserva de varias conexiones es atómica para `--todas`.
+public struct CoordinadorOperacionesRemotas: Sendable {
+    private var ocupadas: Set<String> = []
+
+    public init() {}
+
+    public mutating func reservar(_ ids: Set<String>) -> Bool {
+        guard !ids.isEmpty, ocupadas.isDisjoint(with: ids) else { return false }
+        ocupadas.formUnion(ids)
+        return true
+    }
+
+    public mutating func liberar(_ ids: Set<String>) {
+        ocupadas.subtract(ids)
+    }
+
+    public func estaOcupada(_ id: String) -> Bool {
+        ocupadas.contains(id)
     }
 }
 

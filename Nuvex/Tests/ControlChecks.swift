@@ -25,6 +25,17 @@ struct ControlChecks {
         precondition(Busqueda.buscar("casa", en: conexiones) == .ninguna)
         precondition(Busqueda.buscar("  ", en: conexiones) == .ninguna)
 
+        // Una conexión no puede recibir dos operaciones remotas simultáneas;
+        // reservar varias para --todas es atómico.
+        var operaciones = CoordinadorOperacionesRemotas()
+        precondition(operaciones.reservar(["vpn-1"]))
+        precondition(operaciones.estaOcupada("vpn-1"))
+        precondition(!operaciones.reservar(["vpn-1", "vpn-2"]))
+        precondition(!operaciones.estaOcupada("vpn-2"))
+        operaciones.liberar(["vpn-1"])
+        precondition(operaciones.reservar(["vpn-1", "vpn-2"]))
+        operaciones.liberar(["vpn-1", "vpn-2"])
+
         // Codificación de ida y vuelta, con fechas.
         let mensaje = Mensaje.resultado(.ok, vpn: "vpn-2", estado: "conectada", conexiones: [conexiones[1]])
         let decodificado = try Linea.decodificar(Mensaje.self, de: Linea.codificar(mensaje).dropLast())
@@ -34,7 +45,7 @@ struct ControlChecks {
         let carpeta = NSTemporaryDirectory() + "nvx-\(getpid())"
         let ruta = carpeta + "/control.sock"
         defer { try? FileManager.default.removeItem(atPath: carpeta) }
-        let servidor = ServidorSocket(ruta: ruta) { peticion, cliente, emisor in
+        let servidor = ServidorSocket(ruta: ruta, autorizarCliente: { !$0.ejecutable.isEmpty }) { peticion, cliente, emisor in
             switch peticion.comando {
             case .estado:
                 return .resultado(.ok, conexiones: conexiones)
@@ -70,11 +81,26 @@ struct ControlChecks {
         let invalida = try ClienteControl.enviar(Peticion(comando: .codigo), ruta: ruta)
         precondition(invalida.salida == .uso)
 
+        var incompatible = Peticion(comando: .estado)
+        incompatible.version = Peticion.versionActual + 1
+        let version = try ClienteControl.enviar(incompatible, ruta: ruta)
+        precondition(version.salida == .uso && version.titulo == "Versión de protocolo no compatible")
+
         servidor.detener()
         precondition(!FileManager.default.fileExists(atPath: ruta))
         precondition(!ClienteControl.hayServidor(ruta: ruta))
         do { _ = try ClienteControl.enviar(Peticion(comando: .estado), ruta: ruta); preconditionFailure("sin servidor") }
         catch ErrorControl.sinServidor {}
+
+        // El servidor puede restringirse al cliente oficial antes de atender
+        // cualquier comando, aun cuando el proceso pertenezca al mismo usuario.
+        let restringido = ServidorSocket(ruta: ruta, autorizarCliente: { _ in false }) { _, _, _ in
+            preconditionFailure("un cliente rechazado no debe llegar al manejador")
+        }
+        try restringido.iniciar()
+        let rechazado = try ClienteControl.enviar(Peticion(comando: .estado), ruta: ruta)
+        precondition(rechazado.salida == .noPermitido)
+        restringido.detener()
 
         print("Control: comprobaciones superadas")
     }

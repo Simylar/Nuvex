@@ -24,6 +24,8 @@ public struct InfoCliente: Sendable, Equatable {
     public let pid: pid_t
     /// «Claude Code», «Codex» o «Terminal».
     public let origen: String
+    /// Ruta que el kernel reporta para el ejecutable conectado.
+    public let ejecutable: String
 }
 
 /// Envía mensajes a un cliente. Varias tareas pueden escribir a la vez.
@@ -48,18 +50,22 @@ public final class Emisor: @unchecked Sendable {
 /// 0700. Solo atiende a procesos del mismo usuario.
 public final class ServidorSocket: @unchecked Sendable {
     public typealias Manejador = @Sendable (Peticion, InfoCliente, Emisor) async -> Mensaje
+    public typealias AutorizarCliente = @Sendable (InfoCliente) -> Bool
 
     private let ruta: String
     private let manejador: Manejador
     private let registro: @Sendable (String) -> Void
+    private let autorizarCliente: AutorizarCliente
     private let cerrojo = NSLock()
     private var fd: Int32 = -1
     private var activo = false
 
     public init(ruta: String, registro: @escaping @Sendable (String) -> Void = { _ in },
+                autorizarCliente: @escaping AutorizarCliente = { _ in true },
                 manejador: @escaping Manejador) {
         self.ruta = ruta
         self.registro = registro
+        self.autorizarCliente = autorizarCliente
         self.manejador = manejador
     }
 
@@ -131,14 +137,29 @@ public final class ServidorSocket: @unchecked Sendable {
         setsockopt(cliente, SOL_SOCKET, SO_RCVTIMEO, &espera, socklen_t(MemoryLayout<timeval>.size))
 
         let emisor = Emisor(fd: cliente)
+        let pid = Socket.pidRemoto(cliente)
+        let info = InfoCliente(pid: pid, origen: Procesos.origen(de: pid),
+                               ejecutable: Procesos.rutaEjecutable(pid))
+        guard autorizarCliente(info) else {
+            registro("conexión de control rechazada: cliente no autorizado (pid \(pid))")
+            emisor.enviar(.resultado(.noPermitido, titulo: "Cliente de control no autorizado",
+                                     detalle: "Usa el comando nuvex incluido con esta copia de la app."))
+            close(cliente)
+            return
+        }
         guard let linea = Socket.leerLinea(cliente),
               let peticion = try? Linea.decodificar(Peticion.self, de: linea) else {
             emisor.enviar(.resultado(.uso, titulo: "Petición no válida"))
             close(cliente)
             return
         }
-        let pid = Socket.pidRemoto(cliente)
-        let info = InfoCliente(pid: pid, origen: Procesos.origen(de: pid))
+        guard peticion.version == Peticion.versionActual else {
+            registro("petición de control rechazada: protocolo \(peticion.version)")
+            emisor.enviar(.resultado(.uso, titulo: "Versión de protocolo no compatible",
+                                     detalle: "Instala el comando nuvex incluido con esta copia de la app."))
+            close(cliente)
+            return
+        }
         Task.detached { [manejador] in
             let resultado = await manejador(peticion, info, emisor)
             emisor.enviar(resultado)

@@ -15,7 +15,7 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 swiftc -sdk "$SDKROOT" -module-cache-path "$CLANG_MODULE_CACHE_PATH" \
   "$ROOT/Nuvex/Sources/Nuvex/Modelos.swift" "$ROOT/Nuvex/Sources/Nuvex/Soporte.swift" "$ROOT/Nuvex/Sources/Nuvex/Preferencias.swift" "$ROOT/Nuvex/Sources/Nuvex/Migraciones.swift" \
-  "$ROOT/Nuvex/Sources/Nuvex/Proceso.swift" \
+  "$ROOT/Nuvex/Sources/Nuvex/Proceso.swift" "$ROOT/Nuvex/Sources/Nuvex/ArchivoGestionado.swift" \
   "$ROOT/Nuvex/Tests/NucleoChecks.swift" \
   -o "$tmp/nucleo-checks"
 "$tmp/nucleo-checks"

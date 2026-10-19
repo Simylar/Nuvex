@@ -3,6 +3,32 @@
     <channel>
         <title>Nuvex</title>
         <item>
+            <title>3.1.2</title>
+            <pubDate>Mon, 19 Oct 2026 04:30:05 +0000</pubDate>
+            <link>https://github.com/Simylar/Nuvex</link>
+            <sparkle:version>130</sparkle:version>
+            <sparkle:shortVersionString>3.1.2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[### Mejoras
+- **Conectar desde toda la fila**: cuando una VPN está desconectada, ya no hace falta acertar en el candado; pulsar cualquier parte de la fila inicia la conexión. Las conexiones activas conservan sus detalles desplegables.
+- **Automatización más fácil de comprobar**: Ajustes revisa permisos, ayudante, Llavero, conexiones, comando y habilidades sin intentar conectar una VPN.
+- **Control remoto más robusto**: valida el comando y la versión del protocolo, e impide que dos órdenes modifiquen la misma conexión al mismo tiempo.
+- **Ajustes siempre navegables**: la barra lateral se mantiene visible porque contiene la navegación principal de la ventana.
+- **Versiones anteriores sin duplicados**: el instalador guarda los respaldos como ZIP para que macOS no los muestre como copias adicionales de Nuvex.
+
+### Correcciones
+- Al quitar una habilidad, Nuvex conserva cualquier otro archivo que exista en su carpeta y no sigue enlaces simbólicos.
+- La herramienta de control puede reutilizar el motor y las bibliotecas de la app instalada cuando no hay una compilación local.
+- La publicación conserva las URL correctas de versiones anteriores al generar actualizaciones delta.
+
+]]></description>
+            <enclosure url="https://github.com/Simylar/Nuvex/releases/download/v3.1.2/Nuvex-3.1.2.zip" length="5793354" type="application/octet-stream" sparkle:edSignature="ICJlnO1EGg46VY1uhPYSncbONyOCtdj2fCgy/uZWSg21rRmL6FFYD2L9AN0QY5iqfycH8hLoqz3UZcKT2iLaDQ=="/>
+            <sparkle:deltas>
+                <enclosure url="https://github.com/Simylar/Nuvex/releases/download/v3.1.2/Nuvex130-125.delta" sparkle:deltaFrom="125" length="271074" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977616" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="wLRJzXsel8evUgsC3QeUBR5soMAvdkBrA+52hnk2R8onE/HrDkuw321k2Q8eaKHo7eHJ5KZiMowubZysgiXKBg=="/>
+            </sparkle:deltas>
+        </item>
+        <item>
             <title>3.1.1</title>
             <pubDate>Sun, 18 Oct 2026 06:37:48 +0000</pubDate>
             <link>https://github.com/Simylar/Nuvex</link>
@@ -10,16 +36,6 @@
             <sparkle:shortVersionString>3.1.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[### Mejoras
-- **Cancelar una conexión en curso**: mientras una VPN conecta, su fila muestra el tiempo transcurrido y un botón «Cancelar». Las demás VPN no se tocan.
-- **Errores de Gmail que se entienden**: si no se puede leer el código del correo, el panel dice por qué (sesión caducada, permiso que falta, Gmail API desactivada o sin conexión), cómo resolverlo y ofrece «Volver a buscar».
-- **Qué se guardó y qué quedó pendiente**: al guardar una conexión, Nuvex indica por separado las conexiones, las contraseñas del Llavero y el ayudante de red, con «Autorizar el ayudante ahora» si hace falta.
-
-### Correcciones
-- «Buscar actualizaciones» ya no abre una segunda ventana: todo ocurre en Ajustes › Actualización de software.
-- Las consultas al motor tienen tiempo límite y ya no pueden quedarse esperando para siempre; un intento de conexión que no termina se detiene a los 5½ minutos.
-
-]]></description>
             <enclosure url="https://github.com/Simylar/Nuvex/releases/download/v3.1.1/Nuvex-3.1.1.zip" length="5764717" type="application/octet-stream" sparkle:edSignature="BfmqL1yECgfwRk0vlMYaYOmU1P3ywo829LXNaBmcELK4hrd9wxl/DA9jtlsq2RDtubRxYRmFXldQdyMsBRV3DA=="/>
         </item>
         <item>

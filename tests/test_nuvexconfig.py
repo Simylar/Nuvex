@@ -1,4 +1,5 @@
 import getpass
+import hashlib
 import json
 import selectors
 import time
@@ -6,6 +7,7 @@ import importlib.util
 import io
 import os
 import shlex
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -168,6 +170,35 @@ class NuvexConfigurationTests(unittest.TestCase):
         self.assertIn("NUVEX_TLS_VERIFY_FAILED", source)
         self.assertNotIn("--password=", source)
         self.assertNotIn("--otp=", source)
+
+    def test_control_uses_installed_components_without_local_build(self):
+        source_dir = Path(self.tmp.name) / "source with (spaces)"
+        source_dir.mkdir()
+        shutil.copy2(CONFIG, source_dir / CONFIG.name)
+        resources = Path(self.tmp.name) / "installed app" / "Contents" / "Resources"
+        resources.mkdir(parents=True)
+        engine = resources / "openfortivpn"
+        engine.write_text("#!/bin/sh\nexit 0\n")
+        engine.chmod(0o700)
+        for name in ("libssl.3.dylib", "libcrypto.3.dylib", "prepa-ca-bundle.pem"):
+            (resources / name).write_text("test fixture\n")
+        source = CONTROL.read_text().replace(
+            'SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"',
+            f'SCRIPT_DIR={shlex.quote(str(source_dir))}'
+        ).replace(
+            'INSTALLED_RESOURCES="/Applications/Nuvex.app/Contents/Resources"',
+            f'INSTALLED_RESOURCES={shlex.quote(str(resources))}'
+        )
+        control = source_dir / "nuvexctl.sh"
+        control.write_text(source)
+        control.chmod(0o700)
+
+        helper = Path(self.tmp.name) / "helper"
+        result = subprocess.run([str(control), "gen-helper", str(helper)], env=self.env,
+                                text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"# engine-sha256: {hashlib.sha256(engine.read_bytes()).hexdigest()}",
+                      helper.read_text())
 
     def test_generated_helper_accepts_added_profile_and_installer_is_valid(self):
         self.run_config("set", "sicert", "username", "person")

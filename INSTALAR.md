@@ -50,7 +50,7 @@ También puedes consultar `./nuvexctl.sh list` o iniciar `./nuvexctl.sh connect 
 Las conexiones, contraseñas y ajustes viven fuera de la app ([docs/datos.md](docs/datos.md)), así que actualizar no los toca.
 
 - **Desde la app**: Ajustes › Actualización de software muestra la versión disponible y sus novedades. Las VPN activas siguen conectadas durante la instalación.
-- **Desde el código**: `Nuvex/scripts/instalar.sh` pasa las pruebas, compila, guarda la versión anterior en `~/Library/Application Support/Nuvex/Versiones` y reemplaza la app. `Nuvex/scripts/revertir.sh` vuelve atrás.
+- **Desde el código**: `Nuvex/scripts/instalar.sh` compila, pasa las pruebas, guarda la versión anterior como ZIP en `~/Library/Application Support/Nuvex/Versiones` y reemplaza la app. También archiva los respaldos `.app` antiguos. Después de comprobar la instalación, retira la copia compilada del repositorio. `Nuvex/scripts/revertir.sh` vuelve atrás.
 - Antes de cada versión nueva, Nuvex copia la configuración en `~/Library/Application Support/Nuvex/Copias`. Se restaura desde Ajustes › General › Copias de seguridad.
 - Si una versión cambia el motor, Nuvex pide autorizar el ayudante en ese momento. Si cambió la firma de la app, pide probar el acceso al Llavero: elige «Permitir siempre».
 

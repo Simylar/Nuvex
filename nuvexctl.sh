@@ -10,6 +10,7 @@ ENGINE_SOURCE="${SCRIPT_DIR}/openfortivpn"
 SSL_SOURCE="${SCRIPT_DIR}/libssl.3.dylib"
 CRYPTO_SOURCE="${SCRIPT_DIR}/libcrypto.3.dylib"
 CA_SOURCE="${SCRIPT_DIR}/prepa-ca-bundle.pem"
+INSTALLED_RESOURCES="/Applications/Nuvex.app/Contents/Resources"
 if [ ! -x "$ENGINE_SOURCE" ]; then
   ENGINE_SOURCE="${SCRIPT_DIR}/Nuvex/Nuvex.app/Contents/Resources/openfortivpn"
   SSL_SOURCE="${SCRIPT_DIR}/Nuvex/Nuvex.app/Contents/Resources/libssl.3.dylib"
@@ -18,6 +19,17 @@ if [ ! -x "$ENGINE_SOURCE" ]; then
 fi
 if [ ! -x "$ENGINE_SOURCE" ]; then
   ENGINE_SOURCE="${SCRIPT_DIR}/vendor/openfortivpn/openfortivpn"
+fi
+if { [ ! -x "$ENGINE_SOURCE" ] || [ ! -r "$SSL_SOURCE" ] \
+     || [ ! -r "$CRYPTO_SOURCE" ] || [ ! -r "$CA_SOURCE" ]; } \
+   && [ -x "$INSTALLED_RESOURCES/openfortivpn" ] \
+   && [ -r "$INSTALLED_RESOURCES/libssl.3.dylib" ] \
+   && [ -r "$INSTALLED_RESOURCES/libcrypto.3.dylib" ] \
+   && [ -r "$INSTALLED_RESOURCES/prepa-ca-bundle.pem" ]; then
+  ENGINE_SOURCE="$INSTALLED_RESOURCES/openfortivpn"
+  SSL_SOURCE="$INSTALLED_RESOURCES/libssl.3.dylib"
+  CRYPTO_SOURCE="$INSTALLED_RESOURCES/libcrypto.3.dylib"
+  CA_SOURCE="$INSTALLED_RESOURCES/prepa-ca-bundle.pem"
 fi
 ENGINE_DIR="/Library/PrivilegedHelperTools/Nuvex"
 ENGINE="${ENGINE_DIR}/openfortivpn"

@@ -35,7 +35,7 @@ El resultado es `Nuvex/Nuvex.app` dentro del repositorio. Para instalarlo o actu
 Nuvex/scripts/instalar.sh
 ```
 
-El script pasa las pruebas, compila, guarda la versión anterior, reemplaza la app sin cortar las VPN activas y la vuelve a abrir. `Nuvex/scripts/revertir.sh` vuelve a la versión anterior. El paquete incluye `openfortivpn` y las bibliotecas OpenSSL necesarias; Homebrew se necesita para compilar, no para ejecutar la app. La compilación **no está notarizada**. Con `Nuvex/scripts/configurar-publicacion.sh` se crea una identidad de firma estable para que el Llavero no vuelva a pedir permiso tras cada actualización; la publicación de versiones se explica en [docs/publicar.md](docs/publicar.md).
+El script compila, pasa las pruebas, guarda la versión anterior en un ZIP, reemplaza la app sin cortar las VPN activas y la vuelve a abrir. También archiva los respaldos antiguos que eran paquetes `.app` y retira la copia compilada del repositorio para evitar duplicados en la búsqueda de aplicaciones. `Nuvex/scripts/revertir.sh` vuelve a la versión anterior. El paquete incluye `openfortivpn` y las bibliotecas OpenSSL necesarias; Homebrew se necesita para compilar, no para ejecutar la app. La compilación **no está notarizada**. Con `Nuvex/scripts/configurar-publicacion.sh` se crea una identidad de firma estable para que el Llavero no vuelva a pedir permiso tras cada actualización; la publicación de versiones se explica en [docs/publicar.md](docs/publicar.md).
 
 ## Primer uso
 

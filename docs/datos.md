@@ -8,7 +8,7 @@ Nada de lo que configuras vive dentro de `Nuvex.app`. Por eso actualizar, reinst
 | Contraseñas VPN | Llavero de inicio de sesión, servicio `nuvex.<id>` | Nunca en archivos ni en argumentos de procesos. |
 | Ajustes propios de la app | `~/Library/Application Support/Nuvex/ajustes.json` | Código por correo, permisos de asistentes. Carpeta 0700, archivo 0600. |
 | Copias de seguridad | `~/Library/Application Support/Nuvex/Copias/` | Una antes de cada versión nueva; se conservan 10. Sin contraseñas. |
-| Versiones anteriores de la app | `~/Library/Application Support/Nuvex/Versiones/` | Las guarda `scripts/instalar.sh`; se conservan 3. |
+| Versiones anteriores de la app | `~/Library/Application Support/Nuvex/Versiones/` | Archivos ZIP guardados por `scripts/instalar.sh`; se conservan 3. |
 | Preferencias de la interfaz | UserDefaults `local.gertcode.nuvex` | Avisos, intervalo, Touch ID, actualizaciones. |
 | Ayudante y motor | `/Library/PrivilegedHelperTools/Nuvex` | Instalado con autorización de administrador. |
 | Registro | `~/Library/Logs/Nuvex.log` | Nunca incluye contraseñas ni códigos. |

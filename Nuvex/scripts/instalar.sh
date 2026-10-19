@@ -27,6 +27,11 @@ leer_plist() { /usr/libexec/PlistBuddy -c "Print :$2" "$1/Contents/Info.plist" 2
 
 [ -w /Applications ] || falla "tu usuario no puede escribir en /Applications"
 
+paso "Compilación"
+"$RAIZ_APP/build.sh"
+NUEVA="$RAIZ_APP/Nuvex.app"
+codesign --verify --strict "$NUEVA" || falla "la firma de la app compilada no es válida"
+
 if $PRUEBAS; then
   paso "Pruebas"
   (cd "$RAIZ" && python3 -m unittest discover -s tests >/dev/null 2>&1) || falla "fallaron las pruebas de Python (python3 -m unittest discover -s tests)"
@@ -35,11 +40,6 @@ if $PRUEBAS; then
   done
   echo "Todas las pruebas pasan."
 fi
-
-paso "Compilación"
-"$RAIZ_APP/build.sh"
-NUEVA="$RAIZ_APP/Nuvex.app"
-codesign --verify --strict "$NUEVA" || falla "la firma de la app compilada no es válida"
 
 VERSION_NUEVA="$(leer_plist "$NUEVA" CFBundleShortVersionString)"
 COMPILACION_NUEVA="$(leer_plist "$NUEVA" CFBundleVersion)"
@@ -88,12 +88,27 @@ paso "Instalación"
 if [ -d "$DESTINO" ]; then
   mkdir -p "$VERSIONES"
   chmod 700 "$VERSIONES"
-  RESPALDO="$VERSIONES/Nuvex-${VERSION_ACTUAL:-anterior}-${COMPILACION_ACTUAL:-0}-$(date +%Y%m%d-%H%M%S).app"
-  ditto "$DESTINO" "$RESPALDO"
+fi
+# Las versiones guardadas por instaladores anteriores eran paquetes .app y
+# podían aparecer en la búsqueda de aplicaciones. Se archivan de la más antigua
+# a la más reciente para conservar su orden antes de guardar la versión actual.
+while IFS= read -r antigua; do
+  archivo="${antigua%.app}.zip"
+  [ ! -e "$archivo" ] || falla "ya existe $archivo; no se reemplazó $antigua"
+  "$RAIZ_APP/scripts/guardar-respaldo.sh" "$antigua" "$archivo" \
+    || falla "no se pudo archivar $antigua"
+  rm -rf "$antigua"
+done < <(ls -1tr "$VERSIONES"/Nuvex-*.app 2>/dev/null || true)
+if [ -d "$DESTINO" ]; then
+  RESPALDO="$VERSIONES/Nuvex-${VERSION_ACTUAL:-anterior}-${COMPILACION_ACTUAL:-0}-$(date +%Y%m%d-%H%M%S).zip"
+  "$RAIZ_APP/scripts/guardar-respaldo.sh" "$DESTINO" "$RESPALDO" \
+    || falla "no se pudo guardar la versión anterior"
   echo "Versión anterior guardada en: $RESPALDO"
-  # Conserva las más recientes.
-  ls -1dt "$VERSIONES"/Nuvex-*.app 2>/dev/null | tail -n +$((CONSERVAR + 1)) | while IFS= read -r vieja; do
-    rm -rf "$vieja"
+fi
+# Conserva las versiones más recientes.
+if ls "$VERSIONES"/Nuvex-*.zip >/dev/null 2>&1; then
+  ls -1dt "$VERSIONES"/Nuvex-*.zip | tail -n +$((CONSERVAR + 1)) | while IFS= read -r vieja; do
+    rm -f "$vieja"
   done
 fi
 TEMPORAL="/Applications/.Nuvex.nueva.app"
@@ -120,6 +135,15 @@ import json, sys
 for vpn in json.load(sys.stdin):
     print(("● " if vpn["connected"] else "○ ") + vpn["name"] + (" (conectada)" if vpn["connected"] else ""))
 ' || true
+fi
+
+# La compilación es otra app con el mismo identificador. Tras comprobar
+# la copia instalada, se retira para evitar duplicados en la búsqueda de apps.
+if diferencias=$(rsync -r -l -p -c -n --delete --itemize-changes "$NUEVA/" "$DESTINO/" 2>/dev/null) \
+   && [ -z "$diferencias" ]; then
+  rm -rf "$NUEVA"
+else
+  echo "Aviso: se conservó la compilación porque no coincide con la app instalada."
 fi
 printf '\nNuvex %s (%s) instalado. Para volver a la versión anterior: %s/scripts/revertir.sh\n' \
   "$VERSION_NUEVA" "$COMPILACION_NUEVA" "$RAIZ_APP"

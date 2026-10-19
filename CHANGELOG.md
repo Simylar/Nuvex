@@ -8,10 +8,13 @@ Este archivo sigue el formato de [Keep a Changelog](https://keepachangelog.com/e
 - **Cancelar una conexión en curso**: mientras una VPN conecta, su fila muestra el tiempo transcurrido y un botón «Cancelar». Las demás VPN no se tocan.
 - **Errores de Gmail que se entienden**: si no se puede leer el código del correo, el panel dice por qué (sesión caducada, permiso que falta, Gmail API desactivada o sin conexión), cómo resolverlo y ofrece «Volver a buscar».
 - **Qué se guardó y qué quedó pendiente**: al guardar una conexión, Nuvex indica por separado las conexiones, las contraseñas del Llavero y el ayudante de red, con «Autorizar el ayudante ahora» si hace falta.
+- **Diagnóstico visible de automatización**: Ajustes puede comprobar permisos, ayudante, Llavero, conexiones, comando y habilidades sin intentar conectar una VPN.
+- **Automatización más robusta**: valida el comando y la versión del protocolo, y evita operaciones simultáneas sobre una misma conexión.
 
 ### Correcciones
 - «Buscar actualizaciones» ya no abre una segunda ventana: todo ocurre en Ajustes › Actualización de software.
 - Las consultas al motor tienen tiempo límite y ya no pueden quedarse esperando para siempre; un intento de conexión que no termina se detiene a los 5½ minutos.
+- Al quitar una habilidad, Nuvex ya no elimina otros archivos que estén en su carpeta.
 
 ## [3.1.0] - 2026-10-17
 

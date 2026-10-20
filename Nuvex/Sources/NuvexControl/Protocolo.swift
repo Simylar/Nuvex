@@ -76,6 +76,9 @@ public enum CodigoSalida: Int32, Codable, Sendable {
     case requierePersona = 4
     case tiempoAgotado = 5
     case sinApp = 6
+    /// El comando corre dentro del sandbox de un asistente que no le deja
+    /// abrir Nuvex ni hablar con ella. Hay que repetirlo fuera del sandbox.
+    case aislado = 7
 
     /// Un diagnóstico incompleto nunca debe parecer satisfactorio a scripts o
     /// asistentes, aunque sus comprobaciones se sigan mostrando una por una.
@@ -129,6 +132,7 @@ public enum MotivoResultado: String, Codable, Sendable, Equatable {
     case diagnosticoIncompleto = "diagnostico_incompleto"
     case estadoNoConfirmado = "estado_no_confirmado"
     case errorConexion = "error_conexion"
+    case aislamiento
 }
 
 public struct ConexionInfo: Codable, Sendable, Equatable {

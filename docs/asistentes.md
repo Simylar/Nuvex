@@ -42,6 +42,11 @@ El diagnóstico normal no conecta ninguna VPN ni lee el valor de las contraseña
 | 4 | Hace falta la persona en la Mac o el diagnóstico tiene pendientes |
 | 5 | Tiempo agotado |
 | 6 | Nuvex no responde |
+| 7 | El sandbox del asistente impide abrir Nuvex o hablar con ella |
+
+### Sandbox de Codex y Claude Code
+
+Codex y Claude Code ejecutan los comandos dentro de un sandbox de macOS que no deja abrir apps ni conectar con el socket de Nuvex. Desde ahí, `open` responde `kLSNoExecutableErr` aunque la app esté instalada. `nuvex` lo detecta y sale con el código 7 y el motivo `aislamiento`, y la habilidad indica al asistente que repita el comando fuera del sandbox (en Codex, con permisos elevados). No es un problema de la cuenta ni del servidor VPN. Tras actualizar Nuvex, pulsa **Actualizar** en las habilidades de **Ajustes › Automatización** para que los asistentes reciban estas instrucciones.
 
 ## Antes de salir de casa
 

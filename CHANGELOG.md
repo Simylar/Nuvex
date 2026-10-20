@@ -2,7 +2,7 @@
 
 Este archivo sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y Nuvex usa [versionado semántico](https://semver.org/lang/es/). Cada sección `## [X.Y.Z]` se muestra en la app como «Novedades» y se publica como notas de la versión.
 
-## [Sin publicar]
+## [3.2.0] - 2026-10-20
 
 ### Mejoras
 - Automatización usa estados, eventos y motivos estables en JSON, limita el tiempo de respuesta y permite un diagnóstico profundo opcional del Llavero.

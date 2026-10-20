@@ -9,6 +9,7 @@ Este archivo sigue el formato de [Keep a Changelog](https://keepachangelog.com/e
 - Las instalaciones nuevas piden confirmación antes de aceptar acciones remotas; las preferencias existentes se conservan.
 - El diagnóstico ejecuta el comando instalado de extremo a extremo y diferencia configuración local de credenciales o servidores realmente probados.
 - Las actualizaciones y su publicación validan SemVer sin regresiones, compilación, canal, tipo de paquete, HTTPS, firma EdDSA y espacio disponible; el siguiente arranque exige la versión exacta y conserva cualquier diagnóstico pendiente hasta mostrarlo.
+- La prueba de actualización completa reproduce en copias temporales la descarga firmada, el parche delta, la extracción y el reemplazo; además comprueba que una interrupción o una firma inválida conserve intacta la versión anterior, sin modificar la app instalada ni depender de servicios externos.
 - La pantalla de actualización distingue entre una instalación programada y una que espera a que termine una conexión, un guardado o la preparación del ayudante.
 
 ### Correcciones

@@ -3,6 +3,41 @@
     <channel>
         <title>Nuvex</title>
         <item>
+            <title>3.2.0</title>
+            <pubDate>Tue, 20 Oct 2026 07:40:48 +0000</pubDate>
+            <link>https://github.com/Simylar/Nuvex</link>
+            <sparkle:version>135</sparkle:version>
+            <sparkle:shortVersionString>3.2.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[### Mejoras
+- Automatización usa estados, eventos y motivos estables en JSON, limita el tiempo de respuesta y permite un diagnóstico profundo opcional del Llavero.
+- Las instalaciones nuevas piden confirmación antes de aceptar acciones remotas; las preferencias existentes se conservan.
+- El diagnóstico ejecuta el comando instalado de extremo a extremo y diferencia configuración local de credenciales o servidores realmente probados.
+- Las actualizaciones y su publicación validan SemVer sin regresiones, compilación, canal, tipo de paquete, HTTPS, firma EdDSA y espacio disponible; el siguiente arranque exige la versión exacta y conserva cualquier diagnóstico pendiente hasta mostrarlo.
+- La prueba de actualización completa reproduce en copias temporales la descarga firmada, el parche delta, la extracción y el reemplazo; además comprueba que una interrupción o una firma inválida conserve intacta la versión anterior, sin modificar la app instalada ni depender de servicios externos.
+- La pantalla de actualización distingue entre una instalación programada y una que espera a que termine una conexión, un guardado o la preparación del ayudante.
+- La versión instalada y la compilación candidata se identifican claramente; después de reiniciar se confirma el resultado y, si la instalación no se completó, se informa que la versión anterior y los datos se conservaron.
+- Los fallos ocurridos fuera de la pantalla de actualización dejan un aviso discreto en el panel y un indicador en Ajustes hasta que se revisan.
+- Los fallos de red, firma, configuración, espacio o permisos muestran una explicación segura y una acción útil, sin exponer detalles técnicos internos.
+
+### Correcciones
+- `nuvex conectar` ya no informa un fallo durante el intervalo entre el arranque del túnel y su confirmación en el estado.
+- `nuvex desconectar` puede cancelar una conexión que aún está arrancando o esperando un código.
+- Una cancelación solo se informa como completada tras confirmar el estado del túnel; una confirmación en la Mac ya vencida no ejecuta la orden.
+- Un diagnóstico con pendientes devuelve un código de salida distinto de cero y el registro se rota para no crecer indefinidamente.
+- La instalación y la restauración desde código conservan la app anterior hasta verificar firma, versión, arranque y control local; si fallan, la recuperan y vuelven a abrir, sin cerrar otras copias de Nuvex ni continuar con una conexión en curso cuyo estado no se pudo comprobar.
+- Cancelar una búsqueda temprana ya no permite que una respuesta tardía reactive la actualización, y las notas HTML se convierten localmente sin cargar recursos externos.
+- Una actualización descargada se extrae y verifica antes de ofrecer instalarla al cerrar; el diagnóstico anterior no se borra por un fallo de búsqueda ajeno.
+- La publicación se cancela si no puede recuperar el appcast anterior y comprueba que cada ZIP conserve su versión y canal, evitando perder historial o mover versiones entre estable y beta.
+
+]]></description>
+            <enclosure url="https://github.com/Simylar/Nuvex/releases/download/v3.2.0/Nuvex-3.2.0.zip" length="5887688" type="application/octet-stream" sparkle:edSignature="MRSv+vzGXYIidfc7P/VZW0TsHw63SCMMd93FIyzElE+0tWroMLqfD2UpKZyxRNM36za/wSnVi/Eh9Cf9W1ToBA=="/>
+            <sparkle:deltas>
+                <enclosure url="https://github.com/Simylar/Nuvex/releases/download/v3.2.0/Nuvex135-130.delta" sparkle:deltaFrom="130" length="453902" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977616" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="HZrvDQ1xmbp1UmP50H+5EFlZqjwn6k7cJoMVAI+f5+O7i848ibXCgaC3ZoWIg0/Nylrn9XerlNxrJqX6w0ouCQ=="/>
+            </sparkle:deltas>
+        </item>
+        <item>
             <title>3.1.2</title>
             <pubDate>Mon, 19 Oct 2026 04:30:05 +0000</pubDate>
             <link>https://github.com/Simylar/Nuvex</link>
@@ -37,16 +72,6 @@
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
             <enclosure url="https://github.com/Simylar/Nuvex/releases/download/v3.1.1/Nuvex-3.1.1.zip" length="5764717" type="application/octet-stream" sparkle:edSignature="BfmqL1yECgfwRk0vlMYaYOmU1P3ywo829LXNaBmcELK4hrd9wxl/DA9jtlsq2RDtubRxYRmFXldQdyMsBRV3DA=="/>
-        </item>
-        <item>
-            <title>3.1.0</title>
-            <pubDate>Sun, 18 Oct 2026 05:43:11 +0000</pubDate>
-            <link>https://github.com/Simylar/Nuvex</link>
-            <sparkle:version>121</sparkle:version>
-            <sparkle:shortVersionString>3.1.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/Simylar/Nuvex/releases/download/v3.1.0/Nuvex-3.1.0.zip" length="5705223" type="application/octet-stream" sparkle:edSignature="4K3EVXDM7EfF/HvwG1UTZqRxMPSB2vHIFo5XVRBM+bKyrAYnsN2R99mRigRDROqYPnH2MevgfxJYsoKfV8E0DQ=="/>
         </item>
     </channel>
 </rss>

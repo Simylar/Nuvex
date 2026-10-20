@@ -124,7 +124,17 @@ final class VPNModel: ObservableObject {
     var conectadas: Int { vpns.filter { $0.connected }.count }
     var hayConectando: Bool { estados.values.contains(.conectando) }
     /// Hay una operación que un reinicio de la app interrumpiría.
-    var ocupado: Bool { hayConectando || guardandoConfiguracion || instalandoAyudante }
+    var ocupado: Bool {
+        hayConectando || !esperandoCodigo.isEmpty || !desconexionSolicitada.isEmpty
+            || guardandoConfiguracion || instalandoAyudante
+    }
+    var motivoBloqueoActualizacion: String {
+        if guardandoConfiguracion { return "Esperando a que termine de guardar la configuración…" }
+        if instalandoAyudante { return "Esperando a que termine la preparación del ayudante de red…" }
+        if !esperandoCodigo.isEmpty { return "Esperando a que termine la verificación de una conexión…" }
+        if !desconexionSolicitada.isEmpty { return "Esperando a que termine la desconexión en curso…" }
+        return "Esperando a que termine la conexión en curso…"
+    }
     /// Una caída o un fallo de conexión: el icono de la barra lo señala.
     var requiereAtencion: Bool {
         !desconexiones.isEmpty || errorConsulta != nil || estados.values.contains {

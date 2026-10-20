@@ -52,15 +52,20 @@ El flujo pasa las pruebas, compila, firma, crea el GitHub Release y actualiza `a
 
    El script repite las comprobaciones y sube la etiqueta; GitHub Actions hace el resto. Sigue el progreso con `gh run watch`. Con `--beta`, la versión solo llega a quienes activan «Recibir versiones beta». Con `--local`, se compila y publica desde tu Mac sin GitHub Actions.
 
-El script exige el árbol limpio, una versión mayor que la última etiqueta, las notas en el CHANGELOG y todas las pruebas en verde. También se niega a publicar si el motor `openfortivpn` cambió sin cambios en `vendor/openfortivpn`, porque un motor distinto obliga a todos a reautorizar el ayudante.
+El script exige el árbol limpio, una versión SemVer mayor que la última etiqueta, las notas en el CHANGELOG y todas las pruebas en verde. La comparación aplica las reglas de SemVer también si existen etiquetas prerelease, sin depender del orden particular de `sort -V`. También se niega a publicar si el motor `openfortivpn` cambió sin cambios en `vendor/openfortivpn`, porque un motor distinto obliga a todos a reautorizar el ayudante.
+
+Cada intento limpia primero su directorio de salida y descarga de nuevo el appcast publicado; así no puede subir residuos de una simulación anterior. Al generar el appcast conserva las notas de todas las versiones cuyos ZIP se usan para crear deltas y restaura la URL propia de cada versión histórica.
+
+Antes de subir archivos, valida el appcast ya corregido: la entrada exacta de la nueva versión debe existir una sola vez, sin colisiones de versión o compilación, coincidir con su canal, apuntar al ZIP esperado mediante HTTPS, declarar su tamaño real y tener firma EdDSA. Cada delta también debe pertenecer a la publicación actual, declarar origen, tamaño y firma, existir en disco y estar referenciado exactamente desde el appcast.
 
 ## Qué ve quien tiene Nuvex instalado
 
 - Nuvex busca una vez al día. Si hay versión nueva, aparece un aviso en el panel y en el Centro de notificaciones, sin ventanas inesperadas.
 - «Actualización de software» muestra los detalles y las notas de la versión instalada. Si hay una nueva, muestra además su versión, tamaño, novedades y el botón «Actualizar ahora», con el progreso de descarga e instalación.
+- Antes de descargar, Nuvex valida los metadatos, HTTPS y el espacio disponible; tras reiniciar confirma que arrancó la compilación anunciada. Si debe esperar una conexión o un guardado, lo explica y continúa automáticamente.
 - Las VPN activas siguen conectadas durante la actualización. Si hay una conexión o un código en curso, el reinicio espera a que termine.
 - Al abrirse, la versión nueva muestra sus novedades.
 
 ## Sin Developer ID
 
-Nuvex no está notarizada. La primera instalación en cada Mac se aprueba una vez en Ajustes del Sistema › Privacidad y seguridad › «Abrir igualmente». Las actualizaciones posteriores las instala Sparkle tras verificar su firma y no vuelven a pedirlo. Con una cuenta del Apple Developer Program, basta cambiar la identidad en `publicar.sh` y añadir `notarytool submit --wait` y `stapler staple`.
+Nuvex no está notarizada y este proceso no depende de una cuenta pagada. La primera instalación en cada Mac se aprueba una vez en Ajustes del Sistema › Privacidad y seguridad › «Abrir igualmente». Las actualizaciones posteriores las instala Sparkle tras verificar su firma EdDSA y conservan la identidad local estable de Nuvex.

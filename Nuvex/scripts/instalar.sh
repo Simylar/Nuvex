@@ -8,11 +8,16 @@ set -euo pipefail
 
 RAIZ_APP="$(cd "$(dirname "$0")/.." && pwd)"
 RAIZ="$(cd "$RAIZ_APP/.." && pwd)"
+. "$RAIZ_APP/scripts/transaccion-app.sh"
+. "$RAIZ_APP/scripts/ciclo-app.sh"
 DESTINO="/Applications/Nuvex.app"
 VERSIONES="$HOME/Library/Application Support/Nuvex/Versiones"
 CONSERVAR=3
 PRUEBAS=true
 FORZAR=false
+RESPALDO_NUEVO=""
+INSTALACION_CONFIRMADA=false
+REABRIR_TRAS_FALLO=false
 for argumento in "$@"; do
   case "$argumento" in
     --sin-pruebas) PRUEBAS=false ;;
@@ -25,12 +30,40 @@ paso() { printf '\n==> %s\n' "$*"; }
 falla() { printf 'nuvex: %s\n' "$*" >&2; exit 1; }
 leer_plist() { /usr/libexec/PlistBuddy -c "Print :$2" "$1/Contents/Info.plist" 2>/dev/null || true; }
 
+recuperar_instalacion() {
+  local estado=$?
+  local recuperada=true
+  trap - EXIT
+  if [ "$estado" -ne 0 ] && $NUVEX_TRANSACCION_ACTIVA; then
+    nuvex_cerrar_app "$DESTINO" || true
+    if nuvex_revertir_reemplazo && [ -d "$DESTINO" ]; then
+      echo "Se restauró automáticamente la versión anterior de Nuvex." >&2
+    else
+      recuperada=false
+      echo "No se pudo restaurar automáticamente Nuvex; el respaldo se conservó." >&2
+    fi
+  fi
+  if [ "$estado" -ne 0 ] && $REABRIR_TRAS_FALLO && [ -d "$DESTINO" ]; then
+    if ! open "$DESTINO" >/dev/null 2>&1; then
+      echo "No se pudo volver a abrir Nuvex automáticamente; ábrelo desde Aplicaciones." >&2
+    fi
+  fi
+  if [ "$estado" -ne 0 ] && ! $INSTALACION_CONFIRMADA && $recuperada \
+    && [ -n "$RESPALDO_NUEVO" ] && [ -f "$RESPALDO_NUEVO" ]; then
+    rm -f "$RESPALDO_NUEVO"
+  fi
+  exit "$estado"
+}
+trap recuperar_instalacion EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 [ -w /Applications ] || falla "tu usuario no puede escribir en /Applications"
 
 paso "Compilación"
 "$RAIZ_APP/build.sh"
 NUEVA="$RAIZ_APP/Nuvex.app"
-codesign --verify --strict "$NUEVA" || falla "la firma de la app compilada no es válida"
+codesign --verify --deep --strict "$NUEVA" || falla "la firma de la app compilada no es válida"
 
 if $PRUEBAS; then
   paso "Pruebas"
@@ -61,28 +94,28 @@ fi
 
 # No se reinicia en medio de una conexión o esperando un código.
 NUVEX_INSTALADO="$DESTINO/Contents/Resources/bin/nuvex"
-if ! $FORZAR && [ -x "$NUVEX_INSTALADO" ] && pgrep -f "^$DESTINO/Contents/MacOS/Nuvex$" >/dev/null; then
-  if "$NUVEX_INSTALADO" estado --json 2>/dev/null | grep -qE '"estado":"(conectando|esperando_codigo)"'; then
-    falla "hay una VPN conectándose o esperando un código; espera a que termine o usa --forzar"
+if ! $FORZAR; then
+  if nuvex_app_abierta "$DESTINO"; then
+    if nuvex_estado_operacion_vpn "$NUVEX_INSTALADO"; then
+      falla "hay una VPN conectándose o esperando un código; espera a que termine o usa --forzar"
+    else
+      ESTADO_VPN=$?
+      [ "$ESTADO_VPN" -eq 1 ] \
+        || falla "no se pudo comprobar si hay una conexión en curso; revisa que Nuvex responda o usa --forzar"
+    fi
+  else
+    ESTADO_APP=$?
+    [ "$ESTADO_APP" -eq 1 ] \
+      || falla "no se pudo comprobar el proceso instalado de Nuvex; usa --forzar solo si confirmaste que no hay una conexión en curso"
   fi
 fi
 
 paso "Cierre de Nuvex"
-# Todas las copias en ejecución, incluidas las de otras carpetas: dos Nuvex a
-# la vez compiten por el ayudante y los avisos.
-PIDS="$(pgrep -f '/Nuvex\.app/Contents/MacOS/Nuvex$' || true)"
-for pid in $PIDS; do
-  ruta="$(ps -p "$pid" -o command= 2>/dev/null | sed 's|/Contents/MacOS/Nuvex$||')"
-  if [ "$ruta" != "$DESTINO" ]; then
-    echo "Cerrando otra copia de Nuvex en uso: $ruta"
-  fi
-  kill -TERM "$pid" 2>/dev/null || true
-done
-for _ in $(seq 1 20); do
-  pgrep -f '/Nuvex\.app/Contents/MacOS/Nuvex$' >/dev/null || break
-  sleep 0.5
-done
-pgrep -f '/Nuvex\.app/Contents/MacOS/Nuvex$' >/dev/null && falla "Nuvex no se cerró; ciérralo desde su menú y vuelve a intentarlo"
+# Solo se cierra la copia instalada. Una compilación o copia de respaldo que la
+# persona tenga abierta no pertenece a esta operación.
+nuvex_cerrar_app "$DESTINO" \
+  || falla "la copia instalada de Nuvex no se cerró; ciérrala desde su menú y vuelve a intentarlo"
+[ ! -d "$DESTINO" ] || REABRIR_TRAS_FALLO=true
 
 paso "Instalación"
 if [ -d "$DESTINO" ]; then
@@ -100,42 +133,47 @@ while IFS= read -r antigua; do
   rm -rf "$antigua"
 done < <(ls -1tr "$VERSIONES"/Nuvex-*.app 2>/dev/null || true)
 if [ -d "$DESTINO" ]; then
-  RESPALDO="$VERSIONES/Nuvex-${VERSION_ACTUAL:-anterior}-${COMPILACION_ACTUAL:-0}-$(date +%Y%m%d-%H%M%S).zip"
-  "$RAIZ_APP/scripts/guardar-respaldo.sh" "$DESTINO" "$RESPALDO" \
+  RESPALDO_NUEVO="$VERSIONES/Nuvex-${VERSION_ACTUAL:-anterior}-${COMPILACION_ACTUAL:-0}-$(date +%Y%m%d-%H%M%S).zip"
+  "$RAIZ_APP/scripts/guardar-respaldo.sh" "$DESTINO" "$RESPALDO_NUEVO" \
     || falla "no se pudo guardar la versión anterior"
-  echo "Versión anterior guardada en: $RESPALDO"
+  echo "Versión anterior guardada en: $RESPALDO_NUEVO"
 fi
-# Conserva las versiones más recientes.
+nuvex_preparar_reemplazo "$NUEVA" "$DESTINO" \
+  || falla "no se pudo preparar el reemplazo recuperable de la aplicación"
+
+paso "Apertura"
+open "$DESTINO"
+for _ in $(seq 1 20); do
+  nuvex_app_abierta "$DESTINO" && break
+  sleep 0.5
+done
+nuvex_app_abierta "$DESTINO" || falla "Nuvex no se abrió; ábrelo desde Aplicaciones"
+codesign --verify --deep --strict "$DESTINO" || falla "la app instalada no superó la verificación de firma"
+[ "$(leer_plist "$DESTINO" CFBundleShortVersionString)" = "$VERSION_NUEVA" ] \
+  && [ "$(leer_plist "$DESTINO" CFBundleVersion)" = "$COMPILACION_NUEVA" ] \
+  || falla "la versión instalada no coincide con la compilación preparada"
+
+COMANDO_INSTALADO="$DESTINO/Contents/Resources/bin/nuvex"
+[ -x "$COMANDO_INSTALADO" ] || falla "la app instalada no incluye el comando de diagnóstico"
+RESPONDIO=false
+for _ in $(seq 1 20); do
+  if nuvex_control_responde "$COMANDO_INSTALADO"; then
+    RESPONDIO=true
+    break
+  fi
+  sleep 0.5
+done
+$RESPONDIO || falla "Nuvex abrió, pero no respondió correctamente al diagnóstico de la instalación"
+nuvex_confirmar_reemplazo || falla "no se pudo cerrar la transacción de instalación"
+INSTALACION_CONFIRMADA=true
+REABRIR_TRAS_FALLO=false
+# Solo una instalación confirmada puede desplazar respaldos históricos.
 if ls "$VERSIONES"/Nuvex-*.zip >/dev/null 2>&1; then
   ls -1dt "$VERSIONES"/Nuvex-*.zip | tail -n +$((CONSERVAR + 1)) | while IFS= read -r vieja; do
     rm -f "$vieja"
   done
 fi
-TEMPORAL="/Applications/.Nuvex.nueva.app"
-rm -rf "$TEMPORAL"
-ditto "$NUEVA" "$TEMPORAL"
-if [ -d "$DESTINO" ]; then
-  mv "$DESTINO" "/Applications/.Nuvex.anterior.app"
-fi
-mv "$TEMPORAL" "$DESTINO"
-rm -rf "/Applications/.Nuvex.anterior.app"
-
-paso "Apertura"
-open "$DESTINO"
-for _ in $(seq 1 20); do
-  pgrep -f "^$DESTINO/Contents/MacOS/Nuvex$" >/dev/null && break
-  sleep 0.5
-done
-pgrep -f "^$DESTINO/Contents/MacOS/Nuvex$" >/dev/null || falla "Nuvex no se abrió; ábrelo desde Aplicaciones"
-if [ -x "$DESTINO/Contents/Resources/bin/nuvex" ]; then
-  "$DESTINO/Contents/Resources/bin/nuvex" doctor || true
-else
-  "$DESTINO/Contents/Resources/nuvexctl.sh" list | python3 -c '
-import json, sys
-for vpn in json.load(sys.stdin):
-    print(("● " if vpn["connected"] else "○ ") + vpn["name"] + (" (conectada)" if vpn["connected"] else ""))
-' || true
-fi
+"$COMANDO_INSTALADO" doctor || true
 
 # La compilación es otra app con el mismo identificador. Tras comprobar
 # la copia instalada, se retira para evitar duplicados en la búsqueda de apps.

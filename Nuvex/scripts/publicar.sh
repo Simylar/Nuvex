@@ -18,6 +18,7 @@ SPARKLE_BIN="$RAIZ_APP/.build/artifacts/sparkle/Sparkle/bin"
 SALIDA="$RAIZ/.build-cache/publicaciones"
 PAGINAS="$RAIZ/.build-cache/gh-pages"
 IDENTIDAD="Nuvex Release"
+MOTOR_EXTRAIDO=""
 BETA=false
 MODO=etiqueta
 for argumento in "$@"; do
@@ -32,6 +33,16 @@ done
 
 paso() { printf '\n==> %s\n' "$*"; }
 falla() { printf 'publicar: %s\n' "$*" >&2; exit 1; }
+limpiar_publicacion() {
+  if [ -n "$MOTOR_EXTRAIDO" ] && [ -d "$MOTOR_EXTRAIDO" ]; then
+    case "$MOTOR_EXTRAIDO" in
+      /private/tmp/nuvex-motor-publicado.*) rm -rf "$MOTOR_EXTRAIDO" ;;
+    esac
+  fi
+}
+trap limpiar_publicacion EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 cd "$RAIZ"
 
 VERSION="$(tr -d '[:space:]' < "$RAIZ_APP/VERSION")"
@@ -46,9 +57,11 @@ grep -qE "^## \[$VERSION\] - [0-9]{4}-[0-9]{2}-[0-9]{2}" CHANGELOG.md \
   || falla "CHANGELOG.md necesita la sección «## [$VERSION] - AAAA-MM-DD» con las novedades"
 CLAVE="$(tr -d '[:space:]' < "$RAIZ_APP/Resources/sparkle_ed_public_key" 2>/dev/null || true)"
 [ -n "$CLAVE" ] || falla "falta Resources/sparkle_ed_public_key; ejecuta scripts/configurar-publicacion.sh"
-ANTERIOR="$(git tag -l 'v*' --sort=-v:refname | grep -vx "$ETIQUETA" | head -1 || true)"
+ANTERIOR="$(git tag -l 'v*' | awk -v actual="$ETIQUETA" '$0 != actual' \
+  | python3 "$RAIZ_APP/scripts/comparar_versiones.py" --mayor)" \
+  || falla "no se pudieron ordenar semánticamente las etiquetas publicadas"
 if [ -n "$ANTERIOR" ]; then
-  [ "$(printf '%s\n%s\n' "${ANTERIOR#v}" "$VERSION" | sort -V | tail -1)" = "$VERSION" ] \
+  python3 "$RAIZ_APP/scripts/comparar_versiones.py" "$VERSION" "${ANTERIOR#v}" \
     || falla "la versión $VERSION no es mayor que la última publicada ($ANTERIOR)"
 fi
 
@@ -86,6 +99,13 @@ fi
 
 # MARK: Compilación y publicación (local, simulada o en GitHub Actions)
 
+# Cada intento parte de un conjunto cerrado de artefactos. Así una simulación
+# anterior no puede contaminar el appcast ni los archivos que se publiquen.
+[ "$SALIDA" = "$RAIZ/.build-cache/publicaciones" ] \
+  || falla "la ruta de salida de publicaciones no es la esperada"
+rm -rf "$SALIDA"
+mkdir -p "$SALIDA"
+
 # Motor: si su código y OpenSSL no cambiaron desde la versión anterior, se
 # reutilizan los bytes ya publicados. Compilarlo en otra máquina daría otro
 # hash y obligaría a todos a volver a autorizar el ayudante.
@@ -94,7 +114,7 @@ if [ -n "$ANTERIOR" ] && git diff --quiet "$ANTERIOR" HEAD -- vendor/openfortivp
   OPENSSL_ACTUAL="$(brew list --versions openssl@3 | awk '{print $2}')"
   if [ -n "$MOTOR_PREVIO" ] && [ "${MOTOR_PREVIO#* }" = "openssl-$OPENSSL_ACTUAL" ]; then
     # Siempre el zip publicado, nunca una copia local que pueda ser distinta.
-    MOTOR_EXTRAIDO="$(mktemp -d)"
+    MOTOR_EXTRAIDO="$(mktemp -d /private/tmp/nuvex-motor-publicado.XXXXXX)"
     gh release download "$ANTERIOR" --repo "$REPO" --pattern "Nuvex-${ANTERIOR#v}.zip" --dir "$MOTOR_EXTRAIDO" \
       || falla "no se pudo descargar Nuvex-${ANTERIOR#v}.zip para reutilizar su motor"
     mkdir -p "$SALIDA"
@@ -148,10 +168,23 @@ if [ -n "$ANTERIOR" ] && [ "$MODO" != simular ]; then
 fi
 
 paso "Empaquetado"
-mkdir -p "$SALIDA"
 # Se parte del appcast publicado y del archivo de la versión anterior, para
 # conservar el historial y generar la actualización delta.
-[ -f "$SALIDA/appcast.xml" ] || curl -fsSL "$FEED" -o "$SALIDA/appcast.xml" 2>/dev/null || rm -f "$SALIDA/appcast.xml"
+if [ -n "$ANTERIOR" ]; then
+  rm -f "$SALIDA/appcast.xml"
+  if git fetch --quiet origin gh-pages 2>/dev/null \
+     && git show FETCH_HEAD:appcast.xml > "$SALIDA/appcast.xml" 2>/dev/null \
+     && [ -s "$SALIDA/appcast.xml" ]; then
+    paso "Appcast anterior recuperado de gh-pages"
+  else
+    rm -f "$SALIDA/appcast.xml"
+    curl -fsSL "$FEED" -o "$SALIDA/appcast.xml" 2>/dev/null || true
+  fi
+  [ -s "$SALIDA/appcast.xml" ] \
+    || falla "no se pudo recuperar el appcast publicado; se cancela para no perder su historial"
+else
+  rm -f "$SALIDA/appcast.xml"
+fi
 # Para el delta hace falta el zip publicado exacto, no una compilación local.
 if [ -n "$ANTERIOR" ] && [ "$MODO" != simular ] && [ -z "${NUVEX_MOTOR_PUBLICADO:-}" ]; then
   rm -f "$SALIDA/Nuvex-${ANTERIOR#v}.zip"
@@ -162,12 +195,18 @@ fi
 ZIP="$SALIDA/Nuvex-$VERSION.zip"
 rm -f "$ZIP"
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
-# Las notas de la versión son la sección del CHANGELOG; la app las muestra en
-# «Actualización de software» y en «Novedades».
-awk -v v="$VERSION" '
-  /^## \[/ { dentro = index($0, "## [" v "]") == 1; next }
-  dentro { print }
-' CHANGELOG.md | sed -e '/./,$!d' > "$SALIDA/Nuvex-$VERSION.md"
+# Sparkle vuelve a generar todas las entradas de los ZIP presentes. Por eso
+# cada una necesita sus propias notas; de otro modo borraría las históricas.
+for paquete in "$SALIDA"/Nuvex-*.zip; do
+  version_notas="$(basename "$paquete" .zip)"
+  version_notas="${version_notas#Nuvex-}"
+  notas="$SALIDA/Nuvex-$version_notas.md"
+  awk -v v="$version_notas" '
+    /^## \[/ { dentro = index($0, "## [" v "]") == 1; next }
+    dentro { print }
+  ' CHANGELOG.md | sed -e '/./,$!d' > "$notas"
+  [ -s "$notas" ] || falla "CHANGELOG.md no contiene notas para Nuvex $version_notas"
+done
 printf '%s\n' "$MOTOR" > "$SALIDA/motor.sha256"
 
 paso "Appcast firmado"
@@ -180,20 +219,20 @@ if [ "$MODO" = ci ]; then
 else
   "$SPARKLE_BIN/generate_appcast" "${OPCIONES[@]}" "$SALIDA"
 fi
-grep -q "sparkle:edSignature" "$SALIDA/appcast.xml" || falla "el appcast no quedó firmado"
+CANAL_APPCAST=""
+$BETA && CANAL_APPCAST="beta"
 # generate_appcast pone el prefijo de esta versión a todos los zip; los de
 # versiones anteriores viven en la publicación de su propia etiqueta.
-for anterior_zip in "$SALIDA"/Nuvex-*.zip; do
-  v="$(basename "$anterior_zip" .zip)"; v="${v#Nuvex-}"
-  [ "$v" = "$VERSION" ] && continue
-  sed -i '' "s|releases/download/$ETIQUETA/Nuvex-$v.zip|releases/download/v$v/Nuvex-$v.zip|g" "$SALIDA/appcast.xml"
-done
+python3 "$RAIZ_APP/scripts/ajustar_appcast.py" "$SALIDA/appcast.xml" "$REPO" "$VERSION" \
+  || falla "no se pudieron restaurar las URL históricas del appcast"
 # Los delta se llaman Nuvex<nueva>-<anterior>.delta y se suben con esta versión.
 DELTAS=()
 while IFS= read -r delta; do DELTAS+=("$delta"); done < <(find "$SALIDA" -maxdepth 1 -name "Nuvex$COMPILACION-*.delta")
-for delta in ${DELTAS[@]+"${DELTAS[@]}"}; do
-  grep -q "$(basename "$delta")" "$SALIDA/appcast.xml" || falla "el appcast no menciona $(basename "$delta")"
-done
+python3 "$RAIZ_APP/scripts/verificar_appcast.py" "$SALIDA/appcast.xml" "$VERSION" "$COMPILACION" \
+  --canal "$CANAL_APPCAST" \
+  --url-esperada "https://github.com/$REPO/releases/download/$ETIQUETA/Nuvex-$VERSION.zip" \
+  --archivo "$ZIP" \
+  --directorio-archivos "$SALIDA" || falla "el appcast nuevo no cumple el contrato de actualización"
 
 if [ "$MODO" = simular ]; then
   printf '\nSimulación completa. Se publicaría:\n  %s\n  %s\n' "$ZIP" "$SALIDA/appcast.xml"

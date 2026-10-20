@@ -21,7 +21,7 @@ struct VersionDisponible: Equatable {
         esCritica = item.isCriticalUpdate
         let descripcion = item.itemDescription ?? ""
         if item.itemDescriptionFormat == "html" {
-            notas = VersionDisponible.textoDesdeHTML(descripcion)
+            notas = TextoHTMLSeguro.convertir(descripcion)
         } else {
             notas = descripcion.trimmingCharacters(in: .whitespacesAndNewlines)
         }
@@ -38,13 +38,6 @@ struct VersionDisponible: Equatable {
         self.esCritica = esCritica
     }
 
-    private static func textoDesdeHTML(_ html: String) -> String {
-        guard let datos = html.data(using: .utf8),
-              let texto = try? NSAttributedString(data: datos, options: [.documentType: NSAttributedString.DocumentType.html,
-                                                                          .characterEncoding: String.Encoding.utf8.rawValue],
-                                                  documentAttributes: nil) else { return "" }
-        return texto.string
-    }
 }
 
 /// Etapas de una actualización, como en «Actualización de software» de iOS.
@@ -56,12 +49,15 @@ enum EstadoActualizacion: Equatable {
     case descargando(VersionDisponible, recibido: UInt64, total: UInt64?)
     case preparando(VersionDisponible, progreso: Double)
     case lista(VersionDisponible)
+    case programada(VersionDisponible)
+    case esperando(VersionDisponible, detalle: String)
     case instalando(VersionDisponible)
     case error(String)
 
     var version: VersionDisponible? {
         switch self {
-        case .disponible(let v), .descargando(let v, _, _), .preparando(let v, _), .lista(let v), .instalando(let v): return v
+        case .disponible(let v), .descargando(let v, _, _), .preparando(let v, _),
+             .lista(let v), .programada(let v), .esperando(let v, _), .instalando(let v): return v
         default: return nil
         }
     }
@@ -78,6 +74,7 @@ final class Actualizaciones: NSObject, ObservableObject {
     /// Versión anunciada que el usuario aún no ha abierto (fila del panel).
     @Published private(set) var disponible: String?
     @Published private(set) var puedeBuscar = false
+    @Published private(set) var verificacionInicial: ResultadoInstalacionActualizacion?
     /// false si esta compilación no tiene clave pública ni dirección de avisos.
     private(set) var configuradas: Bool
 
@@ -85,19 +82,29 @@ final class Actualizaciones: NSObject, ObservableObject {
     private var updater: SPUUpdater?
     private var observacion: NSKeyValueObservation?
     private var esperaReinicio: Task<Void, Never>?
+    private var instalarProgramadaAhora: (() -> Void)?
     private var instalarAlEstarLista = false
+    private var candidatoActual: CandidatoActualizacion?
+    /// Distingue el registro creado por este proceso de un diagnóstico antiguo
+    /// que todavía no se le ha mostrado al usuario.
+    private var instalacionRegistradaEnSesion = false
 
     // Respuestas pendientes que Sparkle espera.
     private var responderVersion: ((SPUUserUpdateChoice) -> Void)?
     private var responderLista: ((SPUUserUpdateChoice) -> Void)?
     private var cancelarDescarga: (() -> Void)?
     private var cancelarBusqueda: (() -> Void)?
+    private var busquedaCanceladaPorUsuario = false
 
     init(modelo: VPNModel?) {
         self.modelo = modelo
+        verificacionInicial = RegistroInstalacionActualizacion.resolver()
         let info = Bundle.main.infoDictionary ?? [:]
         configuradas = info["SUPublicEDKey"] is String && info["SUFeedURL"] is String
         super.init()
+        if case .incompleta(_, _) = verificacionInicial {
+            estado = .error(verificacionInicial?.mensaje ?? "No se pudo verificar la última actualización.")
+        }
         guard configuradas else { return }
         let updater = SPUUpdater(hostBundle: .main, applicationBundle: .main, userDriver: self, delegate: self)
         self.updater = updater
@@ -117,6 +124,7 @@ final class Actualizaciones: NSObject, ObservableObject {
     /// Estado fijo para las capturas de depuración, sin Sparkle.
     init(muestra estado: EstadoActualizacion, disponible: String? = nil) {
         configuradas = true
+        verificacionInicial = nil
         super.init()
         self.estado = estado
         self.disponible = disponible
@@ -129,7 +137,12 @@ final class Actualizaciones: NSObject, ObservableObject {
     private var pantallasAbiertas = 0
     var pantallaVisible: Bool { pantallasAbiertas > 0 }
 
-    func pantallaAparecio() { pantallasAbiertas += 1 }
+    func pantallaAparecio() {
+        pantallasAbiertas += 1
+        if case .incompleta(_, _)? = verificacionInicial {
+            RegistroInstalacionActualizacion.confirmarLectura()
+        }
+    }
     func pantallaDesaparecio() { pantallasAbiertas = max(0, pantallasAbiertas - 1) }
 
     // MARK: Acciones
@@ -140,6 +153,7 @@ final class Actualizaciones: NSObject, ObservableObject {
         // Con una versión ya anunciada o descargada, no se pierde de vista.
         guard responderVersion == nil, responderLista == nil else { return }
         guard let updater, updater.canCheckForUpdates else { return }
+        busquedaCanceladaPorUsuario = false
         estado = .buscando
         updater.checkForUpdates()
     }
@@ -148,22 +162,51 @@ final class Actualizaciones: NSObject, ObservableObject {
     /// Ajustes) y busca si no hay ya una versión anunciada.
     func mostrar() {
         if let modelo { AperturaAjustes.abrir(modelo, pagina: .actualizacion) }
-        if responderVersion == nil && responderLista == nil, estado.version == nil || estado == .inactivo {
+        if responderVersion == nil && responderLista == nil,
+           estado == .inactivo || estado == .alDia {
             buscar()
         }
     }
 
     func actualizarAhora() {
-        instalarAlEstarLista = true
+        if let candidatoActual {
+            do {
+                let preparada = responderLista != nil || instalarProgramadaAhora != nil
+                    || estado.esPreparada
+                if !preparada {
+                    try Self.validar(candidatoActual, permiteBeta: recibirBeta)
+                }
+            } catch {
+                responderVersion?(.dismiss)
+                responderLista?(.dismiss)
+                responderVersion = nil
+                responderLista = nil
+                instalarProgramadaAhora = nil
+                instalarAlEstarLista = false
+                self.candidatoActual = nil
+                cancelarRegistroDeSesion()
+                estado = .error(error.localizedDescription)
+                return
+            }
+        }
         if let responder = responderLista {
             responderLista = nil
+            instalarAlEstarLista = false
             prepararReinicio()
+            if let version = estado.version { estado = .instalando(version) }
             responder(.install)
+        } else if let instalar = instalarProgramadaAhora {
+            instalarAlEstarLista = false
+            prepararReinicio()
+            if let version = estado.version { estado = .instalando(version) }
+            instalar()
         } else if let responder = responderVersion {
             responderVersion = nil
+            instalarAlEstarLista = true
             responder(.install)
         } else if let updater, updater.canCheckForUpdates {
             // Se pospuso antes: una búsqueda nueva retoma la versión y se instala.
+            instalarAlEstarLista = true
             updater.checkForUpdates()
         }
     }
@@ -171,34 +214,60 @@ final class Actualizaciones: NSObject, ObservableObject {
     func recordarMasTarde() {
         responderVersion?(.dismiss)
         responderVersion = nil
+        instalarAlEstarLista = false
         disponible = estado.version?.version
+        estado = .inactivo
     }
 
     func omitirVersion() {
         responderVersion?(.skip)
         responderVersion = nil
+        instalarAlEstarLista = false
+        candidatoActual = nil
         disponible = nil
         estado = .alDia
     }
 
     /// Deja la versión descargada para instalarla al cerrar Nuvex.
     func instalarAlCerrar() {
+        guard let version = estado.version else { return }
         UserDefaults.standard.set(true, forKey: Self.claveNovedadesAlIniciar)
+        registrarInstalacion(version: version.version, compilacion: version.compilacion)
         responderLista?(.dismiss)
         responderLista = nil
+        instalarAlEstarLista = false
+        estado = .programada(version)
     }
 
     func cancelar() {
+        if case .buscando = estado {
+            busquedaCanceladaPorUsuario = true
+        }
         cancelarDescarga?()
         cancelarDescarga = nil
         cancelarBusqueda?()
         cancelarBusqueda = nil
+        instalarAlEstarLista = false
+        instalarProgramadaAhora = nil
+        candidatoActual = nil
         estado = .inactivo
     }
 
     private func prepararReinicio() {
         // La versión nueva mostrará sus novedades al abrirse.
         UserDefaults.standard.set(true, forKey: Self.claveNovedadesAlIniciar)
+    }
+
+    private func registrarInstalacion(version: String, compilacion: String) {
+        if RegistroInstalacionActualizacion.comenzar(version: version, compilacion: compilacion) {
+            instalacionRegistradaEnSesion = true
+        }
+    }
+
+    private func cancelarRegistroDeSesion() {
+        guard instalacionRegistradaEnSesion else { return }
+        RegistroInstalacionActualizacion.cancelar()
+        instalacionRegistradaEnSesion = false
     }
 
     // MARK: Preferencias
@@ -223,6 +292,37 @@ final class Actualizaciones: NSObject, ObservableObject {
     }
 
     var ultimaBusqueda: Date? { updater?.lastUpdateCheckDate }
+
+    private static func candidato(_ item: SUAppcastItem) -> CandidatoActualizacion {
+        CandidatoActualizacion(version: item.displayVersionString,
+                               compilacion: item.versionString,
+                               canal: item.channel,
+                               direccion: item.fileURL,
+                               tipoInstalacion: item.installationType,
+                               tamano: item.contentLength > 0 ? item.contentLength : nil)
+    }
+
+    private static func validar(_ candidato: CandidatoActualizacion, permiteBeta: Bool,
+                                comprobarEspacio: Bool = true) throws {
+        let capacidades: [Int64] = comprobarEspacio
+            ? [Bundle.main.bundleURL, FileManager.default.temporaryDirectory].compactMap {
+                try? $0.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+                    .volumeAvailableCapacityForImportantUsage
+            }
+            : []
+        try PreparacionActualizacion.validar(candidato, actual: .actual,
+                                             permiteBeta: permiteBeta,
+                                             capacidadDisponible: comprobarEspacio ? capacidades.min() : nil)
+    }
+}
+
+private extension EstadoActualizacion {
+    var esPreparada: Bool {
+        switch self {
+        case .lista, .programada, .esperando, .instalando: return true
+        default: return false
+        }
+    }
 }
 
 // MARK: - Delegado
@@ -232,25 +332,56 @@ extension Actualizaciones: SPUUpdaterDelegate {
         recibirBeta ? ["beta"] : []
     }
 
+    func updater(_ updater: SPUUpdater, shouldProceedWithUpdate updateItem: SUAppcastItem,
+                 updateCheck: SPUUpdateCheck) throws {
+        let candidato = Self.candidato(updateItem)
+        try Self.validar(candidato, permiteBeta: recibirBeta)
+        candidatoActual = candidato
+    }
+
     /// Reiniciar la app no corta los túneles (los mantiene el ayudante), pero sí
     /// interrumpiría una conexión en curso, un código pendiente o un guardado.
     func updater(_ updater: SPUUpdater, shouldPostponeRelaunchForUpdate item: SUAppcastItem,
                  untilInvokingBlock installHandler: @escaping () -> Void) -> Bool {
         guard let modelo, modelo.ocupado else { return false }
         Log.escribir("actualización \(item.displayVersionString) aplazada hasta terminar la operación en curso")
+        let version = VersionDisponible(item)
+        estado = .esperando(version, detalle: modelo.motivoBloqueoActualizacion)
         esperaReinicio?.cancel()
         esperaReinicio = Task { @MainActor [weak self] in
             while let modelo = self?.modelo, modelo.ocupado {
                 try? await Task.sleep(for: .seconds(2))
                 if Task.isCancelled { return }
             }
+            guard let self, !Task.isCancelled, self.modelo != nil else { return }
+            self.estado = .instalando(version)
             installHandler()
+        }
+        return true
+    }
+
+    func updater(_ updater: SPUUpdater, willInstallUpdateOnQuit item: SUAppcastItem,
+                 immediateInstallationBlock: @escaping () -> Void) -> Bool {
+        let version = VersionDisponible(item)
+        candidatoActual = Self.candidato(item)
+        instalarProgramadaAhora = immediateInstallationBlock
+        instalarAlEstarLista = false
+        estado = .programada(version)
+        disponible = version.version
+        prepararReinicio()
+        registrarInstalacion(version: item.displayVersionString,
+                             compilacion: item.versionString)
+        Log.escribir("actualización \(item.displayVersionString) preparada para instalarse al cerrar")
+        if !pantallaVisible {
+            VPNNotifications.shared.actualizacionDisponible(version: version.version)
         }
         return true
     }
 
     func updater(_ updater: SPUUpdater, willInstallUpdate item: SUAppcastItem) {
         prepararReinicio()
+        registrarInstalacion(version: item.displayVersionString,
+                             compilacion: item.versionString)
         Log.escribir("instalando Nuvex \(item.displayVersionString)")
     }
 }
@@ -263,6 +394,10 @@ extension Actualizaciones: SPUUserDriver {
     }
 
     func showUserInitiatedUpdateCheck(cancellation: @escaping () -> Void) {
+        if busquedaCanceladaPorUsuario {
+            cancellation()
+            return
+        }
         cancelarBusqueda = cancellation
         estado = .buscando
     }
@@ -270,23 +405,46 @@ extension Actualizaciones: SPUUserDriver {
     func showUpdateFound(with appcastItem: SUAppcastItem, state: SPUUserUpdateState,
                          reply: @escaping (SPUUserUpdateChoice) -> Void) {
         cancelarBusqueda = nil
+        if busquedaCanceladaPorUsuario {
+            busquedaCanceladaPorUsuario = false
+            candidatoActual = nil
+            estado = .inactivo
+            reply(.dismiss)
+            return
+        }
         let version = VersionDisponible(appcastItem)
+        candidatoActual = Self.candidato(appcastItem)
+        let etapa: EtapaPresentacionActualizacion
         switch state.stage {
-        case .installing:
+        case .installing: etapa = .instalando
+        case .downloaded: etapa = .descargada
+        default: etapa = .sinDescargar
+        }
+        switch PoliticaPresentacionActualizacion.accion(
+            etapa: etapa, iniciadaPorUsuario: state.userInitiated,
+            instalarAhora: instalarAlEstarLista) {
+        case .iniciarDescarga:
+            reply(.install)
+        case .instalarAhora:
+            instalarAlEstarLista = false
+            prepararReinicio()
             estado = .instalando(version)
             reply(.install)
-        case .downloaded:
-            estado = .lista(version)
-            responderLista = reply
-        default:
+        case .mostrarDisponible:
             estado = .disponible(version)
-            if instalarAlEstarLista && state.userInitiated {
-                reply(.install)
-            } else {
-                responderVersion = reply
-            }
+            responderVersion = reply
+        case .mantenerProgramada:
+            instalarAlEstarLista = false
+            estado = .programada(version)
+            responderLista = nil
+            reply(.dismiss)
         }
-        if !state.userInitiated && !pantallaVisible {
+        let debeAvisar: Bool
+        switch estado {
+        case .disponible, .lista: debeAvisar = true
+        default: debeAvisar = false
+        }
+        if !state.userInitiated && !pantallaVisible && debeAvisar {
             // Comprobación programada: aviso discreto, sin abrir ventanas.
             disponible = version.version
             VPNNotifications.shared.actualizacionDisponible(version: version.version)
@@ -299,7 +457,15 @@ extension Actualizaciones: SPUUserDriver {
 
     func showUpdateNotFoundWithError(_ error: any Error, acknowledgement: @escaping () -> Void) {
         cancelarBusqueda = nil
+        if busquedaCanceladaPorUsuario {
+            busquedaCanceladaPorUsuario = false
+            estado = .inactivo
+            acknowledgement()
+            return
+        }
         estado = .alDia
+        candidatoActual = nil
+        instalarAlEstarLista = false
         disponible = nil
         acknowledgement()
     }
@@ -307,6 +473,17 @@ extension Actualizaciones: SPUUserDriver {
     func showUpdaterError(_ error: any Error, acknowledgement: @escaping () -> Void) {
         cancelarBusqueda = nil
         cancelarDescarga = nil
+        if busquedaCanceladaPorUsuario {
+            busquedaCanceladaPorUsuario = false
+            estado = .inactivo
+            acknowledgement()
+            return
+        }
+        esperaReinicio?.cancel()
+        esperaReinicio = nil
+        instalarProgramadaAhora = nil
+        instalarAlEstarLista = false
+        cancelarRegistroDeSesion()
         Log.escribir("error de actualización: \(error.localizedDescription)")
         estado = .error(Self.mensaje(error))
         acknowledgement()
@@ -342,6 +519,7 @@ extension Actualizaciones: SPUUserDriver {
         guard let version = estado.version else { reply(.dismiss); return }
         if instalarAlEstarLista {
             // Se pulsó «Actualizar ahora»: se instala sin volver a preguntar.
+            instalarAlEstarLista = false
             estado = .instalando(version)
             prepararReinicio()
             reply(.install)
@@ -358,7 +536,12 @@ extension Actualizaciones: SPUUserDriver {
     }
 
     func showUpdateInstalledAndRelaunched(_ relaunched: Bool, acknowledgement: @escaping () -> Void) {
+        busquedaCanceladaPorUsuario = false
         estado = .alDia
+        candidatoActual = nil
+        instalarProgramadaAhora = nil
+        instalarAlEstarLista = false
+        instalacionRegistradaEnSesion = false
         disponible = nil
         acknowledgement()
     }
@@ -368,10 +551,19 @@ extension Actualizaciones: SPUUserDriver {
     }
 
     func dismissUpdateInstallation() {
+        busquedaCanceladaPorUsuario = false
         cancelarDescarga = nil
         cancelarBusqueda = nil
         responderVersion = nil
         responderLista = nil
+        esperaReinicio?.cancel()
+        esperaReinicio = nil
+        if case .programada = estado {
+            // Sparkle conserva la instalación para el cierre de la app.
+            return
+        }
+        cancelarRegistroDeSesion()
+        instalarProgramadaAhora = nil
         instalarAlEstarLista = false
         switch estado {
         case .buscando, .descargando, .preparando, .instalando: estado = .inactivo

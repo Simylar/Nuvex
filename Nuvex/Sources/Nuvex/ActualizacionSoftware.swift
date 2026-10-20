@@ -19,6 +19,18 @@ struct ActualizacionSoftwareView: View {
     var body: some View {
         Form {
             Section { tarjeta.padding(.vertical, 6) }
+            if let verificacion = actualizaciones.verificacionInicial {
+                Section("Última instalación") {
+                    switch verificacion {
+                    case .verificada:
+                        Label(verificacion.mensaje, systemImage: "checkmark.seal.fill")
+                            .foregroundStyle(.green)
+                    case .incompleta:
+                        Label(verificacion.mensaje, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                    }
+                }
+            }
             if let version = actualizaciones.estado.version, !version.notas.isEmpty {
                 Section("Novedades de Nuvex \(version.version)") {
                     NotasVersion(texto: version.notas)
@@ -97,6 +109,8 @@ struct ActualizacionSoftwareView: View {
                 VStack(spacing: 10) {
                     ProgressView().controlSize(.regular)
                     Text("Buscando actualizaciones…").foregroundStyle(.secondary)
+                    Button("Cancelar") { actualizaciones.cancelar() }
+                        .padding(.top, 4)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 24)
@@ -159,6 +173,29 @@ struct ActualizacionSoftwareView: View {
                             .controlSize(.large)
                             .keyboardShortcut(.defaultAction)
                     }
+                }
+            case .programada(let version):
+                VStack(alignment: .leading, spacing: 14) {
+                    cabecera(version)
+                    Label("Se instalará al cerrar Nuvex", systemImage: "clock.fill")
+                        .foregroundStyle(.blue)
+                    Text("La descarga ya está verificada. Puedes seguir usando Nuvex o instalarla ahora.")
+                        .font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Spacer()
+                        Button("Instalar ahora") { actualizaciones.actualizarAhora() }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
+                    }
+                }
+            case .esperando(let version, let detalle):
+                VStack(alignment: .leading, spacing: 14) {
+                    cabecera(version)
+                    progreso(valor: nil, texto: detalle)
+                    Text("Nuvex continuará automáticamente en cuanto sea seguro reiniciar la aplicación. Las VPN ya conectadas no se interrumpirán.")
+                        .font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             case .instalando(let version):
                 VStack(alignment: .leading, spacing: 14) {

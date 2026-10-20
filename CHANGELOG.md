@@ -8,12 +8,18 @@ Este archivo sigue el formato de [Keep a Changelog](https://keepachangelog.com/e
 - Automatización usa estados, eventos y motivos estables en JSON, limita el tiempo de respuesta y permite un diagnóstico profundo opcional del Llavero.
 - Las instalaciones nuevas piden confirmación antes de aceptar acciones remotas; las preferencias existentes se conservan.
 - El diagnóstico ejecuta el comando instalado de extremo a extremo y diferencia configuración local de credenciales o servidores realmente probados.
+- Las actualizaciones y su publicación validan SemVer sin regresiones, compilación, canal, tipo de paquete, HTTPS, firma EdDSA y espacio disponible; el siguiente arranque exige la versión exacta y conserva cualquier diagnóstico pendiente hasta mostrarlo.
+- La pantalla de actualización distingue entre una instalación programada y una que espera a que termine una conexión, un guardado o la preparación del ayudante.
 
 ### Correcciones
 - `nuvex conectar` ya no informa un fallo durante el intervalo entre el arranque del túnel y su confirmación en el estado.
 - `nuvex desconectar` puede cancelar una conexión que aún está arrancando o esperando un código.
 - Una cancelación solo se informa como completada tras confirmar el estado del túnel; una confirmación en la Mac ya vencida no ejecuta la orden.
 - Un diagnóstico con pendientes devuelve un código de salida distinto de cero y el registro se rota para no crecer indefinidamente.
+- La instalación y la restauración desde código conservan la app anterior hasta verificar firma, versión, arranque y control local; si fallan, la recuperan y vuelven a abrir, sin cerrar otras copias de Nuvex ni continuar con una conexión en curso cuyo estado no se pudo comprobar.
+- Cancelar una búsqueda temprana ya no permite que una respuesta tardía reactive la actualización, y las notas HTML se convierten localmente sin cargar recursos externos.
+- Una actualización descargada se extrae y verifica antes de ofrecer instalarla al cerrar; el diagnóstico anterior no se borra por un fallo de búsqueda ajeno.
+- La publicación se cancela si no puede recuperar el appcast anterior y comprueba que cada ZIP conserve su versión y canal, evitando perder historial o mover versiones entre estable y beta.
 
 ## [3.1.2] - 2026-10-18
 

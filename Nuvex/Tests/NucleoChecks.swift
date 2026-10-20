@@ -118,6 +118,113 @@ struct NucleoChecks {
         precondition(v31.canalLegible == "Estable")
         precondition(InfoVersion(corta: "3.2.0", compilacion: 10, canal: "beta").canalLegible == "Beta")
         precondition(InfoVersion(corta: "3.2.0", compilacion: 11, canal: "desarrollo").canalLegible == "Desarrollo")
+
+        // Actualizaciones: se rechazan metadatos inseguros antes de descargar
+        // y el siguiente proceso confirma la compilación realmente instalada.
+        let actual = InfoVersion(corta: "3.1.2", compilacion: 130)
+        let candidato = CandidatoActualizacion(
+            version: "3.2.0", compilacion: "131", canal: nil,
+            direccion: URL(string: "https://example.invalid/Nuvex-3.2.0.zip"),
+            tipoInstalacion: "application", tamano: 20 * 1_024 * 1_024)
+        try PreparacionActualizacion.validar(candidato, actual: actual, permiteBeta: false,
+                                             capacidadDisponible: 500 * 1_024 * 1_024)
+        precondition(PreparacionActualizacion.espacioNecesario(tamano: candidato.tamano) == 250 * 1_024 * 1_024)
+        let inseguro = CandidatoActualizacion(version: candidato.version, compilacion: candidato.compilacion,
+            canal: candidato.canal, direccion: URL(string: "http://example.invalid/Nuvex.zip"),
+            tipoInstalacion: candidato.tipoInstalacion, tamano: candidato.tamano)
+        do {
+            try PreparacionActualizacion.validar(inseguro, actual: actual, permiteBeta: false,
+                                                 capacidadDisponible: nil)
+            preconditionFailure("una actualización por HTTP debe rechazarse")
+        } catch ErrorPreparacionActualizacion.direccionInsegura {}
+        let beta = CandidatoActualizacion(version: "3.2.0-beta.1", compilacion: "132", canal: "beta",
+            direccion: candidato.direccion, tipoInstalacion: "application", tamano: candidato.tamano)
+        do {
+            try PreparacionActualizacion.validar(beta, actual: actual, permiteBeta: false,
+                                                 capacidadDisponible: nil)
+            preconditionFailure("el canal beta necesita consentimiento")
+        } catch ErrorPreparacionActualizacion.canalNoPermitido {}
+        try PreparacionActualizacion.validar(beta, actual: actual, permiteBeta: true,
+                                             capacidadDisponible: 500 * 1_024 * 1_024)
+        let regresiva = CandidatoActualizacion(
+            version: "3.1.1", compilacion: "131", canal: nil, direccion: candidato.direccion,
+            tipoInstalacion: "application", tamano: candidato.tamano)
+        do {
+            try PreparacionActualizacion.validar(regresiva, actual: actual, permiteBeta: false,
+                                                 capacidadDisponible: nil)
+            preconditionFailure("una compilación mayor no debe permitir regresar la versión pública")
+        } catch ErrorPreparacionActualizacion.versionAnterior {}
+        precondition(VersionSemantica("1.0.0-alpha")! < VersionSemantica("1.0.0-alpha.1")!)
+        precondition(VersionSemantica("1.0.0-beta.11")! < VersionSemantica("1.0.0-rc.1")!)
+        precondition(VersionSemantica("1.0.0-rc.1")! < VersionSemantica("1.0.0")!)
+        precondition(VersionSemantica("1.0.0+compilacion.7") == VersionSemantica("1.0.0+otra"))
+        precondition(VersionSemantica("99999999999999999999.0.0")!
+                     > VersionSemantica("10000000000000000000.0.0")!)
+        precondition(VersionSemantica("01.0.0") == nil)
+        precondition(VersionSemantica("1.0.0-01") == nil)
+        do {
+            try PreparacionActualizacion.validar(candidato, actual: actual, permiteBeta: false,
+                                                 capacidadDisponible: 100 * 1_024 * 1_024)
+            preconditionFailure("una actualización sin espacio debe rechazarse")
+        } catch ErrorPreparacionActualizacion.espacioInsuficiente {}
+
+        precondition(PoliticaPresentacionActualizacion.accion(
+            etapa: .sinDescargar, iniciadaPorUsuario: true, instalarAhora: true) == .iniciarDescarga)
+        precondition(PoliticaPresentacionActualizacion.accion(
+            etapa: .descargada, iniciadaPorUsuario: true, instalarAhora: true) == .iniciarDescarga)
+        precondition(PoliticaPresentacionActualizacion.accion(
+            etapa: .instalando, iniciadaPorUsuario: false, instalarAhora: true) == .mantenerProgramada)
+        precondition(PoliticaPresentacionActualizacion.accion(
+            etapa: .instalando, iniciadaPorUsuario: true, instalarAhora: false) == .mantenerProgramada)
+        precondition(PoliticaPresentacionActualizacion.accion(
+            etapa: .descargada, iniciadaPorUsuario: false, instalarAhora: false) == .mostrarDisponible)
+
+        let defaultsActualizacion = UserDefaults(suiteName: "NuvexActualizacion.\(UUID().uuidString)")!
+        precondition(RegistroInstalacionActualizacion.comenzar(
+            version: "3.2.0", compilacion: "131", actual: actual,
+            defaults: defaultsActualizacion, ahora: Date(timeIntervalSince1970: 1)))
+        let verificada = RegistroInstalacionActualizacion.resolver(
+            actual: InfoVersion(corta: "3.2.0", compilacion: 131), defaults: defaultsActualizacion)
+        if case .verificada(let registro)? = verificada {
+            precondition(registro.compilacionOrigen == 130 && registro.compilacionEsperada == 131)
+        } else { preconditionFailure("el siguiente proceso debe confirmar la compilación esperada") }
+        precondition(RegistroInstalacionActualizacion.resolver(actual: actual, defaults: defaultsActualizacion) == nil)
+        RegistroInstalacionActualizacion.comenzar(version: "3.2.0", compilacion: "131", actual: actual,
+                                                  defaults: defaultsActualizacion)
+        let incompleta = RegistroInstalacionActualizacion.resolver(actual: actual, defaults: defaultsActualizacion)
+        if case .incompleta(_, let instalada)? = incompleta {
+            precondition(instalada == actual)
+        } else { preconditionFailure("volver a abrir la versión anterior debe informar el fallo") }
+        precondition(RegistroInstalacionActualizacion.resolver(
+            actual: actual, defaults: defaultsActualizacion) == incompleta,
+            "el diagnóstico incompleto debe persistir hasta que el usuario lo vea")
+        RegistroInstalacionActualizacion.confirmarLectura(defaults: defaultsActualizacion)
+        precondition(!RegistroInstalacionActualizacion.comenzar(
+            version: "3.1.2", compilacion: "130", actual: actual,
+            defaults: defaultsActualizacion))
+        precondition(RegistroInstalacionActualizacion.resolver(
+            actual: actual, defaults: defaultsActualizacion) == nil)
+        RegistroInstalacionActualizacion.comenzar(version: "3.2.0", compilacion: "131", actual: actual,
+                                                  defaults: defaultsActualizacion)
+        let versionDistinta = RegistroInstalacionActualizacion.resolver(
+            actual: InfoVersion(corta: "3.3.0", compilacion: 132), defaults: defaultsActualizacion)
+        if case .incompleta? = versionDistinta {} else {
+            preconditionFailure("solo la versión y compilación exactas deben confirmar la instalación")
+        }
+        RegistroInstalacionActualizacion.confirmarLectura(defaults: defaultsActualizacion)
+
+        let notasHTML = TextoHTMLSeguro.convertir("""
+        <head><link href="https://example.invalid/estilo.css"></head>
+        <h2>Novedades</h2><p>Cambio &amp; mejora &#x1F680;.</p>
+        <img src="https://example.invalid/seguimiento.png">
+        <script>contenidoPeligroso()</script><ul><li>Más estable</li></ul>
+        """)
+        precondition(notasHTML.contains("Novedades"))
+        precondition(notasHTML.contains("Cambio & mejora 🚀."))
+        precondition(notasHTML.contains("• Más estable"))
+        precondition(!notasHTML.contains("https://") && !notasHTML.contains("contenidoPeligroso"),
+                     "las notas HTML no deben conservar recursos ni contenido ejecutable")
+
         // Instalación nueva, sin conexiones: no es una actualización.
         let limpia = UserDefaults(suiteName: "NuvexNucleo.\(UUID().uuidString)")!
         let instalacion = Migraciones.ejecutar(defaults: limpia, version: v31, base: base, perfiles: perfiles)

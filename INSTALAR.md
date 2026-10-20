@@ -50,9 +50,10 @@ También puedes consultar `./nuvexctl.sh list` o iniciar `./nuvexctl.sh connect 
 Las conexiones, contraseñas y ajustes viven fuera de la app ([docs/datos.md](docs/datos.md)), así que actualizar no los toca.
 
 - **Desde la app**: Ajustes › Actualización de software muestra la versión disponible y sus novedades. Las VPN activas siguen conectadas durante la instalación.
-- **Desde el código**: `Nuvex/scripts/instalar.sh` compila, pasa las pruebas, guarda la versión anterior como ZIP en `~/Library/Application Support/Nuvex/Versiones` y reemplaza la app. También archiva los respaldos `.app` antiguos. Después de comprobar la instalación, retira la copia compilada del repositorio. `Nuvex/scripts/revertir.sh` vuelve atrás.
+- **Desde el código**: `Nuvex/scripts/instalar.sh` compila, pasa las pruebas, guarda la versión anterior como ZIP en `~/Library/Application Support/Nuvex/Versiones` y reemplaza la app. Conserva además la app anterior durante el reemplazo hasta verificar firma, versión, arranque y respuesta del control local; si algo falla, la restaura y vuelve a abrir automáticamente. Solo cierra la copia de `/Applications`, no otras compilaciones que estén abiertas. También archiva los respaldos `.app` antiguos. Después de comprobar la instalación, retira la copia compilada del repositorio. `Nuvex/scripts/revertir.sh` usa el mismo reemplazo recuperable para volver atrás y rechaza hacerlo durante una conexión en curso; `--forzar` permite continuar de forma explícita.
 - Antes de cada versión nueva, Nuvex copia la configuración en `~/Library/Application Support/Nuvex/Copias`. Se restaura desde Ajustes › General › Copias de seguridad.
 - Si una versión cambia el motor, Nuvex pide autorizar el ayudante en ese momento. Si cambió la firma de la app, pide probar el acceso al Llavero: elige «Permitir siempre».
+- Antes de descargar desde la app, Nuvex exige una versión y compilación superiores, un canal permitido, un paquete de aplicación mediante HTTPS y espacio suficiente. Sparkle verifica después la firma EdDSA del archivo. Tras reiniciar, Nuvex confirma que está ejecutando la compilación esperada y muestra el resultado en Actualización de software.
 
 ## Privacidad y límites
 

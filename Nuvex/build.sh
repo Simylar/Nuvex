@@ -114,6 +114,7 @@ done
 cp "$ROOT/CHANGELOG.md" "$APP/Contents/Resources/CHANGELOG.md"
 cp "$ENGINE_DIR/LICENSE" "$APP/Contents/Resources/openfortivpn-LICENSE.txt"
 cp "$OPENSSL_PREFIX/LICENSE.txt" "$APP/Contents/Resources/OpenSSL-LICENSE.txt"
+chmod 644 "$APP/Contents/Resources/prepa-ca-bundle.pem"
 chmod 755 "$APP/Contents/Resources/openfortivpn" "$APP/Contents/Resources/nuvexctl.sh"
 
 ICONSET="$ROOT/.build-cache/Nuvex.iconset"

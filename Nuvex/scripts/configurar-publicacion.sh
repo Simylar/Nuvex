@@ -16,6 +16,26 @@ LLAVERO="$HOME/Library/Keychains/login.keychain-db"
 CLAVE_PUBLICA="$RAIZ_APP/Resources/sparkle_ed_public_key"
 GENERATE_KEYS="$RAIZ_APP/.build/artifacts/sparkle/Sparkle/bin/generate_keys"
 OPENSSL="$(brew --prefix openssl@3)/bin/openssl"
+TEMPORAL=""
+TEMPORAL_CLAVE=""
+
+limpiar_temporales() {
+  local estado=$?
+  trap - EXIT INT TERM
+  if [ -n "$TEMPORAL_CLAVE" ] && [ -d "$TEMPORAL_CLAVE" ]; then
+    [ ! -f "$TEMPORAL_CLAVE/clave" ] || rm -P "$TEMPORAL_CLAVE/clave" 2>/dev/null || rm -f "$TEMPORAL_CLAVE/clave"
+    rm -rf "$TEMPORAL_CLAVE"
+  fi
+  if [ -n "$TEMPORAL" ] && [ -d "$TEMPORAL" ]; then
+    [ ! -f "$TEMPORAL/clave.pem" ] || rm -P "$TEMPORAL/clave.pem" 2>/dev/null || rm -f "$TEMPORAL/clave.pem"
+    [ ! -f "$TEMPORAL/nuvex-release.p12" ] || rm -P "$TEMPORAL/nuvex-release.p12" 2>/dev/null || rm -f "$TEMPORAL/nuvex-release.p12"
+    rm -rf "$TEMPORAL"
+  fi
+  exit "$estado"
+}
+trap limpiar_temporales EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 if [ ! -x "$GENERATE_KEYS" ]; then
   (cd "$RAIZ_APP" && swift package resolve >/dev/null)
@@ -29,7 +49,6 @@ else
   read -r -s -p "   Repítela: " FRASE2; echo
   [ "$FRASE" = "$FRASE2" ] && [ ${#FRASE} -ge 12 ] || { echo "Las frases no coinciden o tienen menos de 12 caracteres." >&2; exit 1; }
   TEMPORAL="$(mktemp -d)"
-  trap 'rm -rf "$TEMPORAL"' EXIT
   "$OPENSSL" req -x509 -newkey rsa:3072 -sha256 -days 3650 -nodes \
     -keyout "$TEMPORAL/clave.pem" -out "$TEMPORAL/certificado.pem" -subj "/CN=$IDENTIDAD" \
     -addext "basicConstraints=critical,CA:false" \
@@ -86,6 +105,7 @@ else
   gh secret set SPARKLE_ED_PRIVATE_KEY --repo "$REPO" < "$TEMPORAL_CLAVE/clave"
   rm -P "$TEMPORAL_CLAVE/clave" 2>/dev/null || rm -f "$TEMPORAL_CLAVE/clave"
   rmdir "$TEMPORAL_CLAVE"
+  TEMPORAL_CLAVE=""
   echo "   Guardados en GitHub: NUVEX_CERTIFICADO_P12, NUVEX_CERTIFICADO_FRASE y SPARKLE_ED_PRIVATE_KEY."
 fi
 

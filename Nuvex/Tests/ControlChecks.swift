@@ -5,6 +5,12 @@ import Foundation
 @main
 struct ControlChecks {
     static func main() async throws {
+        // Modo auxiliar: informa la disponibilidad que ve un proceso aislado.
+        if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--sondear" {
+            print(ClienteControl.disponibilidad(ruta: CommandLine.arguments[2]))
+            return
+        }
+
         let conexiones = [
             ConexionInfo(id: "vpn-1", nombre: "Oficina central", estado: .desconectada, permitida: true, codigoPorCorreo: false),
             ConexionInfo(id: "vpn-2", nombre: "Prepa · Sedes", estado: .conectada, ip: "10.0.0.2", permitida: true, codigoPorCorreo: true),
@@ -85,6 +91,21 @@ struct ControlChecks {
         precondition(atributos.st_mode & 0o777 == 0o600, "el socket debe ser privado")
         precondition(ClienteControl.hayServidor(ruta: ruta))
         precondition(ClienteControl.disponibilidad(ruta: ruta) == .abierta)
+
+        // Un sandbox sin red, como el de Codex, no se confunde con una Nuvex cerrada.
+        if FileManager.default.isExecutableFile(atPath: "/usr/bin/sandbox-exec") {
+            let aislado = Process()
+            aislado.executableURL = URL(fileURLWithPath: "/usr/bin/sandbox-exec")
+            aislado.arguments = ["-p", "(version 1)(allow default)(deny network*)",
+                                 CommandLine.arguments[0], "--sondear", ruta]
+            let salida = Pipe()
+            aislado.standardOutput = salida
+            try aislado.run()
+            aislado.waitUntilExit()
+            let visto = String(decoding: salida.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            precondition(visto == "bloqueada", "desde un sandbox se esperaba «bloqueada» y llegó «\(visto)»")
+        }
 
         let segundo = ServidorSocket(ruta: ruta) { _, _, _ in .resultado(.ok) }
         do { try segundo.iniciar(); preconditionFailure("una segunda Nuvex no debe quitarle el socket a la primera") }

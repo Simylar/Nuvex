@@ -2,10 +2,10 @@
 
 Este archivo sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y Nuvex usa [versionado semántico](https://semver.org/lang/es/). Cada sección `## [X.Y.Z]` se muestra en la app como «Novedades» y se publica como notas de la versión.
 
-## [Sin publicar]
+## [3.2.1] - 2026-10-20
 
 ### Correcciones
-- `nuvex` reconoce cuando el sandbox de Codex o Claude Code le impide abrir Nuvex o conectar con ella: en lugar de esperar y decir que Nuvex no respondió, sale con el código 7 y el motivo `aislamiento`, y la habilidad pide repetir el comando fuera del sandbox sin abrir el ejecutable de la app.
+- Codex y Claude Code ya no se quedan esperando cuando su sandbox impide abrir Nuvex: el comando `nuvex` lo detecta al momento y les indica repetir la orden fuera del sandbox, sin abrir la app de forma insegura. Pulsa **Actualizar** en las habilidades de **Ajustes › Automatización** para que los asistentes reciban estas instrucciones.
 
 ## [3.2.0] - 2026-10-20
 

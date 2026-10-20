@@ -179,6 +179,58 @@ struct NucleoChecks {
         precondition(PoliticaPresentacionActualizacion.accion(
             etapa: .descargada, iniciadaPorUsuario: false, instalarAhora: false) == .mostrarDisponible)
 
+        let sinRed = NSError(domain: NSURLErrorDomain, code: NSURLErrorNotConnectedToInternet)
+        precondition(PresentacionErrorActualizacion.mensaje(sinRed).contains("conexión a Internet"))
+        let descargaSinRed = NSError(
+            domain: "SUSparkleErrorDomain", code: 2_001,
+            userInfo: [NSUnderlyingErrorKey: sinRed])
+        precondition(PresentacionErrorActualizacion.mensaje(descargaSinRed).contains("conexión a Internet"),
+                     "un error de red envuelto por Sparkle debe conservar una indicación útil")
+        let firmaInvalida = NSError(domain: "SUSparkleErrorDomain", code: 3_001)
+        precondition(PresentacionErrorActualizacion.mensaje(firmaInvalida).contains("verificación de seguridad"))
+        let validacionInterna = NSError(domain: "SUSparkleErrorDomain", code: 3_002)
+        let instaladorInterno = NSError(
+            domain: "SPUInstallerErrorDomain", code: 1,
+            userInfo: [NSUnderlyingErrorKey: validacionInterna])
+        let instalacionEnvuelta = NSError(
+            domain: "SUSparkleErrorDomain", code: 4_005,
+            userInfo: [NSUnderlyingErrorKey: instaladorInterno])
+        precondition(PresentacionErrorActualizacion.mensaje(instalacionEnvuelta)
+            .contains("verificación de seguridad"),
+            "una validación envuelta debe conservar el motivo de seguridad")
+        let firmaInsuficienteEnvuelta = NSError(
+            domain: "SUSparkleErrorDomain", code: 3_000,
+            userInfo: [NSUnderlyingErrorKey: NSError(domain: "SUSparkleErrorDomain", code: 2)])
+        precondition(PresentacionErrorActualizacion.mensaje(firmaInsuficienteEnvuelta)
+            .contains("verificación de seguridad"))
+        let firmaInsuficienteDeLaApp = NSError(domain: "SUSparkleErrorDomain", code: 2)
+        precondition(PresentacionErrorActualizacion.mensaje(firmaInsuficienteDeLaApp)
+            .contains("configuración"),
+            "el código 2 directo describe la configuración de la aplicación")
+        let regresionEnvuelta = NSError(
+            domain: "SUSparkleErrorDomain", code: 4_005,
+            userInfo: [NSUnderlyingErrorKey: NSError(domain: "SUSparkleErrorDomain", code: 4_006)])
+        precondition(PresentacionErrorActualizacion.mensaje(regresionEnvuelta)
+            .contains("verificación de seguridad"))
+        let sinPermiso = NSError(domain: "SUSparkleErrorDomain", code: 4_012)
+        precondition(PresentacionErrorActualizacion.mensaje(sinPermiso).contains("carpeta Aplicaciones"))
+        let desdeImagen = NSError(domain: "SUSparkleErrorDomain", code: 1_003)
+        precondition(PresentacionErrorActualizacion.mensaje(desdeImagen).contains("imagen de disco"))
+        let translocada = NSError(domain: "SUSparkleErrorDomain", code: 1_005)
+        precondition(PresentacionErrorActualizacion.mensaje(translocada).contains("carpeta Aplicaciones"))
+        let usoIncorrecto = NSError(domain: "SUSparkleErrorDomain", code: 5_000)
+        precondition(PresentacionErrorActualizacion.mensaje(usoIncorrecto).contains("configuración"))
+        let espacioInsuficiente = ErrorPreparacionActualizacion.espacioInsuficiente(
+            necesario: 250 * 1_024 * 1_024, disponible: 100 * 1_024 * 1_024)
+        precondition(PresentacionErrorActualizacion.mensaje(espacioInsuficiente)
+            .contains("No hay espacio suficiente"),
+            "los errores seguros de preparación deben conservar su explicación")
+        let desconocido = NSError(
+            domain: "DominioInterno", code: 99,
+            userInfo: [NSLocalizedDescriptionKey: "ruta privada que no debe mostrarse"])
+        precondition(!PresentacionErrorActualizacion.mensaje(desconocido).contains("ruta privada"),
+                     "la interfaz no debe exponer detalles internos del error")
+
         let defaultsActualizacion = UserDefaults(suiteName: "NuvexActualizacion.\(UUID().uuidString)")!
         precondition(RegistroInstalacionActualizacion.comenzar(
             version: "3.2.0", compilacion: "131", actual: actual,
@@ -187,6 +239,7 @@ struct NucleoChecks {
             actual: InfoVersion(corta: "3.2.0", compilacion: 131), defaults: defaultsActualizacion)
         if case .verificada(let registro)? = verificada {
             precondition(registro.compilacionOrigen == 130 && registro.compilacionEsperada == 131)
+            precondition(verificada?.mensaje.contains("se instaló y abrió correctamente") == true)
         } else { preconditionFailure("el siguiente proceso debe confirmar la compilación esperada") }
         precondition(RegistroInstalacionActualizacion.resolver(actual: actual, defaults: defaultsActualizacion) == nil)
         RegistroInstalacionActualizacion.comenzar(version: "3.2.0", compilacion: "131", actual: actual,
@@ -194,6 +247,7 @@ struct NucleoChecks {
         let incompleta = RegistroInstalacionActualizacion.resolver(actual: actual, defaults: defaultsActualizacion)
         if case .incompleta(_, let instalada)? = incompleta {
             precondition(instalada == actual)
+            precondition(incompleta?.mensaje.contains("Tus conexiones, contraseñas y ajustes se conservaron") == true)
         } else { preconditionFailure("volver a abrir la versión anterior debe informar el fallo") }
         precondition(RegistroInstalacionActualizacion.resolver(
             actual: actual, defaults: defaultsActualizacion) == incompleta,

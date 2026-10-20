@@ -13,31 +13,38 @@ struct IconoNuvex: View {
 /// muestra: el menú, el panel y los avisos llevan aquí.
 struct ActualizacionSoftwareView: View {
     @ObservedObject var actualizaciones: Actualizaciones
-    private static let instalada = InfoVersion.actual
-    private static let notasInstaladas = ChequeoActualizacion.notas(de: instalada.corta)
+    private let instalada: InfoVersion
+    private let notasInstaladas: String?
+
+    init(actualizaciones: Actualizaciones, instalada: InfoVersion = .actual) {
+        self.actualizaciones = actualizaciones
+        self.instalada = instalada
+        notasInstaladas = ChequeoActualizacion.notas(de: instalada.corta)
+    }
 
     var body: some View {
         Form {
             Section { tarjeta.padding(.vertical, 6) }
-            if let verificacion = actualizaciones.verificacionInicial {
+            if let verificacion = actualizaciones.verificacionInicial,
+               actualizaciones.estado != .error(verificacion.mensaje) {
                 Section("Última instalación") {
                     switch verificacion {
                     case .verificada:
-                        Label(verificacion.mensaje, systemImage: "checkmark.seal.fill")
-                            .foregroundStyle(.green)
+                        etiquetaVerificacion(verificacion.mensaje,
+                                             simbolo: "checkmark.seal.fill", color: .green)
                     case .incompleta:
-                        Label(verificacion.mensaje, systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
+                        etiquetaVerificacion(verificacion.mensaje,
+                                             simbolo: "exclamationmark.triangle.fill", color: .orange)
                     }
                 }
             }
+            detallesInstalados
             if let version = actualizaciones.estado.version, !version.notas.isEmpty {
                 Section("Novedades de Nuvex \(version.version)") {
                     NotasVersion(texto: version.notas)
                         .padding(.vertical, 4)
                 }
             }
-            detallesInstalados
             if actualizaciones.configuradas {
                 Section {
                     Toggle("Buscar actualizaciones automáticamente", isOn: Binding(
@@ -66,15 +73,15 @@ struct ActualizacionSoftwareView: View {
 
     private var detallesInstalados: some View {
         Section("Versión instalada") {
-            LabeledContent("Versión", value: Self.instalada.corta)
-            LabeledContent("Compilación", value: String(Self.instalada.compilacion))
-            LabeledContent("Canal", value: Self.instalada.canalLegible)
-            if !Self.instalada.commit.isEmpty {
+            LabeledContent("Versión", value: instalada.corta)
+            LabeledContent("Compilación", value: String(instalada.compilacion))
+            LabeledContent("Canal", value: instalada.canalLegible)
+            if !instalada.commit.isEmpty {
                 LabeledContent("Commit") {
-                    Text(Self.instalada.commit).monospaced().textSelection(.enabled)
+                    Text(instalada.commit).monospaced().textSelection(.enabled)
                 }
             }
-            if let notas = Self.notasInstaladas, !notas.isEmpty {
+            if let notas = notasInstaladas, !notas.isEmpty {
                 DisclosureGroup("Detalles de esta versión") {
                     NotasVersion(texto: notas)
                         .padding(.top, 8)
@@ -88,7 +95,7 @@ struct ActualizacionSoftwareView: View {
     @ViewBuilder
     private var tarjeta: some View {
         if !actualizaciones.configuradas {
-            centrado(titulo: "Nuvex \(InfoVersion.actual.descripcion)",
+            centrado(titulo: "Nuvex \(instalada.descripcion)",
                      detalle: "Esta compilación se hizo antes de activar las actualizaciones automáticas. Instala la versión publicada una vez y, desde ahí, Nuvex se actualizará sola.") {
                 Link("Ver versiones publicadas", destination: URL(string: "https://github.com/Simylar/Nuvex/releases/latest")!)
                     .padding(.top, 6)
@@ -96,9 +103,11 @@ struct ActualizacionSoftwareView: View {
         } else {
             switch actualizaciones.estado {
             case .inactivo, .alDia:
-                centrado(titulo: "Nuvex \(InfoVersion.actual.corta)",
-                         detalle: actualizaciones.estado == .alDia ? "Nuvex está actualizado" : ultimaBusqueda) {
-                    if actualizaciones.estado == .alDia {
+                centrado(titulo: "Nuvex \(instalada.corta)",
+                         detalle: actualizaciones.estado == .alDia
+                            ? "Nuvex está actualizado"
+                            : ultimaBusqueda ?? "Aún no se ha buscado") {
+                    if actualizaciones.estado == .alDia, let ultimaBusqueda {
                         Text(ultimaBusqueda).font(.caption).foregroundStyle(.secondary)
                     }
                     Button("Buscar actualizaciones") { actualizaciones.buscar() }
@@ -116,9 +125,13 @@ struct ActualizacionSoftwareView: View {
                 .padding(.vertical, 24)
             case .error(let mensaje):
                 centrado(titulo: "No se pudo actualizar", detalle: mensaje, simbolo: "exclamationmark.triangle.fill") {
-                    Button("Reintentar") { actualizaciones.buscar() }
-                        .disabled(!actualizaciones.puedeBuscar)
-                        .padding(.top, 6)
+                    HStack {
+                        if actualizaciones.puedeBuscar {
+                            Button("Buscar de nuevo") { actualizaciones.buscar() }
+                        }
+                        Link("Ver versiones publicadas", destination: URL(string: "https://github.com/Simylar/Nuvex/releases/latest")!)
+                    }
+                    .padding(.top, 6)
                 }
             case .disponible(let version):
                 VStack(alignment: .leading, spacing: 14) {
@@ -206,8 +219,8 @@ struct ActualizacionSoftwareView: View {
         }
     }
 
-    private var ultimaBusqueda: String {
-        guard let fecha = actualizaciones.ultimaBusqueda else { return "Aún no se ha buscado" }
+    private var ultimaBusqueda: String? {
+        guard let fecha = actualizaciones.ultimaBusqueda else { return nil }
         return "Última búsqueda: \(fecha.formatted(.relative(presentation: .named)))"
     }
 
@@ -220,12 +233,34 @@ struct ActualizacionSoftwareView: View {
                     if version.esBeta { Etiqueta(texto: "Beta", color: .orange) }
                     if version.esCritica { Etiqueta(texto: "Importante", color: .red) }
                 }
-                Text(["Simylar", version.tamano.map(bytes), version.fecha?.formatted(date: .abbreviated, time: .omitted)]
-                        .compactMap { $0 }.joined(separator: " · "))
+                Text(metadatos(version))
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func metadatos(_ version: VersionDisponible) -> String {
+        var valores = ["Simylar"]
+        if !version.compilacion.isEmpty {
+            valores.append("Compilación \(version.compilacion)")
+        }
+        if let tamano = version.tamano {
+            valores.append(bytes(tamano))
+        }
+        if let fecha = version.fecha {
+            valores.append(fecha.formatted(date: .abbreviated, time: .omitted))
+        }
+        return valores.joined(separator: " · ")
+    }
+
+    private func etiquetaVerificacion(_ mensaje: String, simbolo: String, color: Color) -> some View {
+        Label {
+            Text(mensaje)
+        } icon: {
+            Image(systemName: simbolo).foregroundStyle(color)
         }
     }
 
@@ -233,10 +268,13 @@ struct ActualizacionSoftwareView: View {
         VStack(alignment: .leading, spacing: 6) {
             if let valor {
                 ProgressView(value: min(max(valor, 0), 1))
+                    .accessibilityLabel(Text(texto))
             } else {
                 ProgressView().progressViewStyle(.linear)
+                    .accessibilityLabel(Text(texto))
             }
             Text(texto).font(.callout).foregroundStyle(.secondary).monospacedDigit()
+                .accessibilityHidden(true)
         }
     }
 
@@ -245,6 +283,7 @@ struct ActualizacionSoftwareView: View {
         VStack(spacing: 8) {
             if let simbolo {
                 Image(systemName: simbolo).font(.system(size: 40)).foregroundStyle(.orange)
+                    .accessibilityHidden(true)
             } else {
                 IconoNuvex(lado: 72)
             }

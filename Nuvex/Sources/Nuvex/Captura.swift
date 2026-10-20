@@ -22,6 +22,16 @@ enum Captura {
             guardar(ConfigurationView(modelo: modelo, borradores: borradores).frame(width: 820, height: 640),
                     nombre: "ajustes-conexion-\(sufijo)", en: carpeta, oscuro: oscuro)
         }
+        let modeloAtencion = VPNModel(muestra: ())
+        modeloAtencion.usarActualizacionesDeMuestra(Actualizaciones(
+            muestra: .error("La última actualización no se completó."),
+            puedeBuscar: true, requiereAtencion: true))
+        guardar(PanelVPN(modelo: modeloAtencion).background(.background),
+                nombre: "panel-actualizacion-atencion", en: carpeta, oscuro: false)
+        borradores.seleccion = .general
+        guardar(ConfigurationView(modelo: modeloAtencion, borradores: borradores)
+            .frame(width: 820, height: 640),
+                nombre: "ajustes-actualizacion-atencion", en: carpeta, oscuro: false)
         borradores.seleccion = .conexion("norte")
         if let i = borradores.drafts.firstIndex(where: { $0.id == "norte" }) {
             borradores.drafts[i].server = "remote.norte.example:443"
@@ -42,22 +52,68 @@ enum Captura {
                 nombre: "ajustes-ayudante-claro", en: carpeta, oscuro: false)
         guardar(BienvenidaView(modelo: modelo, cerrar: {}).background(.background),
                 nombre: "bienvenida-claro", en: carpeta, oscuro: false)
-        let notas = ChequeoActualizacion.notas(de: "3.1.0", en: (try? String(contentsOfFile: carpetaProyecto + "/CHANGELOG.md", encoding: .utf8))) ?? ""
-        let version = VersionDisponible(version: "3.1.0", compilacion: "42", tamano: 12_400_000,
+        let notas = """
+        ### Mejoras
+        - Instalación más clara y confiable.
+        - Diagnósticos útiles sin mostrar información sensible.
+
+        ### Seguridad
+        - Verificación obligatoria de la firma antes de instalar.
+        """
+        let instalada = InfoVersion(corta: "3.1.2", compilacion: 130,
+                                    canal: "publicada", commit: "90c7bca")
+        let version = VersionDisponible(version: "3.2.0", compilacion: "140", tamano: 12_400_000,
                                         fecha: Date(), notas: notas)
         let estados: [(String, EstadoActualizacion)] = [
             ("aldia", .alDia),
+            ("buscando", .buscando),
             ("disponible", .disponible(version)),
             ("descargando", .descargando(version, recibido: 5_100_000, total: 12_400_000)),
+            ("preparando", .preparando(version, progreso: 0.72)),
             ("lista", .lista(version)),
+            ("programada", .programada(version)),
+            ("esperando", .esperando(version, detalle: "Esperando a que termine de guardarse la configuración…")),
+            ("instalando", .instalando(version)),
+            ("error", .error("La actualización no superó la verificación de seguridad y no se instaló. Inténtalo de nuevo más tarde.")),
         ]
         for (nombre, estado) in estados {
-            guardar(ActualizacionSoftwareView(actualizaciones: Actualizaciones(muestra: estado)).frame(width: 520, height: 640),
+            guardar(ActualizacionSoftwareView(actualizaciones: Actualizaciones(muestra: estado),
+                                              instalada: instalada).frame(width: 520, height: 640),
                     nombre: "actualizacion-\(nombre)", en: carpeta, oscuro: false)
         }
-        guardar(ActualizacionSoftwareView(actualizaciones: Actualizaciones(muestra: .disponible(version))).frame(width: 520, height: 640),
+        let instaladaActualizada = InfoVersion(corta: version.version, compilacion: 140,
+                                               canal: "publicada", commit: "d4e5f6a")
+        let registroInstalacion = InstalacionActualizacionPendiente(
+            versionOrigen: instalada.corta, compilacionOrigen: instalada.compilacion,
+            versionEsperada: version.version,
+            compilacionEsperada: instaladaActualizada.compilacion, iniciada: Date())
+        let verificada = ResultadoInstalacionActualizacion.verificada(registroInstalacion)
+        guardar(ActualizacionSoftwareView(
+            actualizaciones: Actualizaciones(muestra: .alDia, verificacionInicial: verificada),
+            instalada: instaladaActualizada).frame(width: 520, height: 640),
+                nombre: "actualizacion-instalacion-verificada", en: carpeta, oscuro: false)
+        let incompleta = ResultadoInstalacionActualizacion.incompleta(
+            registroInstalacion, instalada: instalada)
+        guardar(ActualizacionSoftwareView(
+            actualizaciones: Actualizaciones(muestra: .error(incompleta.mensaje),
+                                              verificacionInicial: incompleta),
+            instalada: instalada).frame(width: 520, height: 640),
+                nombre: "actualizacion-instalacion-incompleta", en: carpeta, oscuro: false)
+        guardar(ActualizacionSoftwareView(
+            actualizaciones: Actualizaciones(muestra: .disponible(version),
+                                              verificacionInicial: incompleta),
+            instalada: instalada).frame(width: 520, height: 640),
+                nombre: "actualizacion-incompleta-con-version", en: carpeta, oscuro: false)
+        let errorConfiguracion = "La configuración de actualizaciones no es válida. Instala nuevamente la versión publicada de Nuvex."
+        guardar(ActualizacionSoftwareView(
+            actualizaciones: Actualizaciones(muestra: .error(errorConfiguracion),
+                                              puedeBuscar: false),
+            instalada: instalada).frame(width: 520, height: 640),
+                nombre: "actualizacion-error-sin-busqueda", en: carpeta, oscuro: false)
+        guardar(ActualizacionSoftwareView(actualizaciones: Actualizaciones(muestra: .disponible(version)),
+                                          instalada: instalada).frame(width: 520, height: 640),
                 nombre: "actualizacion-disponible-oscuro", en: carpeta, oscuro: true)
-        guardar(NovedadesView(version: "3.1.0", notas: notas, cerrar: {}), nombre: "novedades", en: carpeta, oscuro: false)
+        guardar(NovedadesView(version: "3.2.0", notas: notas, cerrar: {}), nombre: "novedades", en: carpeta, oscuro: false)
         guardar(PanelCodigoView(solicitud: .muestra(nombre: "Oficina central",
                                                     correo: .buscando(desde: Date().addingTimeInterval(-12), cuenta: "samuel@gmail.com"))),
                 nombre: "codigo-buscando", en: carpeta, oscuro: false)
@@ -87,19 +143,15 @@ enum Captura {
         }
     }
 
-    /// Raíz del repositorio a partir de este archivo fuente.
-    private static let carpetaProyecto = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        .deletingLastPathComponent().path
-
     private static func guardar<V: View>(_ vista: V, nombre: String, en carpeta: String, oscuro: Bool) {
-        let host = NSHostingView(rootView: vista)
+        let host = NSHostingView(rootView: vista.id(nombre))
         host.appearance = NSAppearance(named: oscuro ? .darkAqua : .aqua)
         host.frame = NSRect(origin: .zero, size: host.fittingSize)
         let ventana = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
         ventana.appearance = host.appearance
         ventana.contentView = host
         ventana.orderFrontRegardless()
+        ventana.makeFirstResponder(nil)
         host.layoutSubtreeIfNeeded()
         RunLoop.main.run(until: Date().addingTimeInterval(0.6))
         guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return }

@@ -46,6 +46,92 @@ enum ErrorPreparacionActualizacion: LocalizedError, Equatable {
     }
 }
 
+/// Traduce los errores técnicos de Sparkle y Foundation a indicaciones que el
+/// usuario puede entender y resolver. Los códigos corresponden a la API
+/// pública `SUSparkleError`; se mantienen aquí para que esta política sea
+/// comprobable sin enlazar el framework en las pruebas del núcleo.
+enum PresentacionErrorActualizacion {
+    private static let dominioSparkle = "SUSparkleErrorDomain"
+    private static let erroresConfiguracion: Set<Int> = [1, 2, 3, 4, 5, 6, 7, 5_000]
+    private static let erroresAppcast: Set<Int> = [1_000, 1_002, 1_004]
+    private static let errorSinActualizacion = 1_001
+    private static let errorDesdeImagenDeDisco = 1_003
+    private static let errorAplicacionTranslocada = 1_005
+    private static let erroresNotas: Set<Int> = [1_006, 1_007]
+    private static let errorTemporal = 2_000
+    private static let errorDescarga = 2_001
+    private static let errorExtraccion = 3_000
+    private static let errorFirmaInsuficiente = 2
+    private static let erroresVerificacion: Set<Int> = [3_001, 3_002, 4_006, 4_009]
+    private static let errorCancelado = 4_007
+    private static let errorSinPermiso = 4_012
+    private static let erroresInstalacion = 4_000...4_012
+
+    static func mensaje(_ error: any Error) -> String {
+        if let preparacion = error as? ErrorPreparacionActualizacion,
+           let descripcion = preparacion.errorDescription {
+            return descripcion
+        }
+        let nsError = error as NSError
+        let cadena = cadenaDeErrores(nsError)
+        if cadena.contains(where: { $0.domain == NSURLErrorDomain }) {
+            return "No hay conexión con el servidor de actualizaciones. Comprueba tu conexión a Internet y vuelve a intentarlo."
+        }
+        let rechazoDeSeguridad = cadena.contains {
+            $0.domain == dominioSparkle && erroresVerificacion.contains($0.code)
+        } || cadena.dropFirst().contains {
+            $0.domain == dominioSparkle && $0.code == errorFirmaInsuficiente
+        }
+        if rechazoDeSeguridad {
+            return "La actualización no superó la verificación de seguridad y no se instaló. Inténtalo de nuevo más tarde."
+        }
+        guard nsError.domain == dominioSparkle else {
+            return "No se pudo completar la actualización. Inténtalo de nuevo; si el problema continúa, instala la versión publicada de Nuvex."
+        }
+
+        switch nsError.code {
+        case let codigo where erroresConfiguracion.contains(codigo):
+            return "La configuración de actualizaciones no es válida. Instala nuevamente la versión publicada de Nuvex."
+        case let codigo where erroresAppcast.contains(codigo):
+            return "El servidor publicó información de actualización no válida. Inténtalo de nuevo más tarde."
+        case errorSinActualizacion:
+            return "No se encontró una actualización compatible. Vuelve a buscar más tarde."
+        case errorDesdeImagenDeDisco:
+            return "Nuvex no puede actualizarse desde una imagen de disco. Mueve la aplicación a la carpeta Aplicaciones y vuelve a intentarlo."
+        case errorAplicacionTranslocada:
+            return "Nuvex no puede actualizarse desde la carpeta donde se descargó. Mueve la aplicación a la carpeta Aplicaciones, ábrela desde ahí y vuelve a intentarlo."
+        case let codigo where erroresNotas.contains(codigo):
+            return "No se pudieron cargar los detalles de la versión. Puedes volver a intentarlo o consultar la versión publicada."
+        case errorTemporal:
+            return "macOS no pudo preparar el espacio temporal para la actualización. Comprueba el espacio disponible y vuelve a intentarlo."
+        case errorDescarga:
+            return "No se pudo descargar la actualización. Comprueba tu conexión a Internet y vuelve a intentarlo."
+        case errorExtraccion:
+            return "No se pudo preparar el archivo descargado. Vuelve a descargar la actualización."
+        case errorCancelado:
+            return "La instalación fue cancelada. Nuvex no realizó ningún cambio."
+        case errorSinPermiso:
+            return "macOS no permitió reemplazar Nuvex. Comprueba que la aplicación esté en la carpeta Aplicaciones y que tengas permiso para modificarla."
+        case erroresInstalacion:
+            return "macOS no pudo instalar o volver a abrir Nuvex. Cierra otras copias de la aplicación y vuelve a intentarlo."
+        default:
+            return "No se pudo completar la actualización. Inténtalo de nuevo; si el problema continúa, instala la versión publicada de Nuvex."
+        }
+    }
+
+    private static func cadenaDeErrores(_ error: NSError) -> [NSError] {
+        var resultado: [NSError] = []
+        var actual: NSError? = error
+        while let elemento = actual, resultado.count < 8 {
+            resultado.append(elemento)
+            guard let causa = elemento.userInfo[NSUnderlyingErrorKey] as? NSError,
+                  causa !== elemento else { break }
+            actual = causa
+        }
+        return resultado
+    }
+}
+
 /// Implementación estricta y pequeña de SemVer 2.0.0. Los metadatos de
 /// compilación se validan, pero no intervienen en la precedencia.
 struct VersionSemantica: Comparable, Equatable {
@@ -236,9 +322,9 @@ enum ResultadoInstalacionActualizacion: Equatable {
     var mensaje: String {
         switch self {
         case .verificada(let registro):
-            return "Se verificó la instalación de Nuvex \(registro.versionEsperada) (\(registro.compilacionEsperada))."
+            return "Nuvex \(registro.versionEsperada) (compilación \(registro.compilacionEsperada)) se instaló y abrió correctamente."
         case .incompleta(let registro, let instalada):
-            return "No se pudo confirmar la actualización a Nuvex \(registro.versionEsperada) (\(registro.compilacionEsperada)). Actualmente usas Nuvex \(instalada.corta) (\(instalada.compilacion))."
+            return "La actualización a Nuvex \(registro.versionEsperada) (compilación \(registro.compilacionEsperada)) no se completó. Nuvex volvió a abrirse con la versión \(instalada.corta) (compilación \(instalada.compilacion)). Tus conexiones, contraseñas y ajustes se conservaron; busca la actualización de nuevo."
         }
     }
 }

@@ -75,6 +75,9 @@ final class Actualizaciones: NSObject, ObservableObject {
     @Published private(set) var disponible: String?
     @Published private(set) var puedeBuscar = false
     @Published private(set) var verificacionInicial: ResultadoInstalacionActualizacion?
+    /// Un fallo ocurrido fuera de la pantalla de actualización todavía no se
+    /// le ha mostrado al usuario.
+    @Published private(set) var requiereAtencion = false
     /// false si esta compilación no tiene clave pública ni dirección de avisos.
     private(set) var configuradas: Bool
 
@@ -85,6 +88,7 @@ final class Actualizaciones: NSObject, ObservableObject {
     private var instalarProgramadaAhora: (() -> Void)?
     private var instalarAlEstarLista = false
     private var candidatoActual: CandidatoActualizacion?
+    private var esMuestra = false
     /// Distingue el registro creado por este proceso de un diagnóstico antiguo
     /// que todavía no se le ha mostrado al usuario.
     private var instalacionRegistradaEnSesion = false
@@ -102,8 +106,11 @@ final class Actualizaciones: NSObject, ObservableObject {
         let info = Bundle.main.infoDictionary ?? [:]
         configuradas = info["SUPublicEDKey"] is String && info["SUFeedURL"] is String
         super.init()
-        if case .incompleta(_, _) = verificacionInicial {
+        if case .verificada = verificacionInicial {
+            estado = .alDia
+        } else if case .incompleta = verificacionInicial {
             estado = .error(verificacionInicial?.mensaje ?? "No se pudo verificar la última actualización.")
+            requiereAtencion = true
         }
         guard configuradas else { return }
         let updater = SPUUpdater(hostBundle: .main, applicationBundle: .main, userDriver: self, delegate: self)
@@ -117,18 +124,29 @@ final class Actualizaciones: NSObject, ObservableObject {
             try updater.start()
         } catch {
             Log.escribir("no se pudo iniciar el buscador de actualizaciones: \(error.localizedDescription)")
+            if case .incompleta = verificacionInicial {
+                // La recuperación de una instalación fallida es el dato más
+                // importante; el enlace de descarga sigue disponible.
+                return
+            }
+            estado = .error(PresentacionErrorActualizacion.mensaje(error))
+            requiereAtencion = true
         }
     }
 
     #if DEBUG
     /// Estado fijo para las capturas de depuración, sin Sparkle.
-    init(muestra estado: EstadoActualizacion, disponible: String? = nil) {
+    init(muestra estado: EstadoActualizacion, disponible: String? = nil,
+         verificacionInicial: ResultadoInstalacionActualizacion? = nil,
+         puedeBuscar: Bool = true, requiereAtencion: Bool = false) {
         configuradas = true
-        verificacionInicial = nil
+        self.verificacionInicial = verificacionInicial
         super.init()
+        esMuestra = true
         self.estado = estado
         self.disponible = disponible
-        puedeBuscar = true
+        self.puedeBuscar = puedeBuscar
+        self.requiereAtencion = requiereAtencion
     }
     #endif
 
@@ -139,7 +157,8 @@ final class Actualizaciones: NSObject, ObservableObject {
 
     func pantallaAparecio() {
         pantallasAbiertas += 1
-        if case .incompleta(_, _)? = verificacionInicial {
+        requiereAtencion = false
+        if !esMuestra, case .incompleta(_, _)? = verificacionInicial {
             RegistroInstalacionActualizacion.confirmarLectura()
         }
     }
@@ -283,8 +302,9 @@ final class Actualizaciones: NSObject, ObservableObject {
     }
 
     var recibirBeta: Bool {
-        get { UserDefaults.standard.bool(forKey: Self.claveBeta) }
+        get { esMuestra ? false : UserDefaults.standard.bool(forKey: Self.claveBeta) }
         set {
+            guard !esMuestra else { return }
             UserDefaults.standard.set(newValue, forKey: Self.claveBeta)
             objectWillChange.send()
             updater?.resetUpdateCycleAfterShortDelay()
@@ -366,6 +386,7 @@ extension Actualizaciones: SPUUpdaterDelegate {
         candidatoActual = Self.candidato(item)
         instalarProgramadaAhora = immediateInstallationBlock
         instalarAlEstarLista = false
+        requiereAtencion = false
         estado = .programada(version)
         disponible = version.version
         prepararReinicio()
@@ -413,6 +434,7 @@ extension Actualizaciones: SPUUserDriver {
             return
         }
         let version = VersionDisponible(appcastItem)
+        requiereAtencion = false
         candidatoActual = Self.candidato(appcastItem)
         let etapa: EtapaPresentacionActualizacion
         switch state.stage {
@@ -464,6 +486,7 @@ extension Actualizaciones: SPUUserDriver {
             return
         }
         estado = .alDia
+        requiereAtencion = false
         candidatoActual = nil
         instalarAlEstarLista = false
         disponible = nil
@@ -485,7 +508,8 @@ extension Actualizaciones: SPUUserDriver {
         instalarAlEstarLista = false
         cancelarRegistroDeSesion()
         Log.escribir("error de actualización: \(error.localizedDescription)")
-        estado = .error(Self.mensaje(error))
+        estado = .error(PresentacionErrorActualizacion.mensaje(error))
+        requiereAtencion = !pantallaVisible
         acknowledgement()
     }
 
@@ -538,6 +562,7 @@ extension Actualizaciones: SPUUserDriver {
     func showUpdateInstalledAndRelaunched(_ relaunched: Bool, acknowledgement: @escaping () -> Void) {
         busquedaCanceladaPorUsuario = false
         estado = .alDia
+        requiereAtencion = false
         candidatoActual = nil
         instalarProgramadaAhora = nil
         instalarAlEstarLista = false
@@ -571,11 +596,4 @@ extension Actualizaciones: SPUUserDriver {
         }
     }
 
-    private static func mensaje(_ error: any Error) -> String {
-        let nsError = error as NSError
-        if nsError.domain == NSURLErrorDomain {
-            return "No hay conexión con el servidor de actualizaciones. Revisa tu conexión a Internet."
-        }
-        return "No se pudo completar la actualización: \(nsError.localizedDescription)"
-    }
 }

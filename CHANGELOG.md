@@ -11,6 +11,9 @@ Este archivo sigue el formato de [Keep a Changelog](https://keepachangelog.com/e
 - Las actualizaciones y su publicación validan SemVer sin regresiones, compilación, canal, tipo de paquete, HTTPS, firma EdDSA y espacio disponible; el siguiente arranque exige la versión exacta y conserva cualquier diagnóstico pendiente hasta mostrarlo.
 - La prueba de actualización completa reproduce en copias temporales la descarga firmada, el parche delta, la extracción y el reemplazo; además comprueba que una interrupción o una firma inválida conserve intacta la versión anterior, sin modificar la app instalada ni depender de servicios externos.
 - La pantalla de actualización distingue entre una instalación programada y una que espera a que termine una conexión, un guardado o la preparación del ayudante.
+- La versión instalada y la compilación candidata se identifican claramente; después de reiniciar se confirma el resultado y, si la instalación no se completó, se informa que la versión anterior y los datos se conservaron.
+- Los fallos ocurridos fuera de la pantalla de actualización dejan un aviso discreto en el panel y un indicador en Ajustes hasta que se revisan.
+- Los fallos de red, firma, configuración, espacio o permisos muestran una explicación segura y una acción útil, sin exponer detalles técnicos internos.
 
 ### Correcciones
 - `nuvex conectar` ya no informa un fallo durante el intervalo entre el arranque del túnel y su confirmación en el estado.

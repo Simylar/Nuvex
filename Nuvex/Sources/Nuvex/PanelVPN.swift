@@ -614,7 +614,12 @@ private struct AvisoActualizacion: View {
     @ObservedObject var actualizaciones: Actualizaciones
 
     var body: some View {
-        if let version = actualizaciones.disponible {
+        if actualizaciones.requiereAtencion {
+            NotaConAccion(simbolo: "exclamationmark.triangle.fill", color: .orange,
+                          texto: "La última actualización necesita atención.", accion: "Revisar") {
+                actualizaciones.mostrar()
+            }
+        } else if let version = actualizaciones.disponible {
             NotaConAccion(simbolo: "arrow.down.circle.fill", color: .accentColor,
                           texto: "Nuvex \(version) está disponible.", accion: "Ver") {
                 actualizaciones.mostrar()

@@ -516,7 +516,7 @@ private struct FilaActualizacionLateral: View {
             Label { Text("Actualización de software") } icon: {
                 IconoCuadrado(simbolo: "arrow.triangle.2.circlepath", color: .gray)
             }
-            .badge(actualizaciones.disponible == nil ? 0 : 1)
+            .badge(actualizaciones.disponible == nil && !actualizaciones.requiereAtencion ? 0 : 1)
         }
     }
 }
@@ -527,7 +527,15 @@ private struct SeccionCopias: View {
     @State private var aRestaurar: CopiaSeguridad?
     @State private var error: String?
 
-    private func cargar() { copias = Migraciones.copias() }
+    private var esMuestra: Bool {
+        #if DEBUG
+        modelo.esMuestra
+        #else
+        false
+        #endif
+    }
+
+    private func cargar() { copias = esMuestra ? [] : Migraciones.copias() }
 
     var body: some View {
         Section {
@@ -560,12 +568,13 @@ private struct SeccionCopias: View {
                     }
                     cargar()
                 }
+                .disabled(esMuestra)
                 Spacer()
                 Button("Mostrar en Finder") {
                     let carpeta = Migraciones.carpetaCopias(Preferencias.directorio)
                     NSWorkspace.shared.open(FileManager.default.fileExists(atPath: carpeta.path) ? carpeta : Preferencias.directorio)
                 }
-                .disabled(!FileManager.default.fileExists(atPath: Preferencias.directorio.path))
+                .disabled(esMuestra || !FileManager.default.fileExists(atPath: Preferencias.directorio.path))
             }
             if let error {
                 Text(error).foregroundStyle(.red).textSelection(.enabled)

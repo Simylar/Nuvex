@@ -29,6 +29,10 @@ final class VPNModel: ObservableObject {
     #if DEBUG
     /// Modelo con datos de ejemplo para capturas: no consulta el motor.
     var esMuestra = false
+
+    func usarActualizacionesDeMuestra(_ actualizaciones: Actualizaciones) {
+        self.actualizaciones = actualizaciones
+    }
     #endif
 
     private var timer: Timer?

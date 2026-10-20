@@ -84,6 +84,7 @@ struct ControlChecks {
         precondition(stat(ruta, &atributos) == 0)
         precondition(atributos.st_mode & 0o777 == 0o600, "el socket debe ser privado")
         precondition(ClienteControl.hayServidor(ruta: ruta))
+        precondition(ClienteControl.disponibilidad(ruta: ruta) == .abierta)
 
         let segundo = ServidorSocket(ruta: ruta) { _, _, _ in .resultado(.ok) }
         do { try segundo.iniciar(); preconditionFailure("una segunda Nuvex no debe quitarle el socket a la primera") }
@@ -117,6 +118,7 @@ struct ControlChecks {
         servidor.detener()
         precondition(!FileManager.default.fileExists(atPath: ruta))
         precondition(!ClienteControl.hayServidor(ruta: ruta))
+        precondition(ClienteControl.disponibilidad(ruta: ruta) == .cerrada, "una Nuvex cerrada no es un sandbox")
         do { _ = try ClienteControl.enviar(Peticion(comando: .estado), ruta: ruta); preconditionFailure("sin servidor") }
         catch ErrorControl.sinServidor {}
 

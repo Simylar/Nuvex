@@ -27,7 +27,8 @@ Opciones generales:
 También se aceptan status, connect, disconnect, code y doctor.
 
 Códigos de salida: 0 bien · 1 error · 2 uso incorrecto · 3 no permitido ·
-4 hace falta la persona o hay pendientes · 5 tiempo agotado · 6 Nuvex no responde.
+4 hace falta la persona o hay pendientes · 5 tiempo agotado · 6 Nuvex no responde ·
+7 el sandbox del asistente bloquea Nuvex: repite el comando fuera del sandbox.
 """
 
 struct Opciones {
@@ -117,21 +118,62 @@ func rutaApp() -> String {
     return "/Applications/Nuvex.app"
 }
 
+/// true si este proceso corre dentro de un sandbox de macOS, como el que usan
+/// Codex o Claude Code para ejecutar comandos.
+func procesoAislado() -> Bool {
+    typealias Comprobar = @convention(c) (pid_t, UnsafePointer<CChar>?, Int32) -> Int32
+    // RTLD_DEFAULT; sandbox_check no está en los encabezados públicos.
+    if let simbolo = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "sandbox_check"),
+       unsafeBitCast(simbolo, to: Comprobar.self)(getpid(), nil, 0) > 0 {
+        return true
+    }
+    return ProcessInfo.processInfo.environment["CODEX_SANDBOX"] != nil
+}
+
+/// Dentro de un sandbox, macOS no deja abrir apps (`open` responde
+/// kLSNoExecutableErr aunque la app exista) ni conectar con su socket. Lanzar el
+/// ejecutable desde aquí tampoco sirve: Nuvex heredaría el aislamiento.
+func salirAislado(json: Bool) -> Never {
+    let titulo = "El sandbox del asistente bloquea Nuvex"
+    let detalle = "Este comando corre en un entorno aislado que no permite abrir Nuvex ni comunicarse con ella. "
+        + "Repite el mismo comando fuera del sandbox (en Codex, con permisos elevados). "
+        + "No abras el ejecutable de Nuvex directamente."
+    if json, let datos = try? Linea.codificar(Mensaje.resultado(.aislado, motivo: .aislamiento, titulo: titulo, detalle: detalle)) {
+        FileHandle.standardOutput.write(datos)
+        exit(CodigoSalida.aislado.rawValue)
+    }
+    salir(.aislado, "nuvex: \(titulo).\n\(detalle)")
+}
+
 func asegurarApp(ruta: String, json: Bool) {
-    guard !ClienteControl.hayServidor(ruta: ruta) else { return }
+    switch ClienteControl.disponibilidad(ruta: ruta) {
+    case .abierta: return
+    case .bloqueada: salirAislado(json: json)
+    case .cerrada: break
+    }
+    let aislado = procesoAislado()
     let app = rutaApp()
     guard FileManager.default.fileExists(atPath: app) else { salir(.sinApp, "nuvex: no se encontró Nuvex en \(app)") }
     if !json { FileHandle.standardError.write(Data("Abriendo Nuvex…\n".utf8)) }
     let abrir = Process()
     abrir.executableURL = URL(fileURLWithPath: "/usr/bin/open")
     abrir.arguments = ["-g", app]
-    try? abrir.run()
-    abrir.waitUntilExit()
+    if aislado { abrir.standardError = FileHandle.nullDevice }
+    var abierta = false
+    if (try? abrir.run()) != nil {
+        abrir.waitUntilExit()
+        abierta = abrir.terminationStatus == 0
+    }
+    if !abierta, aislado { salirAislado(json: json) }
     let limite = Date().addingTimeInterval(15)
     while Date() < limite {
-        if ClienteControl.hayServidor(ruta: ruta) { return }
-        usleep(250_000)
+        switch ClienteControl.disponibilidad(ruta: ruta) {
+        case .abierta: return
+        case .bloqueada: salirAislado(json: json)
+        case .cerrada: usleep(250_000)
+        }
     }
+    if aislado { salirAislado(json: json) }
     salir(.sinApp, "nuvex: Nuvex no respondió. Ábrela desde Aplicaciones y vuelve a intentarlo.")
 }
 
@@ -217,6 +259,8 @@ do {
     exit((resultado.salida ?? .error).rawValue)
 } catch ErrorControl.sinServidor {
     salir(.sinApp, "nuvex: Nuvex no está abierta.")
+} catch ErrorControl.bloqueado {
+    salirAislado(json: opciones.json)
 } catch ErrorControl.tiempoAgotado {
     salir(.sinApp, "nuvex: Nuvex dejó de responder durante la operación.")
 } catch {

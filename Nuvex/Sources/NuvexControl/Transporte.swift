@@ -6,6 +6,9 @@ public enum ErrorControl: Error, Equatable, CustomStringConvertible {
     case sistema(String, Int32)
     case yaEnUso
     case sinServidor
+    /// El sistema negó el acceso al socket: el proceso corre dentro de un
+    /// sandbox, como el de Codex, que no permite comunicarse con otras apps.
+    case bloqueado
     case tiempoAgotado
     case protocolo(String)
 
@@ -15,6 +18,7 @@ public enum ErrorControl: Error, Equatable, CustomStringConvertible {
         case .sistema(let llamada, let codigo): return "\(llamada): \(String(cString: strerror(codigo)))"
         case .yaEnUso: return "otra Nuvex ya atiende el socket de control"
         case .sinServidor: return "Nuvex no está abierta"
+        case .bloqueado: return "el aislamiento del proceso impide comunicarse con Nuvex"
         case .tiempoAgotado: return "Nuvex dejó de responder durante la operación"
         case .protocolo(let detalle): return "respuesta inesperada de Nuvex: \(detalle)"
         }
@@ -190,24 +194,49 @@ public final class ServidorSocket: @unchecked Sendable {
 // MARK: - Cliente
 
 public enum ClienteControl {
+    public enum Disponibilidad: Sendable, Equatable {
+        case abierta
+        case cerrada
+        case bloqueada
+    }
+
     /// true si hay una Nuvex escuchando en la ruta.
     public static func hayServidor(ruta: String) -> Bool {
-        guard let fd = try? conectar(ruta: ruta) else { return false }
-        close(fd)
-        return true
+        disponibilidad(ruta: ruta) == .abierta
+    }
+
+    /// Distingue una Nuvex cerrada de un socket al que el sistema niega el acceso.
+    public static func disponibilidad(ruta: String) -> Disponibilidad {
+        do {
+            close(try conectar(ruta: ruta))
+            return .abierta
+        } catch ErrorControl.bloqueado {
+            return .bloqueada
+        } catch {
+            return .cerrada
+        }
     }
 
     static func conectar(ruta: String) throws -> Int32 {
         Socket.ignorarSIGPIPE()
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard fd >= 0 else { throw ErrorControl.sistema("socket", errno) }
+        guard fd >= 0 else {
+            let e = errno
+            throw e == EPERM ? ErrorControl.bloqueado : ErrorControl.sistema("socket", e)
+        }
         var direccion = try Socket.direccion(ruta)
         let resultado = withUnsafePointer(to: &direccion) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
         }
-        guard resultado == 0 else { close(fd); throw ErrorControl.sinServidor }
+        guard resultado == 0 else {
+            // El socket es 0600 y del mismo usuario: un EPERM o EACCES solo
+            // puede venir de un sandbox que prohíbe la conexión.
+            let e = errno
+            close(fd)
+            throw e == EPERM || e == EACCES ? ErrorControl.bloqueado : ErrorControl.sinServidor
+        }
         var uno: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &uno, socklen_t(MemoryLayout<Int32>.size))
         return fd

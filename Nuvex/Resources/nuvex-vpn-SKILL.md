@@ -10,6 +10,8 @@ Nuvex es la app de la barra de menús que gestiona las VPN Fortinet de esta Mac.
 
 Si `nuvex` no está en el PATH, usa `~/.local/bin/nuvex` o `/Applications/Nuvex.app/Contents/Resources/bin/nuvex`.
 
+`nuvex` necesita abrir Nuvex y hablar con ella por un socket local, algo que el sandbox de los asistentes bloquea. Ejecútalo siempre fuera del sandbox: en Codex, pide permisos elevados para el comando; en Claude Code, desactiva el sandbox para ese comando. Nunca abras el ejecutable de Nuvex directamente (`Nuvex.app/Contents/MacOS/…`): heredaría el aislamiento y no podría usar el Llavero ni el ayudante.
+
 ## Comandos
 
 ```sh
@@ -35,6 +37,7 @@ nuvex diagnostico --profundo        # Además prueba el Llavero; puede pedir aut
 | 4 | Hace falta la persona en la Mac | Explica `detalle` (autorizar el ayudante, Touch ID, contraseña o Llavero). No reintentes. |
 | 5 | Tiempo agotado | Consulta `nuvex estado`; puede seguir conectando o esperando un código. |
 | 6 | Nuvex no responde | Pide al usuario que abra Nuvex. |
+| 7 | El sandbox bloquea Nuvex (`motivo` `aislamiento`) | Repite el mismo comando fuera del sandbox. No es un fallo de la cuenta, la VPN ni la app. |
 
 `nuvex desconectar "<vpn>" --json` también cancela un intento que siga conectando o esperando el código.
 

@@ -102,6 +102,46 @@ enum IntegracionAsistentes {
         default: break
         }
     }
+
+    /// Ejecuta el comando instalado contra el socket real de esta app. Así el
+    /// diagnóstico cubre enlace, ejecutable, autorización y versión del
+    /// protocolo, no solo la existencia de archivos.
+    static func comprobarComando() async -> Comprobacion {
+        let estado = estadoComando()
+        guard estado == .instalado else {
+            return Comprobacion(nombre: "Comando nuvex", ok: false, detalle: descripcionComando(estado))
+        }
+        return await Task.detached(priority: .utility) {
+            do {
+                let resultado = try Proceso.ejecutar(enlace.path, args: ["estado", "--json"],
+                                                     entorno: Paths.environment, limite: 15)
+                let mensajes = resultado.salida.split(separator: "\n").compactMap { linea in
+                    try? Linea.decodificar(Mensaje.self, de: Data(linea.utf8))
+                }
+                guard resultado.codigo == CodigoSalida.ok.rawValue,
+                      mensajes.last?.tipo == .resultado, mensajes.last?.salida == .ok else {
+                    let detalle = resultado.error.trimmingCharacters(in: .whitespacesAndNewlines)
+                    return Comprobacion(nombre: "Comando nuvex", ok: false,
+                                        detalle: detalle.isEmpty ? "Se ejecutó, pero no respondió correctamente" : detalle)
+                }
+                return Comprobacion(nombre: "Comando nuvex", ok: true,
+                                    detalle: "Instalado y comunicado con esta copia de Nuvex")
+            } catch {
+                return Comprobacion(nombre: "Comando nuvex", ok: false,
+                                    detalle: "No respondió: \(error.localizedDescription)")
+            }
+        }.value
+    }
+
+    private static func descripcionComando(_ estado: EstadoComando) -> String {
+        switch estado {
+        case .noIncluido: return "Esta compilación no incluye el comando"
+        case .ausente: return "No instalado"
+        case .instalado: return "Instalado"
+        case .otraCopia: return "Apunta a otra copia de Nuvex"
+        case .ajeno: return "Ya existe un comando ajeno que Nuvex no modifica"
+        }
+    }
 }
 
 // MARK: - Página de Ajustes
@@ -113,10 +153,12 @@ struct AjustesAutomatizacion: View {
     @State private var estados: [String: IntegracionAsistentes.Estado] = [:]
     @State private var comprobaciones: [Comprobacion]?
     @State private var error: String?
+    @State private var errorPreferencias: String?
+    @State private var comprobando = false
 
     private var politica: Binding<PoliticaAsistentes> {
         Binding(get: { preferencias.ajustes.politicaAsistentes },
-                set: { nueva in preferencias.modificar { $0.politicaAsistentes = nueva } })
+                set: { nueva in modificarPreferencias { $0.politicaAsistentes = nueva } })
     }
 
     private func refrescar() {
@@ -129,13 +171,21 @@ struct AjustesAutomatizacion: View {
         refrescar()
     }
 
-    private func comprobarPreparacion() {
+    private func modificarPreferencias(_ cambio: (inout AjustesApp) -> Void) {
+        errorPreferencias = preferencias.modificar(cambio)
+            ? nil
+            : "No se pudo guardar el cambio. Revisa los permisos del archivo de ajustes e inténtalo de nuevo."
+    }
+
+    private func comprobarPreparacion() async {
+        comprobando = true
+        defer { comprobando = false }
         refrescar()
         var resultado = modelo.control?.diagnostico() ?? [
             Comprobacion(nombre: "Control remoto", ok: false,
                          detalle: "El servicio de automatización todavía no está disponible."),
         ]
-        resultado.append(comprobacionComando())
+        resultado.append(await IntegracionAsistentes.comprobarComando())
         resultado.append(contentsOf: IntegracionAsistentes.destinos.compactMap(comprobacionHabilidad))
         comprobaciones = resultado
     }
@@ -153,7 +203,11 @@ struct AjustesAutomatizacion: View {
                 }
                 Toggle("Avisar cuando un asistente conecte o desconecte", isOn: Binding(
                     get: { preferencias.ajustes.avisarAccionesAsistentes },
-                    set: { valor in preferencias.modificar { $0.avisarAccionesAsistentes = valor } }))
+                    set: { valor in modificarPreferencias { $0.avisarAccionesAsistentes = valor } }))
+                if let errorPreferencias {
+                    Label(errorPreferencias, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                }
             } header: {
                 Text("Permisos")
             } footer: {
@@ -168,7 +222,7 @@ struct AjustesAutomatizacion: View {
                         Toggle(isOn: Binding(
                             get: { !preferencias.ajustes.bloqueadasParaAsistentes.contains(perfil.id) },
                             set: { permitida in
-                                preferencias.modificar {
+                                modificarPreferencias {
                                     if permitida { $0.bloqueadasParaAsistentes.remove(perfil.id) }
                                     else { $0.bloqueadasParaAsistentes.insert(perfil.id) }
                                 }
@@ -234,7 +288,11 @@ struct AjustesAutomatizacion: View {
             }
 
             Section {
-                Button("Comprobar preparación") { comprobarPreparacion() }
+                Button { Task { await comprobarPreparacion() } } label: {
+                    if comprobando { ProgressView().controlSize(.small) }
+                    else { Text("Comprobar preparación") }
+                }
+                .disabled(comprobando)
                 if let comprobaciones {
                     ForEach(Array(comprobaciones.enumerated()), id: \.offset) { _, comprobacion in
                         Label {
@@ -294,11 +352,6 @@ struct AjustesAutomatizacion: View {
         case .desactualizada: return "Hay una versión más nueva de la habilidad."
         case .ajena: return "Ya existe una habilidad nuvex-vpn que no creó Nuvex; no se modifica."
         }
-    }
-
-    private func comprobacionComando() -> Comprobacion {
-        let estado = IntegracionAsistentes.estadoComando()
-        return Comprobacion(nombre: "Comando nuvex", ok: estado == .instalado, detalle: descripcion(estado))
     }
 
     private func comprobacionHabilidad(_ destino: IntegracionAsistentes.Destino) -> Comprobacion? {

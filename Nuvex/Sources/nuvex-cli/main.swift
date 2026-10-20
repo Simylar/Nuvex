@@ -18,6 +18,7 @@ Comandos:
   codigo <vpn>                Envía el código de verificación leído de la
                               entrada estándar: printf '%s' 123456 | nuvex codigo oficina
   diagnostico                 Comprueba si todo está listo para conectar sin la persona.
+      --profundo              Prueba la lectura del Llavero; puede pedir autorización.
 
 Opciones generales:
   --json                      Una línea JSON por evento y por resultado.
@@ -26,7 +27,7 @@ Opciones generales:
 También se aceptan status, connect, disconnect, code y doctor.
 
 Códigos de salida: 0 bien · 1 error · 2 uso incorrecto · 3 no permitido ·
-4 hace falta la persona en la Mac · 5 tiempo agotado · 6 Nuvex no responde.
+4 hace falta la persona o hay pendientes · 5 tiempo agotado · 6 Nuvex no responde.
 """
 
 struct Opciones {
@@ -36,6 +37,7 @@ struct Opciones {
     var esperar = true
     var limite: Int?
     var json = false
+    var profundo = false
 }
 
 func salir(_ codigo: CodigoSalida, _ mensaje: String? = nil) -> Never {
@@ -68,6 +70,7 @@ func leerOpciones() -> Opciones {
         case "--todas", "--all": opciones.todas = true
         case "--no-esperar", "--no-wait": opciones.esperar = false
         case "--esperar", "--wait": opciones.esperar = true
+        case "--profundo", "--deep": opciones.profundo = true
         case "--limite", "--timeout":
             guard let valor = argumentos.first, let segundos = Int(valor) else { salir(.uso, "nuvex: --limite necesita segundos") }
             argumentos.removeFirst()
@@ -85,6 +88,21 @@ func leerOpciones() -> Opciones {
         if opciones.vpn == nil && !opciones.todas { salir(.uso, "nuvex: indica qué VPN o usa --todas") }
     default:
         break
+    }
+    if opciones.comando != .desconectar, opciones.todas {
+        salir(.uso, "nuvex: --todas solo se puede usar con desconectar")
+    }
+    if opciones.comando != .conectar, (!opciones.esperar || opciones.limite != nil) {
+        salir(.uso, "nuvex: --esperar, --no-esperar y --limite solo se pueden usar con conectar")
+    }
+    if opciones.comando != .diagnostico, opciones.profundo {
+        salir(.uso, "nuvex: --profundo solo se puede usar con diagnostico")
+    }
+    if let limite = opciones.limite, !(10...600).contains(limite) {
+        salir(.uso, "nuvex: --limite debe estar entre 10 y 600 segundos")
+    }
+    if !libres.isEmpty, ![Comando.conectar, .desconectar, .codigo].contains(opciones.comando) {
+        salir(.uso, "nuvex: \(opciones.comando.rawValue) no acepta una conexión")
     }
     return opciones
 }
@@ -127,10 +145,10 @@ let horas: DateFormatter = {
 }()
 
 func describir(_ conexion: ConexionInfo) -> String {
-    let simbolos = ["conectada": "●", "conectando": "◐", "esperando_codigo": "◐", "error": "✕", "caida": "!"]
-    let estados = ["conectada": "conectada", "conectando": "conectando…", "esperando_codigo": "esperando el código",
-                   "error": "error", "caida": "se desconectó", "desconectada": "desconectada"]
-    var partes = [estados[conexion.estado] ?? conexion.estado]
+    let simbolos: [EstadoConexionRemota: String] = [.conectada: "●", .conectando: "◐", .esperandoCodigo: "◐", .error: "✕", .caida: "!"]
+    let estados: [EstadoConexionRemota: String] = [.conectada: "conectada", .conectando: "conectando…",
+        .esperandoCodigo: "esperando el código", .error: "error", .caida: "se desconectó", .desconectada: "desconectada"]
+    var partes = [estados[conexion.estado] ?? conexion.estado.rawValue]
     if let ip = conexion.ip { partes.append(ip) }
     if let desde = conexion.desde { partes.append("desde " + horas.string(from: desde)) }
     if let error = conexion.error { partes.append(error) }
@@ -168,7 +186,8 @@ let opciones = leerOpciones()
 let ruta = RutaControl.socket(home: NSHomeDirectoryForUser(NSUserName()) ?? NSHomeDirectory())
 
 var peticion = Peticion(comando: opciones.comando, vpn: opciones.vpn, todas: opciones.todas ? true : nil,
-                        esperar: opciones.esperar, limite: opciones.limite)
+                        esperar: opciones.esperar, limite: opciones.limite,
+                        profundo: opciones.profundo ? true : nil)
 if opciones.comando == .codigo {
     // El código llega por la entrada estándar: no queda en el historial ni en ps.
     if isatty(STDIN_FILENO) != 0 { FileHandle.standardError.write(Data("Código: ".utf8)) }
@@ -179,11 +198,27 @@ if opciones.comando == .codigo {
 
 asegurarApp(ruta: ruta, json: opciones.json)
 do {
-    let resultado = try ClienteControl.enviar(peticion, ruta: ruta) { mostrar($0, json: opciones.json) }
+    let esperaOperacion: TimeInterval
+    if opciones.comando == .conectar, opciones.esperar {
+        esperaOperacion = TimeInterval(opciones.limite ?? 180) + 30
+    } else if opciones.comando == .diagnostico, opciones.profundo {
+        esperaOperacion = 300
+    } else if opciones.comando == .conectar || opciones.comando == .desconectar {
+        // Desconectar puede esperar hasta 20 s y consultar de nuevo el motor
+        // durante otros 20 s. La confirmación en la Mac tiene su propia espera.
+        esperaOperacion = 75
+    } else {
+        esperaOperacion = 30
+    }
+    let resultado = try ClienteControl.enviar(peticion, ruta: ruta, limiteRespuesta: esperaOperacion) {
+        mostrar($0, json: opciones.json)
+    }
     mostrar(resultado, json: opciones.json)
     exit((resultado.salida ?? .error).rawValue)
 } catch ErrorControl.sinServidor {
     salir(.sinApp, "nuvex: Nuvex no está abierta.")
+} catch ErrorControl.tiempoAgotado {
+    salir(.sinApp, "nuvex: Nuvex dejó de responder durante la operación.")
 } catch {
     salir(.error, "nuvex: \(error)")
 }

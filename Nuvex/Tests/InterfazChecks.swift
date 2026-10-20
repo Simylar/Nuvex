@@ -5,18 +5,30 @@ import Foundation
 @main
 struct InterfazChecks {
     static func main() {
+        let activa = #"[{"id":"vpn-a","name":"Oficina","connected":true,"pid":123,"ip":"","iface":"","networks":[],"enabled":true,"configured":true,"helperReady":true}]"#
+        let detenida = activa.replacingOccurrences(of: "\"connected\":true", with: "\"connected\":false")
+        precondition(!EstadoMotor.confirmaDesconexion(["vpn-a"], codigo: 0, salida: activa))
+        precondition(EstadoMotor.confirmaDesconexion(["vpn-a"], codigo: 0, salida: detenida))
+        precondition(!EstadoMotor.confirmaDesconexion(["vpn-a"], codigo: 1, salida: detenida))
+        precondition(!EstadoMotor.confirmaDesconexion(["vpn-a"], codigo: 0, salida: "respuesta incompleta"))
+        precondition(!EstadoMotor.confirmaDesconexion(["vpn-a"], codigo: 0, salida: "[]"))
+
         // Fallos del motor → mensaje y acción para la fila del panel.
         let credenciales = Fallo.interpretar("ERROR:  Could not authenticate to gateway. Please check the password, client certificate, etc.\n")
         precondition(credenciales.titulo == "Autenticación rechazada")
         precondition(credenciales.accion == .ajustes("Cambiar…"))
+        precondition(credenciales.codigo == .autenticacion)
         let tunel = Fallo.interpretar("ERROR:  Could not authenticate to the gateway. Please make sure tunnel mode is allowed by the gateway.")
         precondition(tunel.titulo == "El servidor rechazó el túnel")
         precondition(tunel.accion == .ajustes("Revisar…"))
         precondition(Fallo.interpretar("NUVEX_TLS_VERIFY_FAILED\nERROR: Gateway certificate validation failed").titulo == "Certificado no verificado")
         precondition(Fallo.interpretar("ERROR:  getaddrinfo: nodename nor servname provided, or not known").titulo == "No se encuentra el servidor")
-        precondition(Fallo.interpretar("ERROR:  connect: Operation timed out").accion == .reintentar("Reintentar"))
+        let sinRespuesta = Fallo.interpretar("ERROR:  connect: Operation timed out")
+        precondition(sinRespuesta.accion == .reintentar("Reintentar"))
+        precondition(sinRespuesta.codigo == .servidorNoResponde)
         let cancelado = Fallo.interpretar("Could not authenticate to gateway", codigoCancelado: true)
         precondition(cancelado.titulo == "Conexión cancelada")
+        precondition(cancelado.codigo == .cancelada)
         let generico = Fallo.interpretar("NUVEX_OTP_REQUIRED\nnuvex: perfil desactivado\n")
         precondition(generico.titulo == "No se pudo conectar")
         precondition(generico.detalle == "perfil desactivado")

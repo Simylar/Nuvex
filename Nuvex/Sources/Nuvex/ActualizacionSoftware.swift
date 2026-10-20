@@ -13,16 +13,19 @@ struct IconoNuvex: View {
 /// muestra: el menú, el panel y los avisos llevan aquí.
 struct ActualizacionSoftwareView: View {
     @ObservedObject var actualizaciones: Actualizaciones
+    private static let instalada = InfoVersion.actual
+    private static let notasInstaladas = ChequeoActualizacion.notas(de: instalada.corta)
 
     var body: some View {
         Form {
             Section { tarjeta.padding(.vertical, 6) }
             if let version = actualizaciones.estado.version, !version.notas.isEmpty {
-                Section("Novedades") {
+                Section("Novedades de Nuvex \(version.version)") {
                     NotasVersion(texto: version.notas)
                         .padding(.vertical, 4)
                 }
             }
+            detallesInstalados
             if actualizaciones.configuradas {
                 Section {
                     Toggle("Buscar actualizaciones automáticamente", isOn: Binding(
@@ -47,6 +50,25 @@ struct ActualizacionSoftwareView: View {
         .animation(.snappy(duration: 0.25), value: actualizaciones.estado)
         .onAppear { actualizaciones.pantallaAparecio() }
         .onDisappear { actualizaciones.pantallaDesaparecio() }
+    }
+
+    private var detallesInstalados: some View {
+        Section("Versión instalada") {
+            LabeledContent("Versión", value: Self.instalada.corta)
+            LabeledContent("Compilación", value: String(Self.instalada.compilacion))
+            LabeledContent("Canal", value: Self.instalada.canalLegible)
+            if !Self.instalada.commit.isEmpty {
+                LabeledContent("Commit") {
+                    Text(Self.instalada.commit).monospaced().textSelection(.enabled)
+                }
+            }
+            if let notas = Self.notasInstaladas, !notas.isEmpty {
+                DisclosureGroup("Detalles de esta versión") {
+                    NotasVersion(texto: notas)
+                        .padding(.top, 8)
+                }
+            }
+        }
     }
 
     // MARK: Tarjeta principal

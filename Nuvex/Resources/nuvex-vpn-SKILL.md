@@ -19,21 +19,24 @@ nuvex desconectar "<vpn>" --json
 nuvex desconectar --todas --json
 printf '%s' "<código>" | nuvex codigo "<vpn>" --json
 nuvex diagnostico                   # Qué falta para conectar sin la persona.
+nuvex diagnostico --profundo        # Además prueba el Llavero; puede pedir autorización.
 ```
 
-`<vpn>` es el nombre que muestra `nuvex estado`, una parte única de él (por ejemplo `oficina`) o su id. Con `--json`, cada línea es un evento o el resultado final; el campo `salida` del resultado coincide con el código de salida.
+`<vpn>` es el nombre que muestra `nuvex estado`, una parte única de él (por ejemplo `oficina`) o su id. Con `--json`, cada línea es un evento o el resultado final; `salida` coincide con el código de salida y `motivo` es el código estable para decidir qué hacer. No tomes decisiones comparando literalmente `titulo` o `detalle`.
 
 ## Códigos de salida
 
 | Código | Significado | Qué hacer |
 | --- | --- | --- |
 | 0 | Hecho | Informa del resultado (nombre, IP si la hay). |
-| 1 | Error de conexión | Explica `titulo` y `detalle`. Reintenta una sola vez solo si el título es «El servidor no responde». |
+| 1 | Error de conexión | Explica `titulo` y `detalle`. Reintenta una sola vez solo si `motivo` es `servidor_no_responde`. |
 | 2 | Uso incorrecto o VPN no encontrada | Revisa el nombre con `nuvex estado`; si varias coinciden, pregunta cuál. |
 | 3 | No permitido | El usuario restringió los asistentes en Ajustes de Nuvex › Automatización. Díselo; no intentes saltarlo. |
 | 4 | Hace falta la persona en la Mac | Explica `detalle` (autorizar el ayudante, Touch ID, contraseña o Llavero). No reintentes. |
 | 5 | Tiempo agotado | Consulta `nuvex estado`; puede seguir conectando o esperando un código. |
 | 6 | Nuvex no responde | Pide al usuario que abra Nuvex. |
+
+`nuvex desconectar "<vpn>" --json` también cancela un intento que siga conectando o esperando el código.
 
 ## Código de verificación
 

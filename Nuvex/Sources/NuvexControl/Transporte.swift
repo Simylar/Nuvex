@@ -6,6 +6,7 @@ public enum ErrorControl: Error, Equatable, CustomStringConvertible {
     case sistema(String, Int32)
     case yaEnUso
     case sinServidor
+    case tiempoAgotado
     case protocolo(String)
 
     public var description: String {
@@ -14,6 +15,7 @@ public enum ErrorControl: Error, Equatable, CustomStringConvertible {
         case .sistema(let llamada, let codigo): return "\(llamada): \(String(cString: strerror(codigo)))"
         case .yaEnUso: return "otra Nuvex ya atiende el socket de control"
         case .sinServidor: return "Nuvex no está abierta"
+        case .tiempoAgotado: return "Nuvex dejó de responder durante la operación"
         case .protocolo(let detalle): return "respuesta inesperada de Nuvex: \(detalle)"
         }
     }
@@ -41,6 +43,21 @@ public final class Emisor: @unchecked Sendable {
         cerrojo.lock(); defer { cerrojo.unlock() }
         guard abierto else { return }
         if !Socket.escribirTodo(fd, datos) { abierto = false }
+    }
+
+    /// Después de un diálogo en la Mac, evita ejecutar una orden cuyo cliente
+    /// ya agotó la espera o cerró la Terminal.
+    public func clienteConectado() -> Bool {
+        cerrojo.lock(); defer { cerrojo.unlock() }
+        guard abierto else { return false }
+        var byte: UInt8 = 0
+        let n = recv(fd, &byte, 1, MSG_PEEK | MSG_DONTWAIT)
+        if n == 0 { abierto = false; return false }
+        if n < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR {
+            abierto = false
+            return false
+        }
+        return true
     }
 }
 
@@ -142,7 +159,8 @@ public final class ServidorSocket: @unchecked Sendable {
                                ejecutable: Procesos.rutaEjecutable(pid))
         guard autorizarCliente(info) else {
             registro("conexión de control rechazada: cliente no autorizado (pid \(pid))")
-            emisor.enviar(.resultado(.noPermitido, titulo: "Cliente de control no autorizado",
+            emisor.enviar(.resultado(.noPermitido, motivo: .clienteNoAutorizado,
+                                     titulo: "Cliente de control no autorizado",
                                      detalle: "Usa el comando nuvex incluido con esta copia de la app."))
             close(cliente)
             return
@@ -155,7 +173,8 @@ public final class ServidorSocket: @unchecked Sendable {
         }
         guard peticion.version == Peticion.versionActual else {
             registro("petición de control rechazada: protocolo \(peticion.version)")
-            emisor.enviar(.resultado(.uso, titulo: "Versión de protocolo no compatible",
+            emisor.enviar(.resultado(.uso, motivo: .protocoloIncompatible,
+                                     titulo: "Versión de protocolo no compatible",
                                      detalle: "Instala el comando nuvex incluido con esta copia de la app."))
             close(cliente)
             return
@@ -195,19 +214,25 @@ public enum ClienteControl {
     }
 
     /// Envía la petición, entrega cada evento y devuelve el resultado final.
-    public static func enviar(_ peticion: Peticion, ruta: String,
+    public static func enviar(_ peticion: Peticion, ruta: String, limiteRespuesta: TimeInterval = 30,
                               alEvento: (Mensaje) -> Void = { _ in }) throws -> Mensaje {
         let fd = try conectar(ruta: ruta)
         defer { close(fd) }
+        let limite = max(0.1, limiteRespuesta)
+        var espera = timeval(tv_sec: Int(limite), tv_usec: Int32((limite.truncatingRemainder(dividingBy: 1)) * 1_000_000))
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &espera, socklen_t(MemoryLayout<timeval>.size))
         guard Socket.escribirTodo(fd, try Linea.codificar(peticion)) else {
             throw ErrorControl.sistema("write", errno)
         }
-        while let linea = Socket.leerLinea(fd) {
+        while true {
+            guard let linea = Socket.leerLinea(fd) else {
+                if errno == EAGAIN || errno == EWOULDBLOCK { throw ErrorControl.tiempoAgotado }
+                throw ErrorControl.protocolo("Nuvex cerró la conexión sin responder")
+            }
             let mensaje = try Linea.decodificar(Mensaje.self, de: linea)
             if mensaje.tipo == .resultado { return mensaje }
             alEvento(mensaje)
         }
-        throw ErrorControl.protocolo("Nuvex cerró la conexión sin responder")
     }
 }
 
@@ -248,6 +273,7 @@ enum Socket {
         var linea = Data()
         var byte: UInt8 = 0
         while linea.count < 1_048_576 {
+            errno = 0
             let n = read(fd, &byte, 1)
             if n < 0 && errno == EINTR { continue }
             guard n == 1 else { return linea.isEmpty ? nil : linea }

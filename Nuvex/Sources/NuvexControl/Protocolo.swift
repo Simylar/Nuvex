@@ -13,7 +13,7 @@ public enum Comando: String, Codable, Sendable {
 }
 
 public struct Peticion: Codable, Sendable, Equatable {
-    public static let versionActual = 1
+    public static let versionActual = 2
 
     public var version = Peticion.versionActual
     public var comando: Comando
@@ -27,15 +27,19 @@ public struct Peticion: Codable, Sendable, Equatable {
     public var limite: Int?
     /// Código de verificación (solo para `codigo`).
     public var codigo: String?
+    /// En `diagnostico`, comprueba que las contraseñas se puedan leer. Puede
+    /// requerir la presencia de la persona delante de la Mac.
+    public var profundo: Bool?
 
     public init(comando: Comando, vpn: String? = nil, todas: Bool? = nil, esperar: Bool? = nil,
-                limite: Int? = nil, codigo: String? = nil) {
+                limite: Int? = nil, codigo: String? = nil, profundo: Bool? = nil) {
         self.comando = comando
         self.vpn = vpn
         self.todas = todas
         self.esperar = esperar
         self.limite = limite
         self.codigo = codigo
+        self.profundo = profundo
     }
 }
 
@@ -72,13 +76,65 @@ public enum CodigoSalida: Int32, Codable, Sendable {
     case requierePersona = 4
     case tiempoAgotado = 5
     case sinApp = 6
+
+    /// Un diagnóstico incompleto nunca debe parecer satisfactorio a scripts o
+    /// asistentes, aunque sus comprobaciones se sigan mostrando una por una.
+    public static func paraDiagnostico(_ comprobaciones: [Comprobacion]) -> CodigoSalida {
+        comprobaciones.allSatisfy(\.ok) ? .ok : .requierePersona
+    }
+}
+
+public enum EstadoConexionRemota: String, Codable, Sendable, Equatable, Hashable {
+    case conectada
+    case desconectada
+    case conectando
+    case esperandoCodigo = "esperando_codigo"
+    case error
+    case caida
+}
+
+public enum EventoControl: String, Codable, Sendable, Equatable {
+    case estado
+    case codigoRequerido = "codigo_requerido"
+    case codigoCorreo = "codigo_correo"
+}
+
+/// Motivo estable y apto para automatización. Los títulos y detalles pueden
+/// mejorar o traducirse sin obligar a los clientes a compararlos literalmente.
+public enum MotivoResultado: String, Codable, Sendable, Equatable {
+    case yaConectada = "ya_conectada"
+    case conectada
+    case desconectada
+    case conectando
+    case cancelada
+    case servidorNoResponde = "servidor_no_responde"
+    case servidorNoEncontrado = "servidor_no_encontrado"
+    case autenticacionRechazada = "autenticacion_rechazada"
+    case certificadoNoVerificado = "certificado_no_verificado"
+    case tunelRechazado = "tunel_rechazado"
+    case tunelActivo = "tunel_activo"
+    case configuracionIncompleta = "configuracion_incompleta"
+    case llaveroNoDisponible = "llavero_no_disponible"
+    case ayudanteNoDisponible = "ayudante_no_disponible"
+    case confirmacionRequerida = "confirmacion_requerida"
+    case codigoNoEsperado = "codigo_no_esperado"
+    case codigoInvalido = "codigo_invalido"
+    case clienteNoAutorizado = "cliente_no_autorizado"
+    case protocoloIncompatible = "protocolo_incompatible"
+    case operacionEnCurso = "operacion_en_curso"
+    case tiempoAgotado = "tiempo_agotado"
+    case noPermitido = "no_permitido"
+    case noEncontrada = "no_encontrada"
+    case ambigua
+    case diagnosticoIncompleto = "diagnostico_incompleto"
+    case estadoNoConfirmado = "estado_no_confirmado"
+    case errorConexion = "error_conexion"
 }
 
 public struct ConexionInfo: Codable, Sendable, Equatable {
     public var id: String
     public var nombre: String
-    /// conectada, desconectada, conectando, esperando_codigo, error
-    public var estado: String
+    public var estado: EstadoConexionRemota
     public var ip: String?
     public var desde: Date?
     public var error: String?
@@ -87,7 +143,7 @@ public struct ConexionInfo: Codable, Sendable, Equatable {
     /// Si su código de verificación se lee del correo.
     public var codigoPorCorreo: Bool
 
-    public init(id: String, nombre: String, estado: String, ip: String? = nil, desde: Date? = nil,
+    public init(id: String, nombre: String, estado: EstadoConexionRemota, ip: String? = nil, desde: Date? = nil,
                 error: String? = nil, permitida: Bool, codigoPorCorreo: Bool) {
         self.id = id
         self.nombre = nombre
@@ -116,11 +172,11 @@ public struct Mensaje: Codable, Sendable, Equatable {
     public enum Tipo: String, Codable, Sendable { case evento, resultado }
 
     public var tipo: Tipo
-    /// En eventos: estado, codigo_requerido, codigo_correo.
-    public var evento: String?
+    public var evento: EventoControl?
     public var salida: CodigoSalida?
     public var vpn: String?
-    public var estado: String?
+    public var estado: EstadoConexionRemota?
+    public var motivo: MotivoResultado?
     public var titulo: String?
     public var detalle: String?
     public var conexiones: [ConexionInfo]?
@@ -128,25 +184,28 @@ public struct Mensaje: Codable, Sendable, Equatable {
 
     public var ok: Bool { salida == .ok }
 
-    public static func evento(_ nombre: String, vpn: String? = nil, titulo: String? = nil, detalle: String? = nil) -> Mensaje {
+    public static func evento(_ nombre: EventoControl, vpn: String? = nil, titulo: String? = nil, detalle: String? = nil) -> Mensaje {
         Mensaje(tipo: .evento, evento: nombre, vpn: vpn, titulo: titulo, detalle: detalle)
     }
 
-    public static func resultado(_ salida: CodigoSalida, vpn: String? = nil, estado: String? = nil,
+    public static func resultado(_ salida: CodigoSalida, vpn: String? = nil, estado: EstadoConexionRemota? = nil,
+                                 motivo: MotivoResultado? = nil,
                                  titulo: String? = nil, detalle: String? = nil,
                                  conexiones: [ConexionInfo]? = nil, comprobaciones: [Comprobacion]? = nil) -> Mensaje {
-        Mensaje(tipo: .resultado, salida: salida, vpn: vpn, estado: estado, titulo: titulo, detalle: detalle,
+        Mensaje(tipo: .resultado, salida: salida, vpn: vpn, estado: estado, motivo: motivo, titulo: titulo, detalle: detalle,
                 conexiones: conexiones, comprobaciones: comprobaciones)
     }
 
-    public init(tipo: Tipo, evento: String? = nil, salida: CodigoSalida? = nil, vpn: String? = nil,
-                estado: String? = nil, titulo: String? = nil, detalle: String? = nil,
+    public init(tipo: Tipo, evento: EventoControl? = nil, salida: CodigoSalida? = nil, vpn: String? = nil,
+                estado: EstadoConexionRemota? = nil, motivo: MotivoResultado? = nil,
+                titulo: String? = nil, detalle: String? = nil,
                 conexiones: [ConexionInfo]? = nil, comprobaciones: [Comprobacion]? = nil) {
         self.tipo = tipo
         self.evento = evento
         self.salida = salida
         self.vpn = vpn
         self.estado = estado
+        self.motivo = motivo
         self.titulo = titulo
         self.detalle = detalle
         self.conexiones = conexiones

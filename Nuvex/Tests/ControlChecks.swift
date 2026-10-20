@@ -6,10 +6,10 @@ import Foundation
 struct ControlChecks {
     static func main() async throws {
         let conexiones = [
-            ConexionInfo(id: "vpn-1", nombre: "Oficina central", estado: "desconectada", permitida: true, codigoPorCorreo: false),
-            ConexionInfo(id: "vpn-2", nombre: "Prepa · Sedes", estado: "conectada", ip: "10.0.0.2", permitida: true, codigoPorCorreo: true),
-            ConexionInfo(id: "vpn-3", nombre: "Cliente Norte", estado: "desconectada", permitida: false, codigoPorCorreo: false),
-            ConexionInfo(id: "vpn-4", nombre: "Cliente Sur", estado: "desconectada", permitida: true, codigoPorCorreo: false),
+            ConexionInfo(id: "vpn-1", nombre: "Oficina central", estado: .desconectada, permitida: true, codigoPorCorreo: false),
+            ConexionInfo(id: "vpn-2", nombre: "Prepa · Sedes", estado: .conectada, ip: "10.0.0.2", permitida: true, codigoPorCorreo: true),
+            ConexionInfo(id: "vpn-3", nombre: "Cliente Norte", estado: .desconectada, permitida: false, codigoPorCorreo: false),
+            ConexionInfo(id: "vpn-4", nombre: "Cliente Sur", estado: .desconectada, permitida: true, codigoPorCorreo: false),
         ]
 
         // Búsqueda por id, nombre sin acentos ni mayúsculas y prefijo único.
@@ -37,9 +37,27 @@ struct ControlChecks {
         operaciones.liberar(["vpn-1", "vpn-2"])
 
         // Codificación de ida y vuelta, con fechas.
-        let mensaje = Mensaje.resultado(.ok, vpn: "vpn-2", estado: "conectada", conexiones: [conexiones[1]])
+        let mensaje = Mensaje.resultado(.ok, vpn: "vpn-2", estado: .conectada, motivo: .conectada,
+                                        conexiones: [conexiones[1]])
         let decodificado = try Linea.decodificar(Mensaje.self, de: Linea.codificar(mensaje).dropLast())
         precondition(decodificado == mensaje)
+        precondition(CodigoSalida.paraDiagnostico([
+            Comprobacion(nombre: "A", ok: true, detalle: "Bien"),
+        ]) == .ok)
+        precondition(CodigoSalida.paraDiagnostico([
+            Comprobacion(nombre: "A", ok: true, detalle: "Bien"),
+            Comprobacion(nombre: "B", ok: false, detalle: "Pendiente"),
+        ]) == .requierePersona, "un diagnóstico incompleto no puede salir con cero")
+
+        // Una confirmación tardía no puede iniciar una operación después de
+        // que el comando haya cerrado el socket.
+        var par = [Int32](repeating: -1, count: 2)
+        precondition(socketpair(AF_UNIX, SOCK_STREAM, 0, &par) == 0)
+        let emisor = Emisor(fd: par[0])
+        precondition(emisor.clienteConectado())
+        close(par[1])
+        precondition(!emisor.clienteConectado())
+        close(par[0])
 
         // Servidor real en un socket temporal.
         let carpeta = NSTemporaryDirectory() + "nvx-\(getpid())"
@@ -50,9 +68,13 @@ struct ControlChecks {
             case .estado:
                 return .resultado(.ok, conexiones: conexiones)
             case .conectar:
-                emisor.enviar(.evento("estado", vpn: peticion.vpn, titulo: "Conectando…"))
-                emisor.enviar(.evento("codigo_requerido", vpn: peticion.vpn))
-                return .resultado(.ok, vpn: peticion.vpn, estado: "conectada", detalle: cliente.origen)
+                emisor.enviar(.evento(.estado, vpn: peticion.vpn, titulo: "Conectando…"))
+                emisor.enviar(.evento(.codigoRequerido, vpn: peticion.vpn))
+                return .resultado(.ok, vpn: peticion.vpn, estado: .conectada, motivo: .conectada,
+                                  detalle: cliente.origen)
+            case .diagnostico:
+                try? await Task.sleep(for: .milliseconds(300))
+                return .resultado(.ok)
             default:
                 return .resultado(.uso)
             }
@@ -70,16 +92,22 @@ struct ControlChecks {
         let estado = try ClienteControl.enviar(Peticion(comando: .estado), ruta: ruta)
         precondition(estado.ok && estado.conexiones?.count == 4)
 
-        var eventos: [String] = []
+        var eventos: [EventoControl] = []
         let conectar = try ClienteControl.enviar(Peticion(comando: .conectar, vpn: "vpn-1", esperar: true), ruta: ruta) {
-            eventos.append($0.evento ?? "")
+            if let evento = $0.evento { eventos.append(evento) }
         }
-        precondition(conectar.ok && conectar.estado == "conectada")
-        precondition(eventos == ["estado", "codigo_requerido"])
+        precondition(conectar.ok && conectar.estado == .conectada && conectar.motivo == .conectada)
+        precondition(eventos == [.estado, .codigoRequerido])
         precondition(!(conectar.detalle ?? "").isEmpty, "se identifica el origen del cliente")
 
         let invalida = try ClienteControl.enviar(Peticion(comando: .codigo), ruta: ruta)
         precondition(invalida.salida == .uso)
+
+        do {
+            _ = try ClienteControl.enviar(Peticion(comando: .diagnostico), ruta: ruta, limiteRespuesta: 0.05)
+            preconditionFailure("el cliente no debe esperar indefinidamente")
+        } catch ErrorControl.tiempoAgotado {}
+        try? await Task.sleep(for: .milliseconds(350))
 
         var incompatible = Peticion(comando: .estado)
         incompatible.version = Peticion.versionActual + 1

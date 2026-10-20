@@ -28,6 +28,15 @@ struct InfoVersion: Equatable {
     var descripcion: String {
         canal == "publicada" || commit.isEmpty ? corta : "\(corta) · \(canal) \(commit)"
     }
+
+    var canalLegible: String {
+        switch canal {
+        case "publicada": return "Estable"
+        case "beta": return "Beta"
+        case "desarrollo": return "Desarrollo"
+        default: return canal
+        }
+    }
 }
 
 /// Copia de seguridad de la configuración sin secretos.

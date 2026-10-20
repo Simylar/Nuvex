@@ -57,7 +57,7 @@ El script exige el árbol limpio, una versión mayor que la última etiqueta, la
 ## Qué ve quien tiene Nuvex instalado
 
 - Nuvex busca una vez al día. Si hay versión nueva, aparece un aviso en el panel y en el Centro de notificaciones, sin ventanas inesperadas.
-- «Actualización de software» muestra la versión, su tamaño, las novedades y el botón «Actualizar ahora», con el progreso de descarga e instalación.
+- «Actualización de software» muestra los detalles y las notas de la versión instalada. Si hay una nueva, muestra además su versión, tamaño, novedades y el botón «Actualizar ahora», con el progreso de descarga e instalación.
 - Las VPN activas siguen conectadas durante la actualización. Si hay una conexión o un código en curso, el reinicio espera a que termine.
 - Al abrirse, la versión nueva muestra sus novedades.
 

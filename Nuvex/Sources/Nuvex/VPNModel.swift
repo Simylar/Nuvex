@@ -33,6 +33,9 @@ final class VPNModel: ObservableObject {
 
     private var timer: Timer?
     private var refrescando = false
+    /// Si se pidió otra consulta mientras había una en curso, se ejecuta en
+    /// cuanto termine. Es importante al confirmar un túnel recién establecido.
+    private var refrescoPendiente = false
     private var desconexionSolicitada: Set<String> = []
     private var faltas: [String: Int] = [:]
     private var conexionPendiente: String?
@@ -161,7 +164,10 @@ final class VPNModel: ObservableObject {
         #if DEBUG
         if esMuestra { return }
         #endif
-        guard !refrescando else { return }
+        guard !refrescando else {
+            refrescoPendiente = true
+            return
+        }
         refrescando = true
         Task.detached(priority: .utility) {
             let resultado: Resultado
@@ -170,8 +176,8 @@ final class VPNModel: ObservableObject {
             } catch {
                 Log.escribir("fallo al ejecutar el motor: \(error)")
                 await MainActor.run {
-                    self.refrescando = false
                     self.errorConsulta = "No se pudo consultar el estado de las VPN: \(error.localizedDescription)"
+                    self.finalizarRefresco()
                 }
                 return
             }
@@ -180,16 +186,15 @@ final class VPNModel: ObservableObject {
             else {
                 Log.escribir("salida no interpretable: código=\(resultado.codigo), bytes de salida=\(resultado.salida.utf8.count), bytes de error=\(resultado.error.utf8.count)")
                 await MainActor.run {
-                    self.refrescando = false
                     self.errorConsulta = resultado.error.isEmpty
                         ? "El motor devolvió una respuesta vacía (código \(resultado.codigo))."
                         : resultado.error.trimmingCharacters(in: .whitespacesAndNewlines)
+                    self.finalizarRefresco()
                 }
                 return
             }
             let lista = DetallesTunel.completar(decodificada)
             await MainActor.run {
-                self.refrescando = false
                 self.errorConsulta = nil
                 self.procesarTransiciones(lista)
                 self.vpns = lista
@@ -200,11 +205,24 @@ final class VPNModel: ObservableObject {
                     self.confirmarConexionExterna(vpn)
                 }
                 // Si el motor ya la reporta conectada, se acabo el "conectando".
-                for v in lista where v.connected {
-                    if self.estados[v.id] == .conectando { self.estados[v.id] = .conectada }
+                for v in lista {
+                    if v.connected {
+                        self.estados[v.id] = .conectada
+                        self.inicioConexion.removeValue(forKey: v.id)
+                    } else if !v.connected, self.estados[v.id] == .conectada {
+                        self.estados.removeValue(forKey: v.id)
+                    }
                 }
+                self.finalizarRefresco()
             }
         }
+    }
+
+    private func finalizarRefresco() {
+        refrescando = false
+        guard refrescoPendiente else { return }
+        refrescoPendiente = false
+        refrescar()
     }
 
     private func procesarTransiciones(_ lista: [VPNStatus]) {
@@ -271,16 +289,20 @@ final class VPNModel: ObservableObject {
         Task.detached(priority: .userInitiated) {
             let resultado = await Self.conectarProceso(id: vpn.id, name: vpn.name)
             await MainActor.run {
-                self.inicioConexion.removeValue(forKey: vpn.id)
                 switch resultado {
                 case .success:
-                    self.estados[vpn.id] = .conectada
+                    // El ayudante ya vio el túnel activo, pero el estado público
+                    // se confirma con `list`. Se conserva «conectando» para no
+                    // abrir un hueco falso de «desconectada» entre ambas cosas.
                     self.reconexionesDesdeAviso.remove(vpn.id)
+                    self.agotarConfirmacionSiNoAparece(vpn)
                 case .failure(let e) where e.fallo == .canceladaPorPersona:
+                    self.inicioConexion.removeValue(forKey: vpn.id)
                     self.estados.removeValue(forKey: vpn.id)
                     self.reconexionesDesdeAviso.remove(vpn.id)
                     self.canceladas.insert(vpn.id)
                 case .failure(let e):
+                    self.inicioConexion.removeValue(forKey: vpn.id)
                     self.estados[vpn.id] = .error(e.falloParaFila)
                     if self.reconexionesDesdeAviso.remove(vpn.id) != nil {
                         VPNNotifications.shared.reconexionFallida(id: vpn.id, name: vpn.name, fallo: e.falloParaFila)
@@ -291,13 +313,59 @@ final class VPNModel: ObservableObject {
         }
     }
 
+    /// Un `list` normal confirma el túnel en milisegundos. Si el motor deja de
+    /// responder después de informar éxito, se termina con un error explícito
+    /// en lugar de mantener «conectando» indefinidamente.
+    private func agotarConfirmacionSiNoAparece(_ vpn: VPNStatus) {
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(30))
+            guard let self, self.inicioConexion[vpn.id] != nil,
+                  self.estados[vpn.id] == .conectando else { return }
+            self.inicioConexion.removeValue(forKey: vpn.id)
+            self.estados[vpn.id] = .error(Fallo(
+                titulo: "No se pudo confirmar el estado",
+                detalle: "El ayudante informó que el túnel inició, pero Nuvex no pudo confirmarlo al consultar su estado.",
+                accion: .ninguna))
+            self.refrescar()
+        }
+    }
+
     /// Cancela un intento de conexión en curso. Detiene el túnel a medio
     /// establecer; las VPN ya conectadas no se tocan.
     func cancelarConexion(_ id: String) {
         guard estados[id] == .conectando else { return }
         Log.escribir("cancelando el intento de conectar \(id)")
-        IntentosConexion.cancelar(id)
         SolicitudCodigo.abiertas[id]?.cancelar()
+        guard !IntentosConexion.cancelar(id) else { return }
+        // El proceso puede haber terminado justo antes de que `list` confirme
+        // el túnel. En ese intervalo ya no hay proceso que cancelar: se detiene
+        // explícitamente el túnel que acaba de iniciar.
+        Task.detached(priority: .userInitiated) {
+            let detencion = try? Self.ejecutar(args: ["stop", id])
+            let consulta = try? Self.ejecutar(args: ["list"])
+            let confirmada = consulta.map {
+                EstadoMotor.confirmaDesconexion([id], codigo: $0.codigo, salida: $0.salida)
+            } ?? false
+            await MainActor.run {
+                self.inicioConexion.removeValue(forKey: id)
+                if confirmada {
+                    self.estados.removeValue(forKey: id)
+                    self.canceladas.insert(id)
+                } else {
+                    let detalle = detencion?.error.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let mensaje = (detalle?.isEmpty == false ? detalle : nil)
+                        ?? "El estado del túnel no confirmó la desconexión."
+                    self.ultimoError = mensaje
+                    self.estados[id] = .error(Fallo(titulo: "No se pudo confirmar la cancelación",
+                                                    detalle: mensaje, accion: .ninguna))
+                }
+                self.refrescar()
+            }
+        }
+    }
+
+    func conexionEnCurso(_ id: String) -> Bool {
+        inicioConexion[id] != nil || estados[id] == .conectando || SolicitudCodigo.abiertas[id] != nil
     }
 
     func reconectarDesdeAviso(_ id: String) {
@@ -574,6 +642,14 @@ final class VPNModel: ObservableObject {
                     }) && !migrations.contains(where: { $0.old.id == previous.id }) {
                         do { try Self.eliminarDelLlavero(profile: previous) }
                         catch { keychainErrors.append(error.localizedDescription) }
+                    }
+                }
+                for profile in profiles {
+                    do { try Self.actualizarEtiquetaDelLlavero(profile: profile) }
+                    catch {
+                        // La etiqueta es metadato descriptivo: su fallo no debe
+                        // invalidar una contraseña que sigue siendo utilizable.
+                        Log.escribir("no se actualizó la etiqueta del Llavero de \(profile.id): \(error.localizedDescription)")
                     }
                 }
                 let statuses = Dictionary(uniqueKeysWithValues: profiles.map {

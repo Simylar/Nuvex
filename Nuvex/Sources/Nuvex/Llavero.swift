@@ -11,14 +11,29 @@ extension VPNModel {
                                     kSecAttrService as String: service,
                                     kSecAttrAccount as String: profile.username]
         let data = Data(password.utf8)
-        let update = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        let attributes: [String: Any] = [kSecValueData as String: data,
+                                         kSecAttrLabel as String: profile.etiquetaLlavero]
+        let update = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
         if update == errSecItemNotFound {
             var item = query
-            item[kSecValueData as String] = data
+            item.merge(attributes) { _, nuevo in nuevo }
             let added = SecItemAdd(item as CFDictionary, nil)
             guard added == errSecSuccess else { throw ErrorVPN(mensaje: "El Llavero devolvió \(added)") }
         } else if update != errSecSuccess {
             throw ErrorVPN(mensaje: "El Llavero devolvió \(update)")
+        }
+    }
+
+    /// Mantiene el nombre visible del Llavero sincronizado aunque al guardar
+    /// el perfil no se haya escrito una contraseña nueva.
+    nonisolated static func actualizarEtiquetaDelLlavero(profile: VPNProfile) throws {
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                    kSecAttrService as String: "nuvex.\(profile.id)",
+                                    kSecAttrAccount as String: profile.username]
+        let status = SecItemUpdate(query as CFDictionary,
+                                   [kSecAttrLabel as String: profile.etiquetaLlavero] as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw ErrorVPN(mensaje: "No se pudo actualizar el nombre visible de la contraseña de \(profile.name).")
         }
     }
 

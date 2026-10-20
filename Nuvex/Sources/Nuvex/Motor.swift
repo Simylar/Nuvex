@@ -126,7 +126,7 @@ extension VPNModel {
                     cont.resume(returning: .failure(ErrorVPN(mensaje: "La conexión tardó demasiado.", fallo: Fallo(
                         titulo: "La conexión tardó demasiado",
                         detalle: "El servidor no completó la conexión en \(Int(IntentosConexion.limite / 60)) minutos y Nuvex detuvo el intento.",
-                        accion: .reintentar("Reintentar")))))
+                        accion: .reintentar("Reintentar"), codigo: .agotado))))
                 } else {
                     let output = acumulado.texto
                     Log.escribir("fallo al conectar \(id) (código \(p.terminationStatus)): \(output.split(separator: "\n").suffix(8).joined(separator: " | "))")
@@ -230,17 +230,19 @@ enum IntentosConexion {
     }
 
     /// Cancela el intento de una conexión.
-    static func cancelar(_ id: String) {
+    @discardableResult
+    static func cancelar(_ id: String) -> Bool {
         cerrojo.lock()
         let intento = enCurso[id]
         if intento == nil { pendientes.insert(id) }
         cerrojo.unlock()
-        guard let intento else { return }
+        guard let intento else { return false }
         intento.acumulado.marcarDetenidoPorPersona()
         // Si aún no arrancó el proceso, el intento se detiene antes de lanzarlo.
         if let proceso = intento.proceso {
             DispatchQueue.global(qos: .userInitiated).async { detener(id, proceso: proceso) }
         }
+        return true
     }
 
     /// Detiene el túnel a medio establecer y, si hace falta, el proceso que lo vigila.

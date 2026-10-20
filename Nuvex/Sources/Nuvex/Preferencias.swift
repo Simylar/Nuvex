@@ -49,10 +49,12 @@ enum DecisionPermisoAsistente: Equatable {
 /// Ajustes propios de la app. Viven fuera de profiles.json porque el
 /// ayudante firma ese archivo: cambiarlo obligaría a reinstalarlo.
 struct AjustesApp: Equatable {
-    static let versionActual = 1
+    static let versionActual = 2
 
     var correo: [String: ConfigCorreo] = [:]
-    var politicaAsistentes: PoliticaAsistentes = .permitir
+    /// Una instalación nueva exige confirmación explícita. Quien ya eligió
+    /// «Conectar sin preguntar» conserva ese valor al actualizar.
+    var politicaAsistentes: PoliticaAsistentes = .preguntar
     /// Conexiones que los asistentes no pueden conectar aunque la política lo permita.
     var bloqueadasParaAsistentes: Set<String> = []
     var avisarAccionesAsistentes = true
@@ -72,7 +74,7 @@ extension AjustesApp: Codable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Claves.self)
         correo = try c.decodeIfPresent([String: ConfigCorreo].self, forKey: .correo) ?? [:]
-        politicaAsistentes = (try? c.decodeIfPresent(PoliticaAsistentes.self, forKey: .politicaAsistentes)) ?? .permitir
+        politicaAsistentes = (try? c.decodeIfPresent(PoliticaAsistentes.self, forKey: .politicaAsistentes)) ?? .preguntar
         bloqueadasParaAsistentes = try c.decodeIfPresent(Set<String>.self, forKey: .bloqueadasParaAsistentes) ?? []
         avisarAccionesAsistentes = try c.decodeIfPresent(Bool.self, forKey: .avisarAccionesAsistentes) ?? true
     }
@@ -102,7 +104,11 @@ enum ArchivoAjustes {
 
     /// Pasos de migración: el de la clave N lleva un archivo de la versión N-1
     /// a la N. Deben ser idempotentes.
-    static let migraciones: [Int: @Sendable ([String: Any]) -> [String: Any]] = [:]
+    static let migraciones: [Int: @Sendable ([String: Any]) -> [String: Any]] = [
+        // La versión 2 cambia el valor seguro para instalaciones nuevas. Los
+        // archivos existentes conservan su política explícita sin alterarla.
+        2: { $0 },
+    ]
 
     static func leer(_ datos: Data?) throws -> Lectura {
         guard let datos, !datos.isEmpty else {

@@ -18,6 +18,16 @@ struct VPNStatus: Decodable, Identifiable {
     var inicio: Date? = nil
 }
 
+enum EstadoMotor {
+    /// Solo una respuesta válida del motor puede confirmar que se detuvieron
+    /// todos los túneles solicitados. Una consulta fallida nunca cuenta como éxito.
+    static func confirmaDesconexion(_ ids: Set<String>, codigo: Int32, salida: String) -> Bool {
+        guard !ids.isEmpty, codigo == 0, let datos = salida.data(using: .utf8),
+              let lista = try? JSONDecoder().decode([VPNStatus].self, from: datos) else { return false }
+        return ids.allSatisfy { id in lista.first(where: { $0.id == id })?.connected == false }
+    }
+}
+
 struct VPNProfile: Codable, Identifiable, Equatable {
     let id: String
     var name: String
@@ -40,6 +50,8 @@ struct VPNProfile: Codable, Identifiable, Equatable {
         copia.server = server.trimmingCharacters(in: .whitespacesAndNewlines)
         return copia
     }
+
+    var etiquetaLlavero: String { "Nuvex: \(name)" }
 }
 
 enum PasswordStatus: Equatable {
@@ -51,6 +63,19 @@ enum PasswordStatus: Equatable {
 /// Fallo de conexión explicado para personas: un título corto para la fila
 /// del panel, un detalle completo y la acción que lo resuelve.
 struct Fallo: Equatable {
+    enum Codigo: String, Equatable {
+        case cancelada
+        case certificado
+        case tunelRechazado
+        case autenticacion
+        case servidorNoEncontrado
+        case servidorNoResponde
+        case ayudante
+        case tunelActivo
+        case agotado
+        case desconocido
+    }
+
     enum Accion: Equatable {
         case reintentar(String)
         case ajustes(String)
@@ -59,10 +84,18 @@ struct Fallo: Equatable {
     let titulo: String
     let detalle: String
     let accion: Accion
+    let codigo: Codigo
+
+    init(titulo: String, detalle: String, accion: Accion, codigo: Codigo = .desconocido) {
+        self.titulo = titulo
+        self.detalle = detalle
+        self.accion = accion
+        self.codigo = codigo
+    }
 
     /// La persona canceló el intento; no es un error que mostrar.
     static let canceladaPorPersona = Fallo(titulo: "Conexión cancelada", detalle: "Cancelaste el intento de conexión.",
-                                           accion: .reintentar("Conectar"))
+                                           accion: .reintentar("Conectar"), codigo: .cancelada)
 
     /// Clasifica la salida del motor (openfortivpn y nuvexctl). La salida
     /// original queda en el registro para diagnóstico.
@@ -70,44 +103,44 @@ struct Fallo: Equatable {
         if codigoCancelado {
             return Fallo(titulo: "Conexión cancelada",
                          detalle: "No se introdujo el código de verificación.",
-                         accion: .reintentar("Conectar"))
+                         accion: .reintentar("Conectar"), codigo: .cancelada)
         }
         func tiene(_ texto: String) -> Bool { salida.localizedCaseInsensitiveContains(texto) }
         if tiene("NUVEX_TLS_VERIFY_FAILED") || tiene("Gateway certificate validation failed") {
             return Fallo(titulo: "Certificado no verificado",
                          detalle: "El certificado del servidor no coincide con la confianza TLS de esta conexión. Revísala o actualiza el ayudante.",
-                         accion: .ajustes("Revisar…"))
+                         accion: .ajustes("Revisar…"), codigo: .certificado)
         }
         if tiene("tunnel mode is allowed") {
             return Fallo(titulo: "El servidor rechazó el túnel",
                          detalle: "El portal no inició el túnel SSL VPN. Revisa el realm y confirma con el administrador que tu usuario tenga permiso para el modo túnel.",
-                         accion: .ajustes("Revisar…"))
+                         accion: .ajustes("Revisar…"), codigo: .tunelRechazado)
         }
         if tiene("Could not authenticate to gateway") || tiene("Authentication failed") {
             return Fallo(titulo: "Autenticación rechazada",
                          detalle: "Revisa el usuario, la contraseña y el código si se solicitó. Si son correctos, consulta si el servidor exige un certificado de cliente u otro método de acceso.",
-                         accion: .ajustes("Cambiar…"))
+                         accion: .ajustes("Cambiar…"), codigo: .autenticacion)
         }
         if tiene("getaddrinfo") {
             return Fallo(titulo: "No se encuentra el servidor",
                          detalle: "No se pudo resolver la dirección del servidor. Revisa cómo está escrita o tu conexión a Internet.",
-                         accion: .ajustes("Revisar…"))
+                         accion: .ajustes("Revisar…"), codigo: .servidorNoEncontrado)
         }
         if tiene("timed out") || tiene("Connection refused") || tiene("Network is unreachable")
             || tiene("no establecio el tunel") {
             return Fallo(titulo: "El servidor no responde",
                          detalle: "No hubo respuesta del servidor. Puede estar caído o bloqueado por la red actual.",
-                         accion: .reintentar("Reintentar"))
+                         accion: .reintentar("Reintentar"), codigo: .servidorNoResponde)
         }
         if tiene("instala o actualiza el ayudante") {
             return Fallo(titulo: "El ayudante necesita actualizarse",
                          detalle: "La configuración cambió desde que se instaló el ayudante de red. Nuvex pedirá autorización a macOS para actualizarlo.",
-                         accion: .reintentar("Preparar"))
+                         accion: .reintentar("Preparar"), codigo: .ayudante)
         }
         if tiene("la VPN ya esta activa") {
             return Fallo(titulo: "Ya hay un túnel activo",
                          detalle: "Esta VPN ya tiene un túnel en marcha. Desconéctala antes de volver a conectar.",
-                         accion: .ninguna)
+                         accion: .ninguna, codigo: .tunelActivo)
         }
         let ultima = salida.split(separator: "\n")
             .map { $0.trimmingCharacters(in: .whitespaces) }
@@ -115,7 +148,7 @@ struct Fallo: Equatable {
             .map { $0.hasPrefix("nuvex: ") ? String($0.dropFirst(7)) : $0 }
         return Fallo(titulo: "No se pudo conectar",
                      detalle: ultima ?? "El motor terminó sin dar detalles. Consulta el registro.",
-                     accion: .reintentar("Reintentar"))
+                     accion: .reintentar("Reintentar"), codigo: .desconocido)
     }
 }
 

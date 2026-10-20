@@ -10,6 +10,8 @@ En **Ajustes de Nuvex › Automatización**:
    - **Conectar sin preguntar**: los asistentes conectan aunque no estés en la Mac.
    - **Pedir confirmación en la Mac**: aparece un diálogo que hay que aceptar.
    - **No permitir**: solo pueden consultar el estado.
+   Una instalación nueva empieza en **Pedir confirmación en la Mac**. Elegir
+   **Conectar sin preguntar** es una decisión explícita para uso desatendido.
 2. En **Conexiones disponibles para asistentes**, desactiva las que no quieras que usen.
 3. Pulsa **Instalar** en **Comando nuvex**. Se crea `~/.local/bin/nuvex`.
 4. Pulsa **Instalar** en **Claude Code** y **Codex**. Así aprenden cuándo y cómo usar `nuvex`.
@@ -24,9 +26,12 @@ nuvex desconectar oficina
 nuvex desconectar --todas
 printf '%s' 123456 | nuvex codigo oficina
 nuvex diagnostico
+nuvex diagnostico --profundo
 ```
 
-`oficina` puede ser el nombre completo, una parte única del nombre o el id de la conexión. Con `--json`, cada evento y el resultado salen como una línea JSON. Si Nuvex no está abierta, `nuvex` la abre.
+`oficina` puede ser el nombre completo, una parte única del nombre o el id de la conexión. Si una conexión está arrancando o esperando un código, `desconectar` cancela ese intento. Con `--json`, cada evento y el resultado salen como una línea JSON. Los campos `estado`, `evento` y `motivo` son códigos estables; los textos son para mostrarlos a la persona. Si Nuvex no está abierta, `nuvex` la abre.
+
+El diagnóstico normal no conecta ninguna VPN ni lee el valor de las contraseñas: distingue entre configuración local y comprobaciones reales. `--profundo` intenta leer cada contraseña guardada sin mostrarla ni conservarla y puede pedir autorización de macOS.
 
 | Código de salida | Significado |
 | --- | --- |
@@ -34,7 +39,7 @@ nuvex diagnostico
 | 1 | Error de conexión |
 | 2 | Uso incorrecto o conexión no encontrada |
 | 3 | No permitido en Ajustes › Automatización |
-| 4 | Hace falta la persona en la Mac |
+| 4 | Hace falta la persona en la Mac o el diagnóstico tiene pendientes |
 | 5 | Tiempo agotado |
 | 6 | Nuvex no responde |
 
@@ -50,7 +55,7 @@ Ejecuta `nuvex diagnostico`. Para conectar a distancia hace falta:
 
 ## Seguridad
 
-- El socket de control está en `~/Library/Application Support/Nuvex/control.sock`, con permisos 0600. Además de comprobar que el proceso pertenece a tu usuario, Nuvex solo acepta órdenes del comando incluido en esa misma copia de la app y valida la versión del protocolo.
+- El socket de control está en `~/Library/Application Support/Nuvex/control.sock`, con permisos 0600. Además de comprobar que el proceso pertenece a tu usuario, Nuvex solo acepta órdenes del comando incluido en esa misma copia de la app, valida la versión del protocolo y limita el tiempo de espera del cliente.
 - `nuvex` nunca recibe ni muestra contraseñas. Los códigos de verificación llegan por la entrada estándar, así no quedan en el historial ni en la lista de procesos.
 - Cada conexión o desconexión hecha por un asistente queda en el registro y, si lo eliges, en un aviso que dice quién la pidió.
 - Si llegan dos órdenes para la misma conexión, Nuvex conserva la primera y rechaza la segunda para que no se crucen.

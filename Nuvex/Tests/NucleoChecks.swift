@@ -14,7 +14,7 @@ struct NucleoChecks {
         // ajustes.json: valores de serie, ida y vuelta y claves desconocidas.
         let vacio = try ArchivoAjustes.leer(nil)
         precondition(vacio.ajustes == AjustesApp())
-        precondition(vacio.ajustes.politicaAsistentes == .permitir)
+        precondition(vacio.ajustes.politicaAsistentes == .preguntar)
 
         let futuro = #"{"version":1,"politicaAsistentes":"preguntar","clavesDelFuturo":{"x":1},"correo":{"vpn-a":{"remitente":"noreply@empresa.com","espera":60,"campoNuevo":true}}}"#
         let lectura = try ArchivoAjustes.leer(Data(futuro.utf8))
@@ -30,17 +30,17 @@ struct NucleoChecks {
         precondition(releido.ajustes == cambiados)
 
         let raro = try ArchivoAjustes.leer(Data(#"{"politicaAsistentes":"desconocida"}"#.utf8))
-        precondition(raro.ajustes.politicaAsistentes == .permitir, "un valor desconocido usa el de serie")
+        precondition(raro.ajustes.politicaAsistentes == .preguntar, "un valor desconocido falla de forma segura")
+        let v3 = try ArchivoAjustes.leer(Data(#"{"version":3}"#.utf8))
         let v2 = try ArchivoAjustes.leer(Data(#"{"version":2}"#.utf8))
-        let v1 = try ArchivoAjustes.leer(Data(#"{"version":1}"#.utf8))
-        precondition(v2.esMasNuevo && !v1.esMasNuevo)
+        precondition(v3.esMasNuevo && !v2.esMasNuevo)
 
-        // Permisos: se conserva «Conectar sin preguntar» como valor inicial y
-        // las exclusiones por conexión prevalecen sobre la política global.
+        // Permisos: una instalación nueva pide confirmación y las exclusiones
+        // por conexión prevalecen sobre la política global.
         var permisosAsistentes = AjustesApp()
-        precondition(permisosAsistentes.decisionParaAsistente(conexion: "vpn-a") == .permitir)
-        permisosAsistentes.politicaAsistentes = .preguntar
         precondition(permisosAsistentes.decisionParaAsistente(conexion: "vpn-a") == .confirmar)
+        permisosAsistentes.politicaAsistentes = .permitir
+        precondition(permisosAsistentes.decisionParaAsistente(conexion: "vpn-a") == .permitir)
         permisosAsistentes.bloqueadasParaAsistentes.insert("vpn-a")
         precondition(permisosAsistentes.decisionParaAsistente(conexion: "vpn-a") == .rechazarConexion)
         permisosAsistentes.politicaAsistentes = .noPermitir
@@ -98,13 +98,26 @@ struct NucleoChecks {
         let intacto = try Data(contentsOf: url)
         precondition(String(decoding: intacto, as: UTF8.self).contains("99"))
 
+        // El registro conserva una sola generación y no crece sin límite.
+        let registro = base.appendingPathComponent("Nuvex.log").path
+        try Data(repeating: 0x61, count: 32).write(to: URL(fileURLWithPath: registro))
+        Log.rotarSiNecesario(registro, maximo: 16)
+        precondition(!FileManager.default.fileExists(atPath: registro))
+        precondition(FileManager.default.fileExists(atPath: registro + ".1"))
+
         // Migraciones: la primera instalación no es una actualización; una
         // versión nueva copia la configuración; repetir no hace nada.
         let defaults = UserDefaults(suiteName: "NuvexNucleo.\(UUID().uuidString)")!
         let perfiles = base.appendingPathComponent("profiles.json")
         let perfilesJSON = #"{"version":2,"profiles":[{"id":"vpn-a","name":"Oficina","server":"vpn.empresa.com:443","username":"ana","trust":"system","realm":"","manageRoutes":true,"manageDNS":true,"enabled":true}]}"#
+        var perfilEtiqueta = VPNProfile.nuevo()
+        perfilEtiqueta.name = "Oficina"
+        precondition(perfilEtiqueta.etiquetaLlavero == "Nuvex: Oficina")
         let v30 = InfoVersion(corta: "3.0.0", compilacion: 3)
         let v31 = InfoVersion(corta: "3.1.0", compilacion: 9)
+        precondition(v31.canalLegible == "Estable")
+        precondition(InfoVersion(corta: "3.2.0", compilacion: 10, canal: "beta").canalLegible == "Beta")
+        precondition(InfoVersion(corta: "3.2.0", compilacion: 11, canal: "desarrollo").canalLegible == "Desarrollo")
         // Instalación nueva, sin conexiones: no es una actualización.
         let limpia = UserDefaults(suiteName: "NuvexNucleo.\(UUID().uuidString)")!
         let instalacion = Migraciones.ejecutar(defaults: limpia, version: v31, base: base, perfiles: perfiles)

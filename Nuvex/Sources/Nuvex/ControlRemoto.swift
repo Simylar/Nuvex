@@ -57,11 +57,14 @@ final class ControlRemoto {
         case .estado:
             return .resultado(.ok, conexiones: conexiones())
         case .diagnostico:
-            return .resultado(.ok, conexiones: conexiones(), comprobaciones: diagnostico())
+            let comprobaciones = await diagnostico(profundo: peticion.profundo == true)
+            let salida = CodigoSalida.paraDiagnostico(comprobaciones)
+            return .resultado(salida, motivo: salida == .ok ? nil : .diagnosticoIncompleto,
+                              conexiones: conexiones(), comprobaciones: comprobaciones)
         case .conectar:
             return await conectar(peticion, cliente, emisor)
         case .desconectar:
-            return await desconectar(peticion, cliente)
+            return await desconectar(peticion, cliente, emisor)
         case .codigo:
             return codigo(peticion, cliente)
         }
@@ -80,62 +83,73 @@ final class ControlRemoto {
     private func conectar(_ peticion: Peticion, _ cliente: InfoCliente, _ emisor: Emisor) async -> Mensaje {
         let (info, fallo) = resolver(peticion.vpn)
         guard let info else { return fallo! }
-        if let rechazo = await permiso(info, cliente, accion: "conectar") { return rechazo }
+        if let rechazo = await permiso(info, cliente, emisor, accion: "conectar") { return rechazo }
         guard let vpn = modelo.vpns.first(where: { $0.id == info.id }) else {
-            return .resultado(.error, vpn: info.id, titulo: "No se pudo leer el estado de «\(info.nombre)»")
+            return .resultado(.error, vpn: info.id, motivo: .estadoNoConfirmado,
+                              titulo: "No se pudo leer el estado de «\(info.nombre)»")
         }
         if vpn.connected {
-            return .resultado(.ok, vpn: vpn.id, estado: "conectada", titulo: "«\(vpn.name)» ya estaba conectada",
+            return .resultado(.ok, vpn: vpn.id, estado: .conectada, motivo: .yaConectada,
+                              titulo: "«\(vpn.name)» ya estaba conectada",
                               conexiones: conexiones().filter { $0.id == vpn.id })
         }
         if let impedimento = impedimento(vpn) { return impedimento }
         let ids = Set([vpn.id])
         guard operaciones.reservar(ids) else {
-            return .resultado(.error, vpn: vpn.id, estado: "conectando",
+            return .resultado(.error, vpn: vpn.id, estado: .conectando, motivo: .operacionEnCurso,
                               titulo: "Ya hay una operación en curso para «\(vpn.name)»")
         }
 
-        emisor.enviar(.evento("estado", vpn: vpn.id, titulo: "Conectando «\(vpn.name)»…"))
+        emisor.enviar(.evento(.estado, vpn: vpn.id, titulo: "Conectando «\(vpn.name)»…"))
+        guard emisor.clienteConectado() else {
+            operaciones.liberar(ids)
+            return .resultado(.tiempoAgotado, vpn: vpn.id, motivo: .tiempoAgotado,
+                              titulo: "La petición terminó antes de iniciar la conexión")
+        }
         modelo.conectar(vpn)
+        guard modelo.conexionEnCurso(vpn.id) else {
+            operaciones.liberar(ids)
+            return .resultado(.error, vpn: vpn.id, estado: .desconectada, motivo: .estadoNoConfirmado,
+                              titulo: "La conexión no llegó a iniciarse")
+        }
         guard peticion.esperar ?? true else {
             liberarCuandoTermine(ids, limite: 600)
-            return .resultado(.ok, vpn: vpn.id, estado: "conectando", titulo: "Conectando «\(vpn.name)»")
+            return .resultado(.ok, vpn: vpn.id, estado: .conectando, motivo: .conectando,
+                              titulo: "Conectando «\(vpn.name)»")
         }
         var liberarAlSalir = true
         defer { if liberarAlSalir { operaciones.liberar(ids) } }
 
         let limite = Date().addingTimeInterval(TimeInterval(min(max(peticion.limite ?? 180, 10), 600)))
         var avisoCodigo = false, avisoCorreo = false
-        let inicio = Date()
         while Date() < limite {
             try? await Task.sleep(for: .milliseconds(300))
             if let solicitud = SolicitudCodigo.abiertas[vpn.id] {
                 if !avisoCodigo {
                     avisoCodigo = true
                     let buscando = { if case .buscando = solicitud.estadoCorreo { return true } else { return false } }()
-                    emisor.enviar(.evento("codigo_requerido", vpn: vpn.id, titulo: "El servidor pidió un código de verificación",
+                    emisor.enviar(.evento(.codigoRequerido, vpn: vpn.id, titulo: "El servidor pidió un código de verificación",
                                           detalle: buscando
                                             ? "Nuvex lo está buscando en el correo."
                                             : "Pídeselo a la persona y envíalo con: printf '%s' CODIGO | nuvex codigo \"\(vpn.name)\""))
                 }
                 if case .encontrado(let remitente) = solicitud.estadoCorreo, !avisoCorreo {
                     avisoCorreo = true
-                    emisor.enviar(.evento("codigo_correo", vpn: vpn.id, titulo: "Código recibido por correo de \(remitente)"))
+                    emisor.enviar(.evento(.codigoCorreo, vpn: vpn.id, titulo: "Código recibido por correo de \(remitente)"))
                 }
             }
             switch modelo.estado(id: vpn.id) {
             case .conectada:
                 avisar(cliente, "\(cliente.origen) conectó «\(vpn.name)»")
-                return .resultado(.ok, vpn: vpn.id, estado: "conectada", titulo: "«\(vpn.name)» está conectada",
+                return .resultado(.ok, vpn: vpn.id, estado: .conectada, motivo: .conectada,
+                                  titulo: "«\(vpn.name)» está conectada",
                                   conexiones: conexiones().filter { $0.id == vpn.id })
             case .error(let fallo):
-                return .resultado(salida(de: fallo), vpn: vpn.id, estado: "error", titulo: fallo.titulo, detalle: fallo.detalle)
+                return .resultado(salida(de: fallo), vpn: vpn.id, estado: .error, motivo: motivo(de: fallo),
+                                  titulo: fallo.titulo, detalle: fallo.detalle)
             case .desconectada where modelo.canceladas.contains(vpn.id):
-                return .resultado(.error, vpn: vpn.id, estado: "desconectada",
+                return .resultado(.error, vpn: vpn.id, estado: .desconectada, motivo: .cancelada,
                                   titulo: "Se canceló la conexión desde la Mac")
-            case .desconectada where Date().timeIntervalSince(inicio) > 3 && !modelo.instalandoAyudante
-                                     && SolicitudCodigo.abiertas[vpn.id] == nil:
-                return .resultado(.error, vpn: vpn.id, estado: "desconectada", titulo: "La conexión no llegó a iniciarse")
             default:
                 continue
             }
@@ -144,7 +158,7 @@ final class ControlRemoto {
         // Nuvex, así que la conexión sigue reservada hasta que realmente acabe.
         liberarAlSalir = false
         liberarCuandoTermine(ids, limite: 600)
-        return .resultado(.tiempoAgotado, vpn: vpn.id, estado: "conectando",
+        return .resultado(.tiempoAgotado, vpn: vpn.id, estado: .conectando, motivo: .tiempoAgotado,
                           titulo: "«\(vpn.name)» aún no termina de conectar",
                           detalle: SolicitudCodigo.abiertas[vpn.id] != nil
                             ? "Sigue esperando el código de verificación."
@@ -154,27 +168,32 @@ final class ControlRemoto {
     /// Lo que impide conectar sin la persona delante.
     private func impedimento(_ vpn: VPNStatus) -> Mensaje? {
         if !vpn.enabled {
-            return .resultado(.uso, vpn: vpn.id, titulo: "«\(vpn.name)» está oculta",
+            return .resultado(.uso, vpn: vpn.id, motivo: .configuracionIncompleta, titulo: "«\(vpn.name)» está oculta",
                               detalle: "Actívala en Ajustes de Nuvex › \(vpn.name) › Mostrar en la barra de menús.")
         }
         if !vpn.configured {
-            return .resultado(.requierePersona, vpn: vpn.id, titulo: "A «\(vpn.name)» le falta el servidor o el usuario",
+            return .resultado(.requierePersona, vpn: vpn.id, motivo: .configuracionIncompleta,
+                              titulo: "A «\(vpn.name)» le falta el servidor o el usuario",
                               detalle: "Complétalos en Ajustes de Nuvex.")
         }
         if modelo.passwordStatuses[vpn.id] == .missing {
-            return .resultado(.requierePersona, vpn: vpn.id, titulo: "Falta la contraseña de «\(vpn.name)»",
+            return .resultado(.requierePersona, vpn: vpn.id, motivo: .llaveroNoDisponible,
+                              titulo: "Falta la contraseña de «\(vpn.name)»",
                               detalle: "Guárdala en Ajustes de Nuvex.")
         }
         if !vpn.helperReady {
-            return .resultado(.requierePersona, vpn: vpn.id, titulo: "El ayudante de red necesita autorización",
+            return .resultado(.requierePersona, vpn: vpn.id, motivo: .ayudanteNoDisponible,
+                              titulo: "El ayudante de red necesita autorización",
                               detalle: "En la Mac, abre el menú de Nuvex y pulsa Autorizar. macOS pedirá la contraseña de administrador.")
         }
         if SecurityPreferences.needsInitialConfirmation() {
-            return .resultado(.requierePersona, vpn: vpn.id, titulo: "Falta la confirmación inicial con Touch ID",
+            return .resultado(.requierePersona, vpn: vpn.id, motivo: .confirmacionRequerida,
+                              titulo: "Falta la confirmación inicial con Touch ID",
                               detalle: "Conecta una vez desde el menú de Nuvex en la Mac; después los asistentes podrán conectar sin ti.")
         }
         if modelo.chequeo?.llaveroPendiente == true {
-            return .resultado(.requierePersona, vpn: vpn.id, titulo: "macOS debe permitir de nuevo el acceso al Llavero",
+            return .resultado(.requierePersona, vpn: vpn.id, motivo: .llaveroNoDisponible,
+                              titulo: "macOS debe permitir de nuevo el acceso al Llavero",
                               detalle: "En la Mac, abre el menú de Nuvex y pulsa Probar; elige «Permitir siempre».")
         }
         return nil
@@ -185,42 +204,85 @@ final class ControlRemoto {
         return .error
     }
 
+    private func motivo(de fallo: Fallo) -> MotivoResultado {
+        switch fallo.codigo {
+        case .servidorNoResponde: return .servidorNoResponde
+        case .servidorNoEncontrado: return .servidorNoEncontrado
+        case .autenticacion: return .autenticacionRechazada
+        case .certificado: return .certificadoNoVerificado
+        case .tunelRechazado: return .tunelRechazado
+        case .tunelActivo: return .tunelActivo
+        case .ayudante: return .ayudanteNoDisponible
+        case .cancelada: return .cancelada
+        case .agotado: return .tiempoAgotado
+        default: return .errorConexion
+        }
+    }
+
     // MARK: Desconectar
 
-    private func desconectar(_ peticion: Peticion, _ cliente: InfoCliente) async -> Mensaje {
+    private func desconectar(_ peticion: Peticion, _ cliente: InfoCliente, _ emisor: Emisor) async -> Mensaje {
         let objetivo: [VPNStatus]
         if peticion.todas == true {
-            objetivo = modelo.vpns.filter(\.connected)
+            objetivo = modelo.vpns.filter { $0.connected || modelo.conexionEnCurso($0.id) }
             for vpn in objetivo {
                 guard let info = conexiones().first(where: { $0.id == vpn.id }) else { continue }
-                if let rechazo = await permiso(info, cliente, accion: "desconectar") { return rechazo }
+                if let rechazo = await permiso(info, cliente, emisor, accion: "desconectar") { return rechazo }
             }
         } else {
             let (info, fallo) = resolver(peticion.vpn)
             guard let info else { return fallo! }
-            if let rechazo = await permiso(info, cliente, accion: "desconectar") { return rechazo }
-            objetivo = modelo.vpns.filter { $0.id == info.id && $0.connected }
+            if let rechazo = await permiso(info, cliente, emisor, accion: "desconectar") { return rechazo }
+            objetivo = modelo.vpns.filter { $0.id == info.id && ($0.connected || modelo.conexionEnCurso($0.id)) }
             if objetivo.isEmpty {
-                return .resultado(.ok, vpn: info.id, estado: "desconectada", titulo: "«\(info.nombre)» ya estaba desconectada")
+                return .resultado(.ok, vpn: info.id, estado: .desconectada, motivo: .desconectada,
+                                  titulo: "«\(info.nombre)» ya estaba desconectada")
             }
         }
         guard !objetivo.isEmpty else { return .resultado(.ok, titulo: "No había VPN conectadas") }
-        let ids = Set(objetivo.map(\.id))
-        guard operaciones.reservar(ids) else {
-            return .resultado(.error, titulo: "Ya hay una operación en curso para una de las conexiones")
+        let conectando = Set(objetivo.filter { modelo.conexionEnCurso($0.id) }.map(\.id))
+        let idsAReservar = Set(objetivo.filter { !conectando.contains($0.id) }.map(\.id))
+        if !idsAReservar.isEmpty, !operaciones.reservar(idsAReservar) {
+            return .resultado(.error, motivo: .operacionEnCurso,
+                              titulo: "Ya hay una operación en curso para una de las conexiones")
         }
-        defer { operaciones.liberar(ids) }
-        objetivo.forEach { modelo.desconectar($0) }
+        defer { operaciones.liberar(idsAReservar) }
+        emisor.enviar(.evento(.estado, titulo: "Desconectando conexiones…"))
+        guard emisor.clienteConectado() else {
+            return .resultado(.tiempoAgotado, motivo: .tiempoAgotado,
+                              titulo: "La petición terminó antes de desconectar")
+        }
+        objetivo.forEach { vpn in
+            if conectando.contains(vpn.id) { modelo.cancelarConexion(vpn.id) }
+            else { modelo.desconectar(vpn) }
+        }
         let limite = Date().addingTimeInterval(20)
-        while Date() < limite, modelo.vpns.contains(where: { vpn in vpn.connected && objetivo.contains { $0.id == vpn.id } }) {
+        let ids = Set(objetivo.map(\.id))
+        while Date() < limite, ids.contains(where: { id in
+            modelo.vpns.first(where: { $0.id == id })?.connected == true || modelo.conexionEnCurso(id)
+        }) {
             try? await Task.sleep(for: .milliseconds(300))
         }
         let nombres = objetivo.map { "«\($0.name)»" }.joined(separator: ", ")
-        if modelo.vpns.contains(where: { vpn in vpn.connected && objetivo.contains { $0.id == vpn.id } }) {
-            return .resultado(.error, titulo: "No se pudo desconectar \(nombres)", detalle: modelo.ultimoError)
+        if ids.contains(where: modelo.conexionEnCurso) {
+            return .resultado(.error, motivo: .errorConexion,
+                              titulo: "No se pudo desconectar \(nombres)", detalle: modelo.ultimoError)
+        }
+        // `vpns` puede seguir mostrando una consulta anterior. Una respuesta
+        // nueva del motor es necesaria antes de informar éxito al cliente.
+        let consulta = await Task.detached(priority: .userInitiated) {
+            try? VPNModel.ejecutar(args: ["list"])
+        }.value
+        guard let consulta,
+              EstadoMotor.confirmaDesconexion(ids, codigo: consulta.codigo, salida: consulta.salida) else {
+            return .resultado(.error, motivo: .estadoNoConfirmado,
+                              titulo: "No se pudo confirmar la desconexión de \(nombres)",
+                              detalle: "El motor no confirmó que todos los túneles estén detenidos. Consulta el estado antes de volver a intentarlo.")
         }
         avisar(cliente, "\(cliente.origen) desconectó \(nombres)")
-        return .resultado(.ok, estado: "desconectada", titulo: "Desconectada: \(nombres)", conexiones: conexiones())
+        return .resultado(.ok, estado: .desconectada, motivo: conectando.isEmpty ? .desconectada : .cancelada,
+                          titulo: conectando.isEmpty ? "Desconectada: \(nombres)" : "Cancelada o desconectada: \(nombres)",
+                          conexiones: conexiones())
     }
 
     // MARK: Código
@@ -229,28 +291,39 @@ final class ControlRemoto {
         let (info, fallo) = resolver(peticion.vpn)
         guard let info else { return fallo! }
         guard preferencias.politicaAsistentes != .noPermitir, info.permitida else {
-            return .resultado(.noPermitido, vpn: info.id, titulo: "Los asistentes no pueden usar «\(info.nombre)»")
+            return .resultado(.noPermitido, vpn: info.id, motivo: .noPermitido,
+                              titulo: "Los asistentes no pueden usar «\(info.nombre)»")
         }
         guard let solicitud = SolicitudCodigo.abiertas[info.id] else {
-            return .resultado(.error, vpn: info.id, titulo: "«\(info.nombre)» no está esperando ningún código")
+            return .resultado(.error, vpn: info.id, motivo: .codigoNoEsperado,
+                              titulo: "«\(info.nombre)» no está esperando ningún código")
         }
         guard let texto = peticion.codigo, solicitud.recibirExterno(texto) else {
-            return .resultado(.uso, vpn: info.id, titulo: "Falta el código", detalle: "Envíalo por la entrada estándar: printf '%s' CODIGO | nuvex codigo \"\(info.nombre)\"")
+            return .resultado(.uso, vpn: info.id, motivo: .codigoInvalido, titulo: "Falta el código",
+                              detalle: "Envíalo por la entrada estándar: printf '%s' CODIGO | nuvex codigo \"\(info.nombre)\"")
         }
-        return .resultado(.ok, vpn: info.id, estado: "conectando", titulo: "Código enviado a «\(info.nombre)»")
+        return .resultado(.ok, vpn: info.id, estado: .conectando, motivo: .conectando,
+                          titulo: "Código enviado a «\(info.nombre)»")
     }
 
     // MARK: Permisos
 
-    private func permiso(_ info: ConexionInfo, _ cliente: InfoCliente, accion: String) async -> Mensaje? {
+    private func permiso(_ info: ConexionInfo, _ cliente: InfoCliente, _ emisor: Emisor, accion: String) async -> Mensaje? {
         switch preferencias.decisionParaAsistente(conexion: info.id) {
         case .rechazarGlobal:
-            return .resultado(.noPermitido, vpn: info.id, titulo: "Nuvex no permite \(accion) desde la Terminal ni los asistentes",
+            return .resultado(.noPermitido, vpn: info.id, motivo: .noPermitido,
+                              titulo: "Nuvex no permite \(accion) desde la Terminal ni los asistentes",
                               detalle: "Se activa en Ajustes de Nuvex › Automatización.")
         case .rechazarConexion:
-            return .resultado(.noPermitido, vpn: info.id, titulo: "«\(info.nombre)» no está disponible para los asistentes",
+            return .resultado(.noPermitido, vpn: info.id, motivo: .noPermitido,
+                              titulo: "«\(info.nombre)» no está disponible para los asistentes",
                               detalle: "Se cambia en Ajustes de Nuvex › Automatización.")
         case .confirmar:
+            emisor.enviar(.evento(.estado, vpn: info.id, titulo: "Esperando confirmación en la Mac"))
+            guard emisor.clienteConectado() else {
+                return .resultado(.tiempoAgotado, vpn: info.id, motivo: .tiempoAgotado,
+                                  titulo: "La petición terminó antes de la confirmación")
+            }
             NSApp.activate(ignoringOtherApps: true)
             let alerta = NSAlert()
             alerta.messageText = "\(cliente.origen) quiere \(accion) «\(info.nombre)»"
@@ -258,7 +331,12 @@ final class ControlRemoto {
             alerta.addButton(withTitle: accion.prefix(1).uppercased() + accion.dropFirst())
             alerta.addButton(withTitle: "Rechazar")
             guard alerta.runModal() == .alertFirstButtonReturn else {
-                return .resultado(.noPermitido, vpn: info.id, titulo: "Se rechazó en la Mac")
+                return .resultado(.noPermitido, vpn: info.id, motivo: .noPermitido, titulo: "Se rechazó en la Mac")
+            }
+            emisor.enviar(.evento(.estado, vpn: info.id, titulo: "Confirmado en la Mac"))
+            guard emisor.clienteConectado() else {
+                return .resultado(.tiempoAgotado, vpn: info.id, motivo: .tiempoAgotado,
+                                  titulo: "La petición terminó antes de la confirmación")
             }
             return nil
         case .permitir:
@@ -273,10 +351,7 @@ final class ControlRemoto {
             guard let self else { return }
             let fin = Date().addingTimeInterval(limite)
             while Date() < fin, ids.contains(where: { id in
-                switch self.modelo.estado(id: id) {
-                case .conectando: return true
-                default: return SolicitudCodigo.abiertas[id] != nil
-                }
+                self.modelo.conexionEnCurso(id) || SolicitudCodigo.abiertas[id] != nil
             }) {
                 try? await Task.sleep(for: .milliseconds(300))
             }
@@ -295,15 +370,16 @@ final class ControlRemoto {
     private func resolver(_ consulta: String?) -> (ConexionInfo?, Mensaje?) {
         let lista = conexiones()
         guard let consulta, !consulta.trimmingCharacters(in: .whitespaces).isEmpty else {
-            return (nil, .resultado(.uso, titulo: "Indica qué conexión", detalle: "Conexiones: " + nombres(lista)))
+            return (nil, .resultado(.uso, motivo: .noEncontrada,
+                                    titulo: "Indica qué conexión", detalle: "Conexiones: " + nombres(lista)))
         }
         switch Busqueda.buscar(consulta, en: lista) {
         case .una(let info): return (info, nil)
         case .ninguna:
-            return (nil, .resultado(.uso, titulo: "No hay ninguna conexión llamada «\(consulta)»",
+            return (nil, .resultado(.uso, motivo: .noEncontrada, titulo: "No hay ninguna conexión llamada «\(consulta)»",
                                     detalle: "Conexiones: " + nombres(lista), conexiones: lista))
         case .varias(let opciones):
-            return (nil, .resultado(.uso, titulo: "«\(consulta)» coincide con varias conexiones",
+            return (nil, .resultado(.uso, motivo: .ambigua, titulo: "«\(consulta)» coincide con varias conexiones",
                                     detalle: "Elige una: " + nombres(opciones), conexiones: opciones))
         }
     }
@@ -314,16 +390,16 @@ final class ControlRemoto {
 
     func conexiones() -> [ConexionInfo] {
         modelo.vpns.filter(\.enabled).map { vpn in
-            let estado: String
+            let estado: EstadoConexionRemota
             var error: String?
             if SolicitudCodigo.abiertas[vpn.id] != nil {
-                estado = "esperando_codigo"
+                estado = .esperandoCodigo
             } else {
                 switch modelo.estado(vpn) {
-                case .conectada: estado = "conectada"
-                case .conectando: estado = "conectando"
-                case .error(let fallo): estado = "error"; error = fallo.titulo
-                case .desconectada: estado = modelo.desconexiones[vpn.id] != nil ? "caida" : "desconectada"
+                case .conectada: estado = .conectada
+                case .conectando: estado = .conectando
+                case .error(let fallo): estado = .error; error = fallo.titulo
+                case .desconectada: estado = modelo.desconexiones[vpn.id] != nil ? .caida : .desconectada
                 }
             }
             return ConexionInfo(id: vpn.id, nombre: vpn.name, estado: estado,
@@ -348,17 +424,45 @@ final class ControlRemoto {
                          detalle: SecurityPreferences.needsInitialConfirmation() ? "Pendiente: conecta una vez desde la Mac" : "Hecha"),
             Comprobacion(nombre: "Firma de la app", ok: modelo.chequeo?.firmaEstable ?? false,
                          detalle: modelo.chequeo?.firmaEstable == true ? "Estable" : "Ad hoc: el Llavero puede preguntar tras cada actualización"),
-            Comprobacion(nombre: "Acceso al Llavero", ok: modelo.chequeo?.llaveroPendiente != true,
-                         detalle: modelo.chequeo?.llaveroPendiente == true ? "Pendiente de permitir en la Mac" : "Permitido"),
+            Comprobacion(nombre: "Estado del Llavero", ok: modelo.chequeo?.llaveroPendiente != true,
+                         detalle: modelo.chequeo?.llaveroPendiente == true
+                            ? "Pendiente de permitir en la Mac"
+                            : "Sin autorización pendiente detectada; la lectura no se probó"),
         ]
         for vpn in modelo.vpns where vpn.enabled {
             var problemas: [String] = []
             if !vpn.configured { problemas.append("falta servidor o usuario") }
-            if modelo.passwordStatuses[vpn.id] == .missing { problemas.append("falta la contraseña") }
+            switch modelo.passwordStatuses[vpn.id] {
+            case .missing: problemas.append("falta la contraseña")
+            case .error: problemas.append("no se pudo comprobar la entrada del Llavero")
+            case .saved: break
+            case nil: problemas.append("estado de contraseña desconocido")
+            }
             if preferencias.bloqueadasParaAsistentes.contains(vpn.id) { problemas.append("no disponible para asistentes") }
             let correo = preferencias.correo[vpn.id] != nil ? "código por correo" : "código a mano si lo pide"
             lista.append(Comprobacion(nombre: "«\(vpn.name)»", ok: problemas.isEmpty,
-                                      detalle: problemas.isEmpty ? "Lista · \(correo)" : problemas.joined(separator: ", ")))
+                                      detalle: problemas.isEmpty
+                                        ? "Configurada localmente · \(correo) · servidor y credenciales no probados"
+                                        : problemas.joined(separator: ", ")))
+        }
+        return lista
+    }
+
+    private func diagnostico(profundo: Bool) async -> [Comprobacion] {
+        var lista = diagnostico()
+        guard profundo else { return lista }
+        for vpn in modelo.vpns where vpn.enabled && vpn.configured {
+            guard modelo.passwordStatuses[vpn.id] == .saved else { continue }
+            do {
+                _ = try await VPNModel.leerDelLlavero(
+                    id: vpn.id, name: vpn.name,
+                    reason: "Comprobar que Automatización puede usar la contraseña de \(vpn.name)")
+                lista.append(Comprobacion(nombre: "Lectura del Llavero · «\(vpn.name)»", ok: true,
+                                          detalle: "Nuvex pudo leerla; el valor no se mostró ni se guardó"))
+            } catch {
+                lista.append(Comprobacion(nombre: "Lectura del Llavero · «\(vpn.name)»", ok: false,
+                                          detalle: error.localizedDescription))
+            }
         }
         return lista
     }

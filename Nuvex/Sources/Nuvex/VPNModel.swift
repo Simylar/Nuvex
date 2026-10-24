@@ -357,7 +357,19 @@ final class VPNModel: ObservableObject {
         guard estados[id] == .conectando else { return }
         Log.escribir("cancelando el intento de conectar \(id)")
         SolicitudCodigo.abiertas[id]?.cancelar()
-        guard !IntentosConexion.cancelar(id) else { return }
+        switch IntentosConexion.cancelar(id) {
+        case .antesDelProceso:
+            inicioConexion.removeValue(forKey: id)
+            estados.removeValue(forKey: id)
+            reconexionesDesdeAviso.remove(id)
+            canceladas.insert(id)
+            refrescar()
+            return
+        case .procesoEnCurso:
+            return
+        case .noEncontrado:
+            break
+        }
         // El proceso puede haber terminado justo antes de que `list` confirme
         // el túnel. En ese intervalo ya no hay proceso que cancelar: se detiene
         // explícitamente el túnel que acaba de iniciar.

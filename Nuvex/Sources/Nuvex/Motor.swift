@@ -1,5 +1,6 @@
 import AppKit
 import Darwin
+import LocalAuthentication
 
 // MARK: - Ejecucion del motor
 
@@ -36,7 +37,7 @@ extension VPNModel {
         // Registrado desde ya: se puede cancelar mientras se lee el Llavero.
         IntentosConexion.registrar(id, proceso: nil, acumulado: acumulado)
         let password: String
-        do { password = try await leerDelLlavero(id: id, name: name) }
+        do { password = try await leerDelLlavero(id: id, name: name, intentoConexion: id) }
         catch let error as ErrorVPN { IntentosConexion.retirar(id, acumulado: acumulado); return .failure(error) }
         catch {
             IntentosConexion.retirar(id, acumulado: acumulado)
@@ -203,11 +204,23 @@ final class Acumulador: @unchecked Sendable {
 /// seguro: `stop` detiene el motor del túnel a medio establecer y el proceso
 /// que lo vigila termina solo.
 enum IntentosConexion {
+    enum ResultadoCancelacion {
+        case noEncontrado
+        case antesDelProceso
+        case procesoEnCurso
+    }
+
+    private struct Intento {
+        var proceso: Process?
+        let acumulado: Acumulador
+        var contexto: LAContext?
+    }
+
     /// Algo más que los 300 s del ayudante, que es quien decide primero.
     static let limite: TimeInterval = 330
 
     private static let cerrojo = NSLock()
-    nonisolated(unsafe) private static var enCurso: [String: (proceso: Process?, acumulado: Acumulador)] = [:]
+    nonisolated(unsafe) private static var enCurso: [String: Intento] = [:]
 
     /// Cancelaciones pedidas antes de que el intento llegara a registrarse.
     nonisolated(unsafe) private static var pendientes: Set<String> = []
@@ -220,8 +233,26 @@ enum IntentosConexion {
 
     static func registrar(_ id: String, proceso: Process?, acumulado: Acumulador) {
         cerrojo.lock(); defer { cerrojo.unlock() }
-        enCurso[id] = (proceso, acumulado)
+        let contexto = enCurso[id].flatMap { $0.acumulado === acumulado ? $0.contexto : nil }
+        enCurso[id] = Intento(proceso: proceso, acumulado: acumulado, contexto: contexto)
         if pendientes.remove(id) != nil { acumulado.marcarDetenidoPorPersona() }
+    }
+
+    static func registrarContexto(_ id: String, contexto: LAContext) {
+        cerrojo.lock()
+        guard var intento = enCurso[id] else { cerrojo.unlock(); contexto.invalidate(); return }
+        intento.contexto = contexto
+        enCurso[id] = intento
+        let cancelado = intento.acumulado.detenidoPorPersona
+        cerrojo.unlock()
+        if cancelado { contexto.invalidate() }
+    }
+
+    static func retirarContexto(_ id: String, contexto: LAContext) {
+        cerrojo.lock(); defer { cerrojo.unlock() }
+        guard var intento = enCurso[id], intento.contexto === contexto else { return }
+        intento.contexto = nil
+        enCurso[id] = intento
     }
 
     static func retirar(_ id: String, acumulado: Acumulador) {
@@ -230,19 +261,20 @@ enum IntentosConexion {
     }
 
     /// Cancela el intento de una conexión.
-    @discardableResult
-    static func cancelar(_ id: String) -> Bool {
+    static func cancelar(_ id: String) -> ResultadoCancelacion {
         cerrojo.lock()
         let intento = enCurso[id]
         if intento == nil { pendientes.insert(id) }
         cerrojo.unlock()
-        guard let intento else { return false }
+        guard let intento else { return .noEncontrado }
         intento.acumulado.marcarDetenidoPorPersona()
+        intento.contexto?.invalidate()
         // Si aún no arrancó el proceso, el intento se detiene antes de lanzarlo.
         if let proceso = intento.proceso {
             DispatchQueue.global(qos: .userInitiated).async { detener(id, proceso: proceso) }
+            return .procesoEnCurso
         }
-        return true
+        return .antesDelProceso
     }
 
     /// Detiene el túnel a medio establecer y, si hace falta, el proceso que lo vigila.

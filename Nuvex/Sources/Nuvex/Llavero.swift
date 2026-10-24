@@ -69,7 +69,8 @@ extension VPNModel {
     }
 
     nonisolated static func leerDelLlavero(id: String, name: String,
-                                            reason: String? = nil) async throws -> String {
+                                            reason: String? = nil,
+                                            intentoConexion: String? = nil) async throws -> String {
         let userResult = try ejecutar(args: ["config", "get", id, "username"])
         guard userResult.codigo == 0 else { throw ErrorVPN(mensaje: "Falta el usuario de \(id)") }
         // El comando añade un salto de línea; los espacios del usuario forman
@@ -82,6 +83,14 @@ extension VPNModel {
                            fallo: Fallo(titulo: "Falta la contraseña", detalle: "No hay contraseña guardada en el Llavero para esta conexión.", accion: .ajustes("Añadir…")))
         }
         let context = LAContext()
+        if let intentoConexion {
+            IntentosConexion.registrarContexto(intentoConexion, contexto: context)
+        }
+        defer {
+            if let intentoConexion {
+                IntentosConexion.retirarContexto(intentoConexion, contexto: context)
+            }
+        }
         if SecurityPreferences.needsInitialConfirmation() {
             var policyError: NSError?
             let policy: LAPolicy = context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics,

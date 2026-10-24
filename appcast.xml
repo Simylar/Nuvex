@@ -3,6 +3,62 @@
     <channel>
         <title>Nuvex</title>
         <item>
+            <title>3.3.0</title>
+            <pubDate>Sat, 24 Oct 2026 10:47:46 +0000</pubDate>
+            <link>https://github.com/Simylar/Nuvex</link>
+            <sparkle:version>159</sparkle:version>
+            <sparkle:shortVersionString>3.3.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[### Nuevo diseño
+- Nuvex estrena un sistema visual unificado inspirado en macOS y Liquid Glass, con materiales, color, tipografía, espaciado, sombras y estados interactivos coherentes.
+- El panel, la bienvenida, Ajustes, actualización de software, exportación y los diálogos se adaptan mejor a los modos claro y oscuro.
+- La ventana del código de verificación permanece dentro del área visible, permite desplazamiento y conserva sus acciones accesibles en pantallas pequeñas y configuraciones con varios monitores.
+- La navegación, los mensajes de estado y los componentes reutilizables ofrecen una experiencia más clara sin cambiar las conexiones existentes.
+
+### Automatización
+- Codex y Claude Code pueden recibir una autorización persistente, acotada y revocable para `~/.local/bin/nuvex`, sin desactivar globalmente sus sandboxes.
+- El comando abre Nuvex en segundo plano cuando hace falta; la app continúa atendiendo con el menú oculto o la sesión bloqueada mientras la sesión de usuario siga iniciada.
+- Una sola acción configura el CLI, las skills, las reglas de los agentes detectados y el inicio con la sesión; las skills gestionadas se mantienen actualizadas sin reemplazar archivos ajenos.
+- El diagnóstico muestra el estado de Codex y Claude Code sin iniciar una VPN.
+
+### Gmail y autenticación
+- La lectura de Gmail admite mensajes MIME completos, contenido adjunto y códigos presentes solo en HTML.
+- La búsqueda tolera retrasos de indexación, filtra correctamente por el momento de la conexión y vuelve a leer de forma acotada un correo recién recibido cuyo contenido aún no esté listo.
+- Los reintentos respetan los límites de Gmail y distinguen fallos recuperables de sesiones revocadas, sin registrar códigos, correos ni tokens.
+
+### VPN y estabilidad
+- Nuvex recupera automáticamente el control local y reconcilia el estado de las VPN después de reactivar la Mac o recuperar la conexión de red.
+- Las conexiones canceladas, las reconexiones y las solicitudes simultáneas mantienen un estado consistente sin dejar tareas ni operaciones duplicadas.
+- El socket de automatización se recupera si su escucha se interrumpe o desaparece su ruta.
+
+### Seguridad
+- Las reglas de agentes son privadas, idempotentes y revocables; solo autorizan el comando oficial de Nuvex.
+- El control local valida el usuario, el binario oficial, el protocolo y la política configurada para cada VPN.
+- La actualización conserva el motor autorizado cuando no cambió, evitando solicitudes administrativas innecesarias.
+
+### Correcciones
+- Gmail ya no deja esperando una conexión cuando el correo es visible pero todavía no aparece en todos los resultados de búsqueda.
+- Una reconexión posterior ya no puede recibir por error el resultado tardío de un intento anterior.
+- Las conexiones en espera pueden cancelarse correctamente, incluso mientras macOS solicita acceso al Llavero.
+- Codex Desktop descubre la skill y reutiliza su autorización aunque use un directorio de configuración aislado.
+- El comando encuentra siempre la instalación y el socket correctos aunque un agente use un entorno aislado.
+- El icono de Nuvex conserva el logotipo correcto en los tamaños pequeños usados por Ítems de inicio y otras vistas del sistema.
+
+### Compatibilidad y limitaciones conocidas
+- Los artefactos oficiales de esta versión son para Mac con Apple Silicon (arm64) y macOS 14 o posterior.
+- Perfiles, preferencias, credenciales del Llavero, cuenta Gmail, políticas de automatización y protocolo del CLI conservan sus formatos actuales; la actualización no requiere migración destructiva.
+- macOS no ejecuta Nuvex, Gmail ni los agentes durante una suspensión real. Al despertar se reanudan únicamente las operaciones que continúen vigentes; antes de iniciar sesión tampoco están disponibles la automatización por usuario ni su Llavero.
+- En Claude Code, enviar manualmente un código mediante una tubería puede requerir una aprobación puntual; Nuvex no amplía la autorización a comandos ajenos como `printf`.
+- La certificación física de bloqueo de sesión, suspensión, reactivación, reinicio y pérdida de Internet debe completarse en cada entorno donde esas condiciones sean críticas.
+
+]]></description>
+            <enclosure url="https://github.com/Simylar/Nuvex/releases/download/v3.3.0/Nuvex-3.3.0.zip" length="6079867" type="application/octet-stream" sparkle:edSignature="O4DT4rm1zCyhwz6QSiVZaiOvzBa12ULP9JpRJ05buf2H8rSwBqhz+A5a9ggyB+pEdCIfOrNzvD8OUIPBR5FMBA=="/>
+            <sparkle:deltas>
+                <enclosure url="https://github.com/Simylar/Nuvex/releases/download/v3.3.0/Nuvex159-137.delta" sparkle:deltaFrom="137" length="866818" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977616" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="GAxp+f0fGoXUWaHhVZioKuNWE3gs98Xc78ZpF0Ck0Ag5dYqFqOwQrwlPwrE5fses35YhOr397CwdJJGdt8nlBw=="/>
+            </sparkle:deltas>
+        </item>
+        <item>
             <title>3.2.1</title>
             <pubDate>Tue, 20 Oct 2026 08:31:19 +0000</pubDate>
             <link>https://github.com/Simylar/Nuvex</link>
@@ -52,32 +108,6 @@
             <enclosure url="https://github.com/Simylar/Nuvex/releases/download/v3.2.0/Nuvex-3.2.0.zip" length="5887688" type="application/octet-stream" sparkle:edSignature="MRSv+vzGXYIidfc7P/VZW0TsHw63SCMMd93FIyzElE+0tWroMLqfD2UpKZyxRNM36za/wSnVi/Eh9Cf9W1ToBA=="/>
             <sparkle:deltas>
                 <enclosure url="https://github.com/Simylar/Nuvex/releases/download/v3.2.0/Nuvex135-130.delta" sparkle:deltaFrom="130" length="453902" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977616" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="HZrvDQ1xmbp1UmP50H+5EFlZqjwn6k7cJoMVAI+f5+O7i848ibXCgaC3ZoWIg0/Nylrn9XerlNxrJqX6w0ouCQ=="/>
-            </sparkle:deltas>
-        </item>
-        <item>
-            <title>3.1.2</title>
-            <pubDate>Mon, 19 Oct 2026 04:30:05 +0000</pubDate>
-            <link>https://github.com/Simylar/Nuvex</link>
-            <sparkle:version>130</sparkle:version>
-            <sparkle:shortVersionString>3.1.2</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[### Mejoras
-- **Conectar desde toda la fila**: cuando una VPN está desconectada, ya no hace falta acertar en el candado; pulsar cualquier parte de la fila inicia la conexión. Las conexiones activas conservan sus detalles desplegables.
-- **Automatización más fácil de comprobar**: Ajustes revisa permisos, ayudante, Llavero, conexiones, comando y habilidades sin intentar conectar una VPN.
-- **Control remoto más robusto**: valida el comando y la versión del protocolo, e impide que dos órdenes modifiquen la misma conexión al mismo tiempo.
-- **Ajustes siempre navegables**: la barra lateral se mantiene visible porque contiene la navegación principal de la ventana.
-- **Versiones anteriores sin duplicados**: el instalador guarda los respaldos como ZIP para que macOS no los muestre como copias adicionales de Nuvex.
-
-### Correcciones
-- Al quitar una habilidad, Nuvex conserva cualquier otro archivo que exista en su carpeta y no sigue enlaces simbólicos.
-- La herramienta de control puede reutilizar el motor y las bibliotecas de la app instalada cuando no hay una compilación local.
-- La publicación conserva las URL correctas de versiones anteriores al generar actualizaciones delta.
-
-]]></description>
-            <enclosure url="https://github.com/Simylar/Nuvex/releases/download/v3.1.2/Nuvex-3.1.2.zip" length="5793354" type="application/octet-stream" sparkle:edSignature="ICJlnO1EGg46VY1uhPYSncbONyOCtdj2fCgy/uZWSg21rRmL6FFYD2L9AN0QY5iqfycH8hLoqz3UZcKT2iLaDQ=="/>
-            <sparkle:deltas>
-                <enclosure url="https://github.com/Simylar/Nuvex/releases/download/v3.1.2/Nuvex130-125.delta" sparkle:deltaFrom="125" length="271074" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977616" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="wLRJzXsel8evUgsC3QeUBR5soMAvdkBrA+52hnk2R8onE/HrDkuw321k2Q8eaKHo7eHJ5KZiMowubZysgiXKBg=="/>
             </sparkle:deltas>
         </item>
     </channel>

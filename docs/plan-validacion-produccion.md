@@ -36,19 +36,21 @@ correos completos al reporte.
 ## Codex, Claude Code y socket
 
 1. Instala versiones funcionales de ambos agentes y reinícialos después de
-   pulsar **Preparar** en Ajustes › Automatización.
+   pulsar **Configurar** en Ajustes › Automatización.
 2. Comprueba que `~/.local/bin/nuvex` apunte al binario de la app instalada y
    que cada agente descubra `nuvex-vpn` desde su directorio de skills.
-3. Pulsa **Autorizar** en **Acceso persistente de agentes**, reinicia cada
-   agente y ejecuta `~/.local/bin/nuvex estado --json`, `diagnostico` y una
-   conexión autorizada. No debe aparecer otra aprobación. Revoca la regla,
-   reinicia el agente y confirma que vuelve a solicitarla o devuelve código 7.
+3. Confirma que **Configurar** creó la autorización acotada para cada agente,
+   reinicia cada agente y ejecuta `~/.local/bin/nuvex estado --json`,
+   `diagnostico` y una conexión autorizada. No debe aparecer otra aprobación.
+   Revoca la regla, reinicia el agente y confirma que vuelve a solicitarla o
+   devuelve código 7.
    Para un OTP manual, confirma por separado que Claude Code solicita una sola
    aprobación para la tubería y que no se creó una regla global para `printf`.
 4. Verifica los códigos 3, 4, 5, 6 y 7 con política denegada, confirmación
    pendiente, timeout, app cerrada y sandbox respectivamente.
 5. Crea temporalmente una skill `nuvex-vpn` no gestionada para un agente y deja
-   la del otro ausente. **Preparar** debe conservar la ajena y preparar la otra.
+   la del otro ausente. **Configurar** debe conservar la ajena, no autorizarla y
+   preparar la otra.
 6. En una copia de prueba, provoca la terminación de `accept`: el CLI debe
    responder después del reinicio automático y solo debe existir una escucha.
    En otra ejecución elimina la ruta del socket y simula una recuperación de

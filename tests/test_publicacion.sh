@@ -44,6 +44,9 @@ linea_appcast_obligatorio="$(grep -nF 'no se pudo recuperar el appcast publicado
 linea_generacion="$(grep -nF '"$SPARKLE_BIN/generate_appcast" "${OPCIONES[@]}" "$SALIDA"' "$publicador" | tail -1 | cut -d: -f1)"
 linea_ajuste="$(grep -nF 'scripts/ajustar_appcast.py' "$publicador" | cut -d: -f1)"
 linea_validacion="$(grep -nF 'scripts/verificar_appcast.py' "$publicador" | cut -d: -f1)"
+linea_congelado="$(grep -nF 'verificar_candidato_congelado' "$publicador" | tail -1 | cut -d: -f1)"
+linea_sumas="$(grep -nF 'SUMAS="$SALIDA/SHA256SUMS"' "$publicador" | cut -d: -f1)"
+linea_publicacion="$(grep -nF 'gh release create "$ETIQUETA"' "$publicador" | cut -d: -f1)"
 [ "$linea_limpieza" -lt "$linea_motor" ]
 [ "$linea_motor" -lt "$linea_version_motor" ]
 [ "$linea_version_motor" -lt "$linea_extraccion_motor" ]
@@ -52,6 +55,12 @@ linea_validacion="$(grep -nF 'scripts/verificar_appcast.py' "$publicador" | cut 
 [ "$linea_notas" -lt "$linea_generacion" ]
 [ "$linea_generacion" -lt "$linea_ajuste" ]
 [ "$linea_ajuste" -lt "$linea_validacion" ]
+[ "$linea_validacion" -lt "$linea_congelado" ]
+[ "$linea_congelado" -lt "$linea_sumas" ]
+[ "$linea_sumas" -lt "$linea_publicacion" ]
 ! grep -qF '|| rm -f "$SALIDA/appcast.xml"' "$publicador"
+grep -qF '[ "$COMPILACION" = "$COMPILACION_ESPERADA" ]' "$publicador"
+grep -qF '[ "$COMMIT_PAQUETE" = "$COMMIT_CORTO" ]' "$publicador"
+grep -qF '"$MANIFIESTO" "$SUMAS"' "$publicador"
 
-echo 'Publicación: limpieza, notas, URL y validación conservan el orden seguro'
+echo 'Publicación: candidato congelado, artefactos y checksums conservan el orden seguro'

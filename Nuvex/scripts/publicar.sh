@@ -47,11 +47,22 @@ cd "$RAIZ"
 
 VERSION="$(tr -d '[:space:]' < "$RAIZ_APP/VERSION")"
 ETIQUETA="v$VERSION"
+COMMIT_INICIAL="$(git rev-parse HEAD)"
+COMMIT_CORTO="$(git rev-parse --short HEAD)"
+COMPILACION_ESPERADA="$((100 + $(git rev-list --count HEAD)))"
+
+verificar_candidato_congelado() {
+  [ "$(git rev-parse HEAD)" = "$COMMIT_INICIAL" ] \
+    || falla "HEAD cambió durante la preparación; vuelve a iniciar el release"
+  [ -z "$(git status --porcelain)" ] \
+    || falla "el árbol cambió durante la preparación; vuelve a iniciar el release"
+}
 
 # MARK: Comprobaciones comunes
 
 paso "Comprobaciones"
-git fetch --tags --quiet origin 2>/dev/null || true
+git fetch --tags --quiet origin \
+  || falla "no se pudieron actualizar las etiquetas remotas"
 [ -z "$(git status --porcelain)" ] || falla "hay cambios sin commit"
 grep -qE "^## \[$VERSION\] - [0-9]{4}-[0-9]{2}-[0-9]{2}" CHANGELOG.md \
   || falla "CHANGELOG.md necesita la sección «## [$VERSION] - AAAA-MM-DD» con las novedades"
@@ -155,6 +166,9 @@ fi
 paso "Compilación de Nuvex $VERSION"
 NUVEX_CANAL=publicada "$RAIZ_APP/build.sh"
 APP="$RAIZ_APP/Nuvex.app"
+verificar_candidato_congelado
+codesign --verify --deep --strict "$APP" \
+  || falla "la app compilada no superó la verificación profunda de firma"
 IDENTIDAD_HASH="$(security find-identity -p codesigning | awk -v identidad="$IDENTIDAD" 'index($0, "\"" identidad "\"") { print $2; exit }')"
 [ -n "$IDENTIDAD_HASH" ] || falla "no se encontró la identidad de firma «${IDENTIDAD}»"
 REQUISITO_FIRMA="$(codesign -d -r- "$APP" 2>&1)"
@@ -163,7 +177,22 @@ case "$REQUISITO_FIRMA" in
   *"certificate leaf = H\"$IDENTIDAD_HASH\""*) ;;
   *) falla "la app no quedó firmada con «${IDENTIDAD}»" ;;
 esac
-COMPILACION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")"
+PLIST="$APP/Contents/Info.plist"
+VERSION_PAQUETE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")"
+COMPILACION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST")"
+COMMIT_PAQUETE="$(/usr/libexec/PlistBuddy -c 'Print :NuvexCommit' "$PLIST")"
+CANAL_PAQUETE="$(/usr/libexec/PlistBuddy -c 'Print :NuvexCanal' "$PLIST")"
+BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$PLIST")"
+[ "$VERSION_PAQUETE" = "$VERSION" ] \
+  || falla "la app declara versión $VERSION_PAQUETE y se esperaba $VERSION"
+[ "$COMPILACION" = "$COMPILACION_ESPERADA" ] \
+  || falla "la app declara build $COMPILACION y se esperaba $COMPILACION_ESPERADA"
+[ "$COMMIT_PAQUETE" = "$COMMIT_CORTO" ] \
+  || falla "la app declara commit $COMMIT_PAQUETE y se esperaba $COMMIT_CORTO"
+[ "$CANAL_PAQUETE" = publicada ] \
+  || falla "la app no fue compilada para el canal publicado"
+[ "$BUNDLE_ID" = local.gertcode.nuvex ] \
+  || falla "la app declara un identificador inesperado: $BUNDLE_ID"
 OPENSSL_VERSION="$(brew list --versions openssl@3 | awk '{print $2}')"
 MOTOR="$(shasum -a 256 "$APP/Contents/Resources/openfortivpn" | cut -d' ' -f1) openssl-$OPENSSL_VERSION"
 
@@ -219,6 +248,15 @@ for paquete in "$SALIDA"/Nuvex-*.zip; do
   [ -s "$notas" ] || falla "CHANGELOG.md no contiene notas para Nuvex $version_notas"
 done
 printf '%s\n' "$MOTOR" > "$SALIDA/motor.sha256"
+MANIFIESTO="$SALIDA/release-manifest.txt"
+printf '%s\n' \
+  "version=$VERSION" \
+  "build=$COMPILACION" \
+  "commit=$COMMIT_INICIAL" \
+  "bundle_id=$BUNDLE_ID" \
+  "channel=$CANAL_PAQUETE" \
+  "engine_sha256=${MOTOR%% *}" \
+  "openssl=$OPENSSL_VERSION" > "$MANIFIESTO"
 
 paso "Appcast firmado"
 OPCIONES=(--download-url-prefix "https://github.com/$REPO/releases/download/$ETIQUETA/"
@@ -244,9 +282,22 @@ python3 "$RAIZ_APP/scripts/verificar_appcast.py" "$SALIDA/appcast.xml" "$VERSION
   --url-esperada "https://github.com/$REPO/releases/download/$ETIQUETA/Nuvex-$VERSION.zip" \
   --archivo "$ZIP" \
   --directorio-archivos "$SALIDA" || falla "el appcast nuevo no cumple el contrato de actualización"
+verificar_candidato_congelado
+
+SUMAS="$SALIDA/SHA256SUMS"
+(
+  cd "$SALIDA"
+  archivos=("Nuvex-$VERSION.zip" "Nuvex-$VERSION.md" appcast.xml motor.sha256 release-manifest.txt)
+  while IFS= read -r delta; do archivos+=("$(basename "$delta")"); done \
+    < <(find . -maxdepth 1 -name "Nuvex$COMPILACION-*.delta" -type f | LC_ALL=C sort)
+  shasum -a 256 "${archivos[@]}"
+) > "$SUMAS"
+(cd "$SALIDA" && shasum -a 256 -c "$(basename "$SUMAS")" >/dev/null) \
+  || falla "no se pudieron verificar los checksums del release"
 
 if [ "$MODO" = simular ]; then
-  printf '\nSimulación completa. Se publicaría:\n  %s\n  %s\n' "$ZIP" "$SALIDA/appcast.xml"
+  printf '\nSimulación completa. Se publicaría:\n  %s\n  %s\n  %s\n  %s\n' \
+    "$ZIP" "$SALIDA/appcast.xml" "$MANIFIESTO" "$SUMAS"
   for delta in ${DELTAS[@]+"${DELTAS[@]}"}; do printf '  %s\n' "$delta"; done
   exit 0
 fi
@@ -256,7 +307,9 @@ NOTAS="$SALIDA/Nuvex-$VERSION.md"
 BANDERAS=(--title "Nuvex $VERSION" --notes-file "$NOTAS")
 if [ "$MODO" = ci ]; then BANDERAS+=(--verify-tag); else BANDERAS+=(--target "$(git rev-parse HEAD)"); fi
 $BETA && BANDERAS+=(--prerelease)
-gh release create "$ETIQUETA" --repo "$REPO" "${BANDERAS[@]}" "$ZIP" "$SALIDA/motor.sha256" ${DELTAS[@]+"${DELTAS[@]}"}
+gh release create "$ETIQUETA" --repo "$REPO" "${BANDERAS[@]}" \
+  "$ZIP" "$SALIDA/motor.sha256" "$MANIFIESTO" "$SUMAS" \
+  ${DELTAS[@]+"${DELTAS[@]}"}
 
 paso "Aviso de actualización (GitHub Pages)"
 # La rama gh-pages se trabaja en un árbol aparte del mismo repositorio, así

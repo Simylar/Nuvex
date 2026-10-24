@@ -77,10 +77,12 @@ autorización y ciclo de vida sin exponer una capacidad nueva. Los servidores
 MCP locales también necesitarían configuración y una política de herramientas;
 no resolverían la suspensión real ni la ausencia de una sesión iniciada.
 
-**Preparar** instala o actualiza el comando y las habilidades detectadas, sin
-reemplazar archivos ajenos ni cambiar la política de permisos. Una habilidad
-ajena se informa pero no impide preparar el otro agente. Después se ejecuta el
-diagnóstico real. Cada petición lleva un identificador opaco de operación para
+**Configurar** instala o actualiza el comando y las habilidades detectadas,
+crea únicamente las reglas acotadas de los agentes cuya habilidad quedó bajo
+gestión de Nuvex, activa el inicio con la sesión y ejecuta el diagnóstico real.
+No reemplaza ni autoriza una habilidad ajena. Después de una actualización,
+solo sincroniza las habilidades que ya administraba y no concede permisos
+nuevos. Cada petición lleva un identificador opaco de operación para
 correlacionar el registro; clientes anteriores del protocolo 2 siguen siendo
 compatibles.
 

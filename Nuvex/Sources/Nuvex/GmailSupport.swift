@@ -14,6 +14,35 @@ struct ParteTextoGmail: Equatable {
     let tamano: Int
 }
 
+/// Estado local de una espera de OTP. Gmail puede listar un mensaje nuevo
+/// antes de que todas sus partes MIME estén disponibles. En ese caso se vuelve
+/// a leer un número pequeño y acotado de veces; los mensajes definitivamente
+/// descartados y los ya usados se excluyen desde el primer momento.
+struct RegistroInspeccionGmail {
+    static let maximoLecturasSinCodigo = 3
+
+    private var lecturasSinCodigo: [String: Int] = [:]
+    private var descartados: Set<String> = []
+
+    mutating func registrarSinCodigo(_ ids: Set<String>) {
+        for id in ids { lecturasSinCodigo[id, default: 0] += 1 }
+    }
+
+    mutating func descartar(_ ids: Set<String>) {
+        descartados.formUnion(ids)
+    }
+
+    func excluidos(usados: Set<String>) -> Set<String> {
+        usados
+            .union(descartados)
+            .union(lecturasSinCodigo.compactMap { id, lecturas in
+                lecturas >= Self.maximoLecturasSinCodigo ? id : nil
+            })
+    }
+
+    func lecturas(de id: String) -> Int { lecturasSinCodigo[id, default: 0] }
+}
+
 /// Lógica pura del lector de Gmail, separada de la red para poder probar los
 /// árboles MIME y la política de reintentos sin una cuenta real.
 enum SoporteGmail {

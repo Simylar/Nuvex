@@ -22,9 +22,11 @@ enum LectorGmail {
 
     private struct Busqueda {
         let hallazgos: [Hallazgo]
-        /// Mensajes que se leyeron correctamente, tuvieran código o no. Se
-        /// evita descargarlos de nuevo en cada sondeo de la misma operación.
-        let inspeccionados: Set<String>
+        /// Mensajes recientes cuyo contenido todavía no expuso un código. Se
+        /// releen de forma acotada por si Gmail aún propagaba sus partes MIME.
+        let sinCodigo: Set<String>
+        /// Mensajes con código pero anteriores a la ventana del intento.
+        let descartados: Set<String>
     }
 
     enum Resultado: Equatable, Sendable {
@@ -46,15 +48,22 @@ enum LectorGmail {
         let operacion = String(UUID().uuidString.prefix(8)).lowercased()
         var ultimo: ProblemaGmail?
         var fallosConsecutivos = 0
-        var inspeccionados: Set<String> = []
+        var inspeccion = RegistroInspeccionGmail()
         while Date() < limite, !Task.isCancelled {
             var pausa = SoporteGmail.pausaSinCorreo(segundosTranscurridos: Date().timeIntervalSince(comienzo))
             do {
                 let token = try await CuentaGoogle.shared.tokenAcceso()
                 let excluir = await MainActor.run { usados }
                 let busqueda = try await buscar(config, desde: desde,
-                                                excluir: excluir.union(inspeccionados), token: token)
-                inspeccionados.formUnion(busqueda.inspeccionados)
+                                                excluir: inspeccion.excluidos(usados: excluir), token: token)
+                inspeccion.registrarSinCodigo(busqueda.sinCodigo)
+                inspeccion.descartar(busqueda.descartados)
+                if !busqueda.sinCodigo.isEmpty {
+                    let mayor = busqueda.sinCodigo.map { inspeccion.lecturas(de: $0) }.max() ?? 0
+                    Log.escribir("gmail op=\(operacion) estado=mensaje_sin_codigo "
+                        + "cantidad=\(busqueda.sinCodigo.count) "
+                        + "lectura=\(mayor)/\(RegistroInspeccionGmail.maximoLecturasSinCodigo)")
+                }
                 fallosConsecutivos = 0
                 if ultimo != nil {
                     ultimo = nil
@@ -66,10 +75,7 @@ enum LectorGmail {
                     // actor principal: dos VPN simultáneas no pueden consumir
                     // el mismo correo aunque lo hayan leído a la vez.
                     let reservado = await MainActor.run { usados.insert(hallazgo.id).inserted }
-                    guard reservado else {
-                        inspeccionados.insert(hallazgo.id)
-                        continue
-                    }
+                    guard reservado else { continue }
                     Log.escribir("gmail op=\(operacion) estado=codigo_encontrado segundos=\(Int(Date().timeIntervalSince(comienzo)))")
                     return .codigo(CodigoRecibido(codigo: hallazgo.codigo, remitente: hallazgo.remitente))
                 }
@@ -143,18 +149,20 @@ enum LectorGmail {
                                token: String) async throws -> Busqueda {
         let consulta = ExtractorCodigo.consultaGmail(remitente: config.remitente, asunto: config.asunto, desde: desde)
         var hallazgos: [Hallazgo] = []
-        var inspeccionados: Set<String> = []
+        var sinCodigo: Set<String> = []
+        var descartados: Set<String> = []
         for id in try await listar(consulta, token: token) where !excluir.contains(id) {
             let hallazgo = try await leer(id, patron: config.patron, token: token)
             guard let hallazgo else {
-                inspeccionados.insert(id)
+                sinCodigo.insert(id)
                 continue
             }
             // Gmail redondea after: a segundos; se descarta lo anterior al intento.
             if hallazgo.fecha >= desde.addingTimeInterval(-30) { hallazgos.append(hallazgo) }
-            else { inspeccionados.insert(id) }
+            else { descartados.insert(id) }
         }
-        return Busqueda(hallazgos: hallazgos.sorted { $0.fecha > $1.fecha }, inspeccionados: inspeccionados)
+        return Busqueda(hallazgos: hallazgos.sorted { $0.fecha > $1.fecha },
+                        sinCodigo: sinCodigo, descartados: descartados)
     }
 
     // MARK: API de Gmail

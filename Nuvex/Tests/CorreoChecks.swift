@@ -97,6 +97,20 @@ struct CorreoChecks {
         ]
         precondition(SoporteGmail.partesTexto(en: demasiadoGrande).isEmpty)
 
+        // Un mensaje nuevo sin código se relee de forma acotada: Gmail puede
+        // haber listado su ID antes de terminar de propagar las partes MIME.
+        var inspeccion = RegistroInspeccionGmail()
+        precondition(!inspeccion.excluidos(usados: []).contains("nuevo"))
+        inspeccion.registrarSinCodigo(["nuevo"])
+        inspeccion.registrarSinCodigo(["nuevo"])
+        precondition(!inspeccion.excluidos(usados: []).contains("nuevo"))
+        inspeccion.registrarSinCodigo(["nuevo"])
+        precondition(inspeccion.excluidos(usados: []).contains("nuevo"),
+                     "un mensaje sin código no debe releerse indefinidamente")
+        inspeccion.descartar(["antiguo"])
+        precondition(inspeccion.excluidos(usados: []).contains("antiguo"))
+        precondition(inspeccion.excluidos(usados: ["usado"]).contains("usado"))
+
         // Sondeo normal y backoff truncado, con jitter y Retry-After.
         precondition(SoporteGmail.pausaSinCorreo(segundosTranscurridos: 0) == 3)
         precondition(SoporteGmail.pausaSinCorreo(segundosTranscurridos: 45) == 5)

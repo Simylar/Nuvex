@@ -6,16 +6,16 @@ Nuvex incluye el comando `nuvex`, pensado para que puedas pedirle a Claude Code 
 
 En **Ajustes de Nuvex › Automatización**:
 
-1. Elige el permiso en **Terminal y asistentes**:
+1. Revisa el permiso en **Terminal y asistentes**:
    - **Conectar sin preguntar**: los asistentes conectan aunque no estés en la Mac.
    - **Pedir confirmación en la Mac**: aparece un diálogo que hay que aceptar.
    - **No permitir**: solo pueden consultar el estado.
    Una instalación nueva empieza en **Pedir confirmación en la Mac**. Elegir
    **Conectar sin preguntar** es una decisión explícita para uso desatendido.
-2. En **Conexiones disponibles para asistentes**, desactiva las que no quieras que usen.
-3. Pulsa **Preparar**. Nuvex instala o actualiza `~/.local/bin/nuvex` y las habilidades de Claude Code y Codex que detecte. No reemplaza archivos que no haya creado ni cambia la política elegida. Si una herramienta ya tiene una habilidad `nuvex-vpn` ajena, la conserva y continúa preparando la otra.
-4. En **Acceso persistente de agentes**, pulsa **Autorizar** para cada agente que quieras usar. Nuvex crea una regla limitada al CLI; no desactiva el sandbox completo. Reinicia el agente para que cargue la regla. Puedes revocarla desde la misma pantalla.
-5. Revisa el diagnóstico automático. También puedes instalar o quitar cada componente por separado y pulsar **Comprobar preparación** sin iniciar una VPN.
+2. Si quieres, desactiva alguna VPN en **Conexiones disponibles para asistentes**.
+3. Pulsa **Configurar**. En una sola acción, Nuvex instala o actualiza `~/.local/bin/nuvex` y las skills detectadas, crea para cada agente una regla limitada al CLI, activa **Abrir al iniciar sesión** y ejecuta el diagnóstico. No reemplaza archivos ajenos, no desactiva el sandbox completo y no modifica la política elegida.
+
+Después de configurar, cada agente muestra **Listo para usar Nuvex** y ofrece **Revocar**. Si macOS exige aprobar el ítem de inicio, Nuvex muestra el único paso pendiente y abre directamente la pantalla correcta de Ajustes del Sistema.
 
 ## Comandos
 
@@ -61,7 +61,7 @@ tubería esté excluido para sacarla completa del sandbox. Esa operación
 excepcional puede requerir una aprobación puntual: Nuvex no autoriza `printf`
 globalmente porque ampliaría la confianza a un comando ajeno.
 
-Tras actualizar Nuvex, pulsa **Preparar** para actualizar ambas habilidades. Las reglas continúan siendo válidas porque apuntan al enlace estable; **Comprobar preparación** informa si falta alguna.
+Tras actualizar Nuvex, las skills que ya gestionaba se sincronizan automáticamente. Las reglas continúan siendo válidas porque apuntan al enlace estable; **Volver a comprobar** informa si queda algún pendiente.
 
 ## Antes de salir de casa
 

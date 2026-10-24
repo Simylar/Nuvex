@@ -66,6 +66,11 @@ final class VPNModel: ObservableObject {
         chequeo = ChequeoActualizacion(migracion: migracion)
         actualizaciones = Actualizaciones(modelo: self)
         SecurityPreferences.migrate()
+        do {
+            try IntegracionAsistentes.actualizarGestionados()
+        } catch {
+            Log.escribir("automatizacion estado=actualizacion_fallida")
+        }
         VPNNotifications.shared.reconnect = { [weak self] id in
             Task { @MainActor in self?.reconectarDesdeAviso(id) }
         }

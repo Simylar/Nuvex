@@ -212,6 +212,29 @@ enum IntegracionAsistentes {
         }
     }
 
+    /// Onboarding completo y explícito: un solo clic instala los componentes
+    /// gestionados y autoriza únicamente el CLI de Nuvex para los agentes cuya
+    /// habilidad quedó instalada. Una habilidad ajena nunca recibe permisos.
+    static func configurar() throws {
+        try preparar()
+        for destino in destinos where estado(destino) == .instalada {
+            switch estadoAutorizacion(destino) {
+            case .ausente, .parcial:
+                try autorizar(destino)
+            case .noDisponible, .instalada, .ajena:
+                continue
+            }
+        }
+    }
+
+    /// Al actualizar Nuvex, sincroniza solamente habilidades que la propia app
+    /// ya gestionaba. No instala integraciones nuevas ni concede permisos.
+    static func actualizarGestionados() throws {
+        for destino in destinos where estado(destino) == .desactualizada {
+            try instalar(destino)
+        }
+    }
+
     /// Ejecuta el comando instalado contra el socket real de esta app. Así el
     /// diagnóstico cubre enlace, ejecutable, autorización y versión del
     /// protocolo, no solo la existencia de archivos.
@@ -266,6 +289,17 @@ struct AjustesAutomatizacion: View {
     @State private var errorPreferencias: String?
     @State private var comprobando = false
 
+    private var automatizacionLista: Bool {
+        estadoComando == .instalado
+            && InicioDeSesion.activo
+            && IntegracionAsistentes.destinos.allSatisfy { destino in
+                let habilidad = estados[destino.id] ?? .sinHerramienta
+                let acceso = autorizaciones[destino.id] ?? .noDisponible
+                return habilidad == .sinHerramienta
+                    || (habilidad == .instalada && acceso == .instalada)
+            }
+    }
+
     private var politica: Binding<PoliticaAsistentes> {
         Binding(get: { preferencias.ajustes.politicaAsistentes },
                 set: { nueva in modificarPreferencias { $0.politicaAsistentes = nueva } })
@@ -301,12 +335,25 @@ struct AjustesAutomatizacion: View {
         resultado.append(await IntegracionAsistentes.comprobarComando())
         resultado.append(contentsOf: IntegracionAsistentes.destinos.compactMap(comprobacionHabilidad))
         resultado.append(contentsOf: IntegracionAsistentes.destinos.compactMap(comprobacionAutorizacion))
+        resultado.append(Comprobacion(
+            nombre: "Abrir al iniciar sesión", ok: InicioDeSesion.activo,
+            detalle: InicioDeSesion.activo ? "Activado" : InicioDeSesion.requiereAprobacion
+                ? "Pendiente de aprobación en Ajustes del Sistema" : "Desactivado"
+        ))
         comprobaciones = resultado
     }
 
-    private func prepararIntegracion() {
-        intentar(IntegracionAsistentes.preparar)
-        guard error == nil else { return }
+    private func configurarAutomaticamente() {
+        do {
+            try IntegracionAsistentes.configurar()
+            if !InicioDeSesion.activo && !InicioDeSesion.requiereAprobacion {
+                try InicioDeSesion.cambiar(true)
+            }
+            error = nil
+        } catch {
+            self.error = "No se pudo completar la configuración: \(error.localizedDescription)"
+        }
+        refrescar()
         Task { await comprobarPreparacion() }
     }
 
@@ -320,19 +367,30 @@ struct AjustesAutomatizacion: View {
                     IconoCuadrado(simbolo: "wand.and.stars", color: Paleta.acento,
                                   lado: Tamano.iconoCabecera)
                     VStack(alignment: .leading, spacing: Espacio.xxs) {
-                        Text("Preparar automatización").font(Tipo.encabezado)
-                        Text("Instala o actualiza el comando y las habilidades detectadas; después comprueba la comunicación real.")
+                        Text(automatizacionLista ? "Automatización lista" : "Configura la automatización")
+                            .font(Tipo.encabezado)
+                        Text("Nuvex prepara Codex y Claude Code, limita su acceso al comando oficial y se abre con tu sesión.")
                             .font(Tipo.apoyo).foregroundStyle(Paleta.textoSecundario)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer()
-                    Button("Preparar") { prepararIntegracion() }
+                    Button(automatizacionLista ? "Actualizar" : "Configurar") {
+                        configurarAutomaticamente()
+                    }
                         .estiloBoton(.principal)
                         .disabled(comprobando || estadoComando == .noIncluido || estadoComando == .ajeno)
                 }
                 .padding(.vertical, Espacio.xs)
+                if InicioDeSesion.requiereAprobacion {
+                    LabeledContent {
+                        Button("Abrir Ajustes del Sistema…") { InicioDeSesion.abrirAjustesDelSistema() }
+                    } label: {
+                        Label("Permite Nuvex en los ítems de inicio", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(Paleta.avisoTexto)
+                    }
+                }
             } footer: {
-                Text("No concede permisos de macOS ni modifica «Conectar sin preguntar». Los archivos que Nuvex no creó nunca se reemplazan.")
+                Text("Un clic instala o actualiza el CLI y las skills, crea reglas revocables limitadas a ~/.local/bin/nuvex y activa «Abrir al iniciar sesión». No reemplaza archivos ajenos ni modifica «Conectar sin preguntar».")
                     .foregroundStyle(Paleta.textoSecundario)
             }
             Section {
@@ -379,41 +437,20 @@ struct AjustesAutomatizacion: View {
             }
 
             Section {
-                LabeledContent {
-                    switch estadoComando {
-                    case .instalado:
-                        Button("Quitar") { intentar(IntegracionAsistentes.quitarComando) }
-                    case .ausente, .otraCopia:
-                        Button("Instalar") { intentar(IntegracionAsistentes.instalarComando) }
-                    case .noIncluido, .ajeno:
-                        EmptyView()
-                    }
-                } label: {
-                    VStack(alignment: .leading, spacing: Espacio.xxs) {
-                        Text("Comando nuvex")
-                        Text(descripcion(estadoComando)).font(Tipo.nota).foregroundStyle(Paleta.textoSecundario)
-                    }
+                LabeledContent("Comando nuvex") {
+                    Text(descripcion(estadoComando))
+                        .font(Tipo.nota).foregroundStyle(Paleta.textoSecundario)
                 }
-            } header: {
-                Text("Terminal")
-            } footer: {
-                Text("Crea ~/.local/bin/nuvex. Si tu Terminal no lo encuentra, añade ~/.local/bin a tu PATH.")
-                    .foregroundStyle(Paleta.textoSecundario)
-            }
-
-            Section {
                 ForEach(IntegracionAsistentes.destinos) { destino in
                     LabeledContent {
-                        switch estados[destino.id] ?? .ausente {
-                        case .ausente: Button("Instalar") { intentar { try IntegracionAsistentes.instalar(destino) } }
-                        case .desactualizada: Button("Actualizar") { intentar { try IntegracionAsistentes.instalar(destino) } }
-                        case .instalada: Button("Quitar") { intentar { try IntegracionAsistentes.quitar(destino) } }
-                        case .sinHerramienta, .ajena: EmptyView()
+                        if autorizaciones[destino.id] == .instalada {
+                            Button("Revocar") { intentar { try IntegracionAsistentes.revocar(destino) } }
                         }
                     } label: {
                         VStack(alignment: .leading, spacing: Espacio.xxs) {
                             Text(destino.nombre)
-                            Text(descripcion(estados[destino.id] ?? .ausente, destino)).font(Tipo.nota).foregroundStyle(Paleta.textoSecundario)
+                            Text(descripcionAgente(destino))
+                                .font(Tipo.nota).foregroundStyle(Paleta.textoSecundario)
                         }
                     }
                 }
@@ -421,42 +458,16 @@ struct AjustesAutomatizacion: View {
                     Text(error).foregroundStyle(Paleta.errorTexto).textSelection(.enabled)
                 }
             } header: {
-                Text("Habilidad para asistentes")
+                Text("Agentes")
             } footer: {
-                Text("Enseña a Claude Code y a Codex cuándo y cómo usar nuvex, por ejemplo al pedirles «conéctame a la VPN de la oficina». Si la VPN pide un código, te lo preguntarán en el chat o Nuvex lo leerá del correo.")
-                    .foregroundStyle(Paleta.textoSecundario)
-            }
-
-            Section {
-                ForEach(IntegracionAsistentes.destinos) { destino in
-                    LabeledContent {
-                        switch autorizaciones[destino.id] ?? .noDisponible {
-                        case .ausente, .parcial:
-                            Button("Autorizar") { intentar { try IntegracionAsistentes.autorizar(destino) } }
-                        case .instalada:
-                            Button("Revocar") { intentar { try IntegracionAsistentes.revocar(destino) } }
-                        case .noDisponible, .ajena:
-                            EmptyView()
-                        }
-                    } label: {
-                        VStack(alignment: .leading, spacing: Espacio.xxs) {
-                            Text(destino.nombre)
-                            Text(descripcion(autorizaciones[destino.id] ?? .noDisponible, destino))
-                                .font(Tipo.nota).foregroundStyle(Paleta.textoSecundario)
-                        }
-                    }
-                }
-            } header: {
-                Text("Acceso persistente de agentes")
-            } footer: {
-                Text("Autorizar crea una regla revocable limitada a ~/.local/bin/nuvex. Las operaciones rutinarias ejecutan únicamente ese CLI fuera del sandbox sin volver a preguntar; el resto de comandos conserva su aislamiento y Nuvex sigue aplicando la política y las conexiones permitidas de arriba. Reinicia el agente después de cambiarla.")
+                Text("«Configurar» instala la skill y autoriza solo el CLI oficial. «Revocar» elimina esa autorización sin afectar otras reglas del agente.")
                     .foregroundStyle(Paleta.textoSecundario)
             }
 
             Section {
                 Button { Task { await comprobarPreparacion() } } label: {
                     if comprobando { ProgressView().controlSize(.small) }
-                    else { Text("Comprobar preparación") }
+                    else { Text("Volver a comprobar") }
                 }
                 .disabled(comprobando)
                 if let comprobaciones {
@@ -492,6 +503,7 @@ struct AjustesAutomatizacion: View {
         .formularioNuvex()
         .navigationTitle("Automatización")
         .onAppear(perform: refrescar)
+        .task { await comprobarPreparacion() }
     }
 
     private func descripcion(_ estado: IntegracionAsistentes.EstadoComando) -> String {
@@ -523,6 +535,19 @@ struct AjustesAutomatizacion: View {
         case .instalada: return "Autorizado para las operaciones rutinarias del CLI de Nuvex."
         case .ajena: return "La configuración existente no tiene una estructura segura para modificarla."
         }
+    }
+
+    private func descripcionAgente(_ destino: IntegracionAsistentes.Destino) -> String {
+        let habilidad = estados[destino.id] ?? .sinHerramienta
+        let acceso = autorizaciones[destino.id] ?? .noDisponible
+        if habilidad == .sinHerramienta { return "No detectado en esta Mac" }
+        if habilidad == .ajena { return "Tiene una skill ajena que Nuvex no modifica" }
+        if acceso == .ajena { return "Su configuración existente no se puede modificar con seguridad" }
+        if habilidad == .instalada && acceso == .instalada { return "Listo para usar Nuvex" }
+        if habilidad == .desactualizada { return "La skill necesita actualizarse" }
+        if habilidad == .ausente { return "Falta configurar la skill" }
+        if acceso == .parcial { return "La autorización necesita repararse" }
+        return "Falta autorizar el CLI de Nuvex"
     }
 
     private func comprobacionHabilidad(_ destino: IntegracionAsistentes.Destino) -> Comprobacion? {

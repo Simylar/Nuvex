@@ -420,6 +420,15 @@ Label {
 
 `GroupBox` del sistema; por ejemplo, el resultado del guardado en la bienvenida. `.superficie(_:)` solo para muestras y casos en que el límite sea información.
 
+### Onboarding de automatización
+
+La preparación de agentes expone una sola acción principal, **Configurar**. Ese
+consentimiento instala o actualiza los componentes gestionados, crea reglas
+acotadas y revocables, activa el inicio con la sesión y ejecuta el diagnóstico.
+Los detalles técnicos se resumen por agente como **Listo** o con el único paso
+pendiente. Nunca se presentan instalación, autorización y comprobación como
+acciones consecutivas que la persona deba descubrir por separado.
+
 ### Estados vacíos
 
 `EstadoVacio` ocupa el lugar de una lista vacía o que no se pudo leer: icono, título en `Tipo.encabezado`, explicación en `Tipo.apoyo` y `textoSecundario` y, como mucho, una acción pequeña. Centrado y sin contenedor.

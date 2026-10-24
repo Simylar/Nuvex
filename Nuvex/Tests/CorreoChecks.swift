@@ -96,6 +96,19 @@ struct CorreoChecks {
             "body": ["attachmentId": "enorme", "size": SoporteGmail.maximoBytesTexto + 1],
         ]
         precondition(SoporteGmail.partesTexto(en: demasiadoGrande).isEmpty)
+        let configFortinet = ConfigCorreo.fortinet
+        precondition(SoporteGmail.coincide(
+            remitenteCabecera: "Fortinet <donotreply@notification.fortinet.net>",
+            asuntoCabecera: "AuthCode: acceso", config: configFortinet
+        ))
+        precondition(!SoporteGmail.coincide(
+            remitenteCabecera: "otro@example.com", asuntoCabecera: "AuthCode: acceso",
+            config: configFortinet
+        ))
+        precondition(!SoporteGmail.coincide(
+            remitenteCabecera: "DoNotReply@notification.fortinet.net", asuntoCabecera: "Aviso general",
+            config: configFortinet
+        ))
 
         // Un mensaje nuevo sin código se relee de forma acotada: Gmail puede
         // haber listado su ID antes de terminar de propagar las partes MIME.

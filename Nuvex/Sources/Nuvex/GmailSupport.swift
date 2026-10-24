@@ -50,6 +50,26 @@ enum SoporteGmail {
     /// adjuntos inesperados como si fueran el cuerpo del mensaje.
     static let maximoBytesTexto = 256 * 1_024
 
+    /// Repite localmente las restricciones de la consulta de Gmail. El
+    /// fallback sin `q` nunca procesa el cuerpo de mensajes ajenos al perfil.
+    static func coincide(remitenteCabecera: String, asuntoCabecera: String,
+                         config: ConfigCorreo) -> Bool {
+        let remitente: String
+        if let inicio = remitenteCabecera.firstIndex(of: "<"),
+           let fin = remitenteCabecera.firstIndex(of: ">"), inicio < fin {
+            remitente = String(remitenteCabecera[remitenteCabecera.index(after: inicio)..<fin])
+        } else {
+            remitente = remitenteCabecera.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard remitente.caseInsensitiveCompare(
+            config.remitente.trimmingCharacters(in: .whitespacesAndNewlines)
+        ) == .orderedSame else { return false }
+        let asunto = config.asunto.trimmingCharacters(in: .whitespacesAndNewlines)
+        return asunto.isEmpty || asuntoCabecera.range(
+            of: asunto, options: [.caseInsensitive, .diacriticInsensitive]
+        ) != nil
+    }
+
     static func partesTexto(en carga: [String: Any]) -> [ParteTextoGmail] {
         var resultado: [ParteTextoGmail] = []
 

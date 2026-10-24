@@ -6,9 +6,10 @@ from pathlib import Path
 folder = Path(sys.argv[1])
 output = Path(sys.argv[2])
 entries = [
-    ("icp4", "icon_16x16.png"),
-    ("icp5", "icon_32x32.png"),
-    ("icp6", "icon_32x32@2x.png"),
+    # IconServices interpreta las entradas icp4/icp5/icp6 de este contenedor
+    # artesanal como mapas clásicos, no como los PNG incluidos, y muestra
+    # bandas de colores. Las variantes Retina ic11/ic12 cubren los tamaños
+    # pequeños y el sistema también puede reducirlas en pantallas 1x.
     ("ic07", "icon_128x128.png"),
     ("ic08", "icon_256x256.png"),
     ("ic09", "icon_512x512.png"),

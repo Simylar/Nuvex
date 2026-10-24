@@ -1,12 +1,13 @@
 import AppKit
 import Foundation
 
-guard CommandLine.arguments.count == 2 else {
-    fputs("Uso: icono-checks ICONSET\n", stderr)
+guard (2...3).contains(CommandLine.arguments.count) else {
+    fputs("Uso: icono-checks ICONSET [--completo]\n", stderr)
     exit(1)
 }
 
 let folder = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
+let requiereIconsetCompleto = CommandLine.arguments.dropFirst(2).contains("--completo")
 let archivos = [
     ("icon_16x16.png", 16),
     ("icon_16x16@2x.png", 32),
@@ -20,8 +21,16 @@ let archivos = [
     ("icon_512x512@2x.png", 1024),
 ]
 
+var validados = 0
 for (nombre, pixels) in archivos {
     let url = folder.appendingPathComponent(nombre)
+    guard FileManager.default.fileExists(atPath: url.path) else {
+        if requiereIconsetCompleto {
+            fputs("Falta una representación del icono: \(nombre)\n", stderr)
+            exit(1)
+        }
+        continue
+    }
     guard let data = try? Data(contentsOf: url),
           let bitmap = NSBitmapImageRep(data: data),
           bitmap.pixelsWide == pixels,
@@ -59,6 +68,12 @@ for (nombre, pixels) in archivos {
         fputs("Los píxeles del logotipo no corresponden a la marca: \(nombre)\n", stderr)
         exit(1)
     }
+    validados += 1
+}
+
+guard validados >= 4 else {
+    fputs("El icono no contiene suficientes representaciones.\n", stderr)
+    exit(1)
 }
 
 print("Icono de aplicación válido en todas las escalas")

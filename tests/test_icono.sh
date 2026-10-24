@@ -18,7 +18,9 @@ swift "$ROOT/Nuvex/scripts/rasterize_svg.swift" \
   "$ROOT/Nuvex/Resources/nuvex_mark.svg" "$tmp/Nuvex.iconset"
 swiftc -sdk "$SDKROOT" -module-cache-path "$CLANG_MODULE_CACHE_PATH" \
   "$ROOT/Nuvex/Tests/IconoChecks.swift" -o "$tmp/icono-checks"
-"$tmp/icono-checks" "$tmp/Nuvex.iconset"
+"$tmp/icono-checks" "$tmp/Nuvex.iconset" --completo
 python3 "$ROOT/Nuvex/scripts/make_icns.py" \
   "$tmp/Nuvex.iconset" "$tmp/Nuvex.icns"
 file "$tmp/Nuvex.icns" | grep -q 'Mac OS X icon'
+iconutil -c iconset -o "$tmp/extraido.iconset" "$tmp/Nuvex.icns"
+"$tmp/icono-checks" "$tmp/extraido.iconset"

@@ -246,7 +246,7 @@ Retícula de 2 pt (`Espacio`):
 | --- | --- | --- |
 | `Tamano.panel` | 320 | Ancho del panel |
 | `Tamano.codigoAnchoIdeal` / `codigoAnchoMinimo` | 360 / 300 | Ventana del código: ancho normal y mínimo en pantallas estrechas |
-| `Tamano.codigoAltoIdeal` / `codigoAltoMinimo` / `codigoAltoMaximo` | 420 / 280 / 560 | Alto adaptativo de la ventana del código; el contenido se desplaza si hace falta |
+| `Tamano.codigoAltoIdeal` / `codigoAltoMinimo` / `codigoAltoMaximo` | 340 / 280 / 560 | Inicia a 340 pt, solo se reduce si la pantalla no permite los márgenes y admite redimensionarse hasta 560 pt; el contenido se desplaza si hace falta |
 | `Tamano.columnaFormulario` | 704 | Ancho máximo de las secciones de un `Form` agrupado en macOS 27 (medido). La barra de acciones usa la misma columna |
 | `Tamano.filaPanel` | 40 | Alto mínimo de una fila del panel |
 | `Tamano.circuloEstado` | 28 | Círculo de cada VPN; columna de símbolos de los avisos |
@@ -526,7 +526,7 @@ Cuando está desconectada, toda la fila es un botón con `EstiloFila`. En los de
 
 - **Panel:** 320 pt de ancho; con más de 8 conexiones, la lista se desplaza dentro de 8 filas de alto.
 - **Ajustes:** barra lateral de 210–300 pt y detalle flexible; mínimo 780 × 580. Revisado a 780 × 580, 820 × 640 y 1180 × 820. Las secciones crecen hasta 704 pt y después se centran; la barra de acciones sigue la misma columna.
-- **Diálogos:** ancho fijo y alto según el contenido. Los textos largos envuelven (`.fixedSize(horizontal: false, vertical: true)`).
+- **Diálogos:** ancho fijo y alto según el contenido. La ventana del código inicia compacta a 360 × 340 pt y permanece en el nivel flotante estándar mientras la operación esté activa; los textos largos envuelven (`.fixedSize(horizontal: false, vertical: true)`).
 - **Truncado:** nombres y servidores en una línea; valores técnicos largos con truncado central.
 - **Versiones:** macOS 14 o posterior. Las API de macOS 26 (vidrio, `safeAreaBar`, botones de vidrio) se comprueban solo en `Diseno.swift`, con respaldo en 14 y 15.
 

@@ -6,6 +6,14 @@ import AppKit
 @main
 struct InterfazChecks {
     static func main() {
+        let intentoAnterior = Date(timeIntervalSince1970: 1)
+        let intentoNuevo = Date(timeIntervalSince1970: 2)
+        precondition(VigenciaIntentoConexion.corresponde(intentoNuevo, al: intentoNuevo))
+        precondition(!VigenciaIntentoConexion.corresponde(intentoAnterior, al: intentoNuevo),
+                     "un temporizador anterior no debe afectar una reconexión")
+        precondition(GeometriaVentanaCodigo.nivelVentana == .floating)
+        precondition(GeometriaVentanaCodigo.esPanelFlotante)
+
         // La ventana del código permanece dentro del área visible, incluso en
         // una pantalla pequeña, secundaria o al escalonar varias solicitudes.
         func contiene(_ exterior: NSRect, _ interior: NSRect) -> Bool {
@@ -13,16 +21,18 @@ struct InterfazChecks {
                 && interior.minY >= exterior.minY && interior.maxY <= exterior.maxY
         }
         let principal = NSRect(x: 0, y: 40, width: 1_280, height: 680)
+        precondition(GeometriaVentanaCodigo.altoInicial(areaVisible: principal) == 340)
         let marcoPrincipal = GeometriaVentanaCodigo.marco(
-            areaVisible: principal, tamanoIdeal: NSSize(width: 360, height: 420), indice: 0)
+            areaVisible: principal, tamanoIdeal: NSSize(width: 360, height: 340), indice: 0)
         precondition(contiene(principal, marcoPrincipal))
         let secundaria = NSRect(x: -1_024, y: 23, width: 1_024, height: 745)
         let marcoSecundario = GeometriaVentanaCodigo.marco(
             areaVisible: secundaria, tamanoIdeal: NSSize(width: 360, height: 560), indice: 3)
         precondition(contiene(secundaria, marcoSecundario))
         let pequena = NSRect(x: 100, y: 100, width: 320, height: 240)
+        precondition(GeometriaVentanaCodigo.altoInicial(areaVisible: pequena) == 160)
         let marcoPequeno = GeometriaVentanaCodigo.marco(
-            areaVisible: pequena, tamanoIdeal: NSSize(width: 360, height: 420), indice: 1)
+            areaVisible: pequena, tamanoIdeal: NSSize(width: 360, height: 340), indice: 1)
         precondition(contiene(pequena, marcoPequeno))
 
         let activa = #"[{"id":"vpn-a","name":"Oficina","connected":true,"pid":123,"ip":"","iface":"","networks":[],"enabled":true,"configured":true,"helperReady":true}]"#

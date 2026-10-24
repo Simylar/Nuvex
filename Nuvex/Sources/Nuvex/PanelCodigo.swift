@@ -224,10 +224,12 @@ enum VentanaCodigo {
         panel.titlebarAppearsTransparent = true
         panel.titleVisibility = .hidden
         panel.isMovableByWindowBackground = true
-        // Una ventana normal permanece visible sin colocarse encima de los
-        // menús de macOS ni de otras opciones de Nuvex.
-        panel.level = .normal
-        panel.isFloatingPanel = false
+        // El código pertenece a una operación en curso: debe seguir visible
+        // sobre las ventanas normales aunque la persona cambie de aplicación.
+        // `.floating` no invade los niveles reservados de menús y alertas de
+        // macOS, a diferencia de niveles globales más agresivos.
+        panel.level = GeometriaVentanaCodigo.nivelVentana
+        panel.isFloatingPanel = GeometriaVentanaCodigo.esPanelFlotante
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
         panel.isRestorable = false
@@ -251,7 +253,10 @@ enum VentanaCodigo {
             ?? NSApp.keyWindow?.screen
             ?? NSScreen.main
         guard let area = pantalla?.visibleFrame else { return }
-        let alto = min(Tamano.codigoAltoMaximo, max(Tamano.codigoAltoMinimo, area.height * 0.62))
+        // El alto ideal ya contempla todos los estados habituales. Antes se
+        // usaba el 62 % de la pantalla y en escritorios grandes la ventana
+        // crecía hasta 560 pt aunque el contenido no lo necesitara.
+        let alto = GeometriaVentanaCodigo.altoInicial(areaVisible: area)
         let ancho = min(Tamano.codigoAnchoIdeal, max(Tamano.codigoAnchoMinimo, area.width - Espacio.pantalla * 2))
         panel.contentMinSize = NSSize(width: min(Tamano.codigoAnchoMinimo, ancho),
                                       height: min(Tamano.codigoAltoMinimo, alto))

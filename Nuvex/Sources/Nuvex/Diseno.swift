@@ -182,7 +182,7 @@ enum Tamano {
     /// ampliado sin crecer fuera del área visible.
     static let codigoAnchoIdeal: CGFloat = 360
     static let codigoAnchoMinimo: CGFloat = 300
-    static let codigoAltoIdeal: CGFloat = 420
+    static let codigoAltoIdeal: CGFloat = 340
     static let codigoAltoMinimo: CGFloat = 280
     static let codigoAltoMaximo: CGFloat = 560
     /// Ancho máximo de las secciones de un `Form` agrupado en macOS 27

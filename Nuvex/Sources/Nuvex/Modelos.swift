@@ -1,5 +1,13 @@
 import Foundation
 
+/// Evita que el temporizador de un intento anterior afecte a una reconexión
+/// posterior del mismo perfil.
+enum VigenciaIntentoConexion {
+    static func corresponde(_ intento: Date, al inicioActual: Date?) -> Bool {
+        inicioActual == intento
+    }
+}
+
 // MARK: - Modelo de datos
 
 struct VPNStatus: Decodable, Identifiable {

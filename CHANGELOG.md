@@ -21,6 +21,8 @@ Este archivo sigue el formato de [Keep a Changelog](https://keepachangelog.com/e
 - Las habilidades explican recuperación, códigos de salida y límites reales de macOS, y se actualizan sin reemplazar archivos ajenos.
 
 ### Correcciones de errores
+- El temporizador de confirmación de un túnel ya no puede marcar como fallida una reconexión posterior del mismo perfil, y una espera de código activa puede cancelarse aunque la fila haya cambiado a error.
+- La ventana del código inicia con una altura compacta y permanece sobre las ventanas normales mientras la verificación está en curso.
 - La preparación de actualizaciones conserva el motor ya autorizado cuando el release anterior incluye una versión igual o más reciente de OpenSSL, evitando degradaciones y solicitudes administrativas innecesarias.
 - El control local obtiene la identidad del CLI mediante las credenciales del socket y el audit token de macOS, y localiza el socket desde el hogar real aunque un agente redefina `HOME`, evitando rechazos o rutas incorrectas del comando oficial.
 - Las skills y autorizaciones persistentes usan la ruta absoluta del CLI instalada para que Codex y Claude Code no dependan de la expansión de `~` dentro de sus sandboxes.

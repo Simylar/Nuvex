@@ -302,8 +302,9 @@ final class VPNModel: ObservableObject {
 
     private func iniciarConexion(_ vpn: VPNStatus) {
         guard estado(vpn) != .conectando else { return }
+        let inicioIntento = Date()
         estados[vpn.id] = .conectando
-        inicioConexion[vpn.id] = Date()
+        inicioConexion[vpn.id] = inicioIntento
         canceladas.remove(vpn.id)
         ultimoError = nil
         IntentosConexion.preparar(vpn.id)
@@ -316,7 +317,7 @@ final class VPNModel: ObservableObject {
                     // se confirma con `list`. Se conserva «conectando» para no
                     // abrir un hueco falso de «desconectada» entre ambas cosas.
                     self.reconexionesDesdeAviso.remove(vpn.id)
-                    self.agotarConfirmacionSiNoAparece(vpn)
+                    self.agotarConfirmacionSiNoAparece(vpn, intento: inicioIntento)
                 case .failure(let e) where e.fallo == .canceladaPorPersona:
                     self.inicioConexion.removeValue(forKey: vpn.id)
                     self.estados.removeValue(forKey: vpn.id)
@@ -337,10 +338,11 @@ final class VPNModel: ObservableObject {
     /// Un `list` normal confirma el túnel en milisegundos. Si el motor deja de
     /// responder después de informar éxito, se termina con un error explícito
     /// en lugar de mantener «conectando» indefinidamente.
-    private func agotarConfirmacionSiNoAparece(_ vpn: VPNStatus) {
+    private func agotarConfirmacionSiNoAparece(_ vpn: VPNStatus, intento: Date) {
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(30))
-            guard let self, self.inicioConexion[vpn.id] != nil,
+            guard let self,
+                  VigenciaIntentoConexion.corresponde(intento, al: self.inicioConexion[vpn.id]),
                   self.estados[vpn.id] == .conectando else { return }
             self.inicioConexion.removeValue(forKey: vpn.id)
             self.estados[vpn.id] = .error(Fallo(
@@ -354,7 +356,10 @@ final class VPNModel: ObservableObject {
     /// Cancela un intento de conexión en curso. Detiene el túnel a medio
     /// establecer; las VPN ya conectadas no se tocan.
     func cancelarConexion(_ id: String) {
-        guard estados[id] == .conectando else { return }
+        // La operación real prevalece sobre la representación visual: si un
+        // error de consulta cambió la fila, la espera de OTP aún debe poder
+        // cancelarse y limpiar su proceso.
+        guard conexionEnCurso(id) else { return }
         Log.escribir("cancelando el intento de conectar \(id)")
         SolicitudCodigo.abiertas[id]?.cancelar()
         switch IntentosConexion.cancelar(id) {

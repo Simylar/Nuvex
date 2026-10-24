@@ -47,9 +47,13 @@ Si el código no aparece, abre **Patrón avanzado** y escribe una expresión reg
 ## Cómo funciona al conectar
 
 1. Cuando el servidor pide el código, aparece la ventana del código con «Buscando en tu@gmail.com…».
-2. Nuvex consulta Gmail cada pocos segundos durante el tiempo configurado (2 minutos por defecto).
+2. Nuvex consulta Gmail cada pocos segundos durante el tiempo configurado (2 minutos por defecto). Si hay un fallo de red, cuota o servidor, usa reintentos exponenciales con jitter y respeta `Retry-After`; nunca reintenta sin límite.
 3. Al encontrar el código, lo escribe y conecta. Puedes pulsar **Revisar** para detenerlo.
 4. Si no llega a tiempo, puedes escribirlo a mano o un asistente puede enviarlo con `nuvex codigo`.
+
+Nuvex revisa el árbol MIME completo, incluidas partes de texto que Gmail entrega mediante `attachmentId`, elige el candidato más reciente por la fecha interna de Gmail y no reutiliza el mismo mensaje durante la sesión. Cada cuerpo de texto tiene un límite de 256 KiB. Tras perder red o reactivar la Mac, una búsqueda pendiente se reanuda automáticamente si el intento de conexión sigue vigente.
+
+El equipo debe estar despierto para consultar Gmail. Durante una suspensión real macOS detiene CPU y red; Nuvex reconcilia el estado al reactivarse, pero no puede recibir el correo mientras está dormido.
 
 ## Quitar el acceso
 

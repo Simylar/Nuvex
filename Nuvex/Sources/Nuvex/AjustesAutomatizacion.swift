@@ -103,6 +103,16 @@ enum IntegracionAsistentes {
         }
     }
 
+    /// Prepara de una vez el comando y las habilidades de los asistentes que
+    /// ya estén instalados. Conserva archivos ajenos y no cambia la política
+    /// de autorización elegida por la persona.
+    static func preparar() throws {
+        try instalarComando()
+        for destino in destinos where estado(destino) != .sinHerramienta && estado(destino) != .instalada {
+            try instalar(destino)
+        }
+    }
+
     /// Ejecuta el comando instalado contra el socket real de esta app. Así el
     /// diagnóstico cubre enlace, ejecutable, autorización y versión del
     /// protocolo, no solo la existencia de archivos.
@@ -190,10 +200,36 @@ struct AjustesAutomatizacion: View {
         comprobaciones = resultado
     }
 
+    private func prepararIntegracion() {
+        intentar(IntegracionAsistentes.preparar)
+        guard error == nil else { return }
+        Task { await comprobarPreparacion() }
+    }
+
     var body: some View {
         Form {
             if let aviso = preferencias.soloLectura {
                 Section { Label(aviso, systemImage: "lock.fill").foregroundStyle(Paleta.avisoTexto) }
+            }
+            Section {
+                HStack(spacing: Espacio.l) {
+                    IconoCuadrado(simbolo: "wand.and.stars", color: Paleta.acento,
+                                  lado: Tamano.iconoCabecera)
+                    VStack(alignment: .leading, spacing: Espacio.xxs) {
+                        Text("Preparar automatización").font(Tipo.encabezado)
+                        Text("Instala o actualiza el comando y las habilidades detectadas; después comprueba la comunicación real.")
+                            .font(Tipo.apoyo).foregroundStyle(Paleta.textoSecundario)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer()
+                    Button("Preparar") { prepararIntegracion() }
+                        .estiloBoton(.principal)
+                        .disabled(comprobando || estadoComando == .noIncluido || estadoComando == .ajeno)
+                }
+                .padding(.vertical, Espacio.xs)
+            } footer: {
+                Text("No concede permisos de macOS ni modifica «Conectar sin preguntar». Los archivos que Nuvex no creó nunca se reemplazan.")
+                    .foregroundStyle(Paleta.textoSecundario)
             }
             Section {
                 Picker("Terminal y asistentes", selection: politica) {

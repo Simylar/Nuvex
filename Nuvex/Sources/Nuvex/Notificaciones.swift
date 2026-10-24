@@ -50,10 +50,9 @@ final class VPNNotifications: NSObject, UNUserNotificationCenterDelegate, @unche
             UNNotificationCategory(identifier: Categoria.ayudante, actions: [], intentIdentifiers: []),
             UNNotificationCategory(identifier: Categoria.asistente, actions: [], intentIdentifiers: []),
         ])
-        center.getNotificationSettings { settings in
-            guard settings.authorizationStatus == .notDetermined else { return }
-            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
-        }
+        // La autorización se pide desde Ajustes, en contexto. Solicitarla al
+        // arrancar apilaba un diálogo de macOS con el onboarding del ayudante,
+        // Llavero y Google aunque la persona aún no hubiera pedido avisos.
     }
 
     // MARK: Avisos
@@ -139,6 +138,7 @@ final class VPNNotifications: NSObject, UNUserNotificationCenterDelegate, @unche
     // MARK: Estilo
 
     enum Estilo: Equatable {
+        case sinAutorizar
         case desactivados
         case alertas
         case banners
@@ -150,13 +150,25 @@ final class VPNNotifications: NSObject, UNUserNotificationCenterDelegate, @unche
         let ajustes = await UNUserNotificationCenter.current().notificationSettings()
         switch ajustes.authorizationStatus {
         case .denied: return .desactivados
-        case .notDetermined: return .banners
+        case .notDetermined: return .sinAutorizar
         default: break
         }
         switch ajustes.alertStyle {
         case .alert: return .alertas
         case .banner: return .banners
         default: return .sinPresentacion
+        }
+    }
+
+    /// Único punto que solicita el permiso de avisos. macOS decide si debe
+    /// mostrar el diálogo y conserva o revoca la autorización.
+    func solicitarAutorizacion() async -> Bool {
+        guard disponible else { return false }
+        do {
+            return try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
+        } catch {
+            Log.escribir("permisos componente=avisos estado=fallo")
+            return false
         }
     }
 

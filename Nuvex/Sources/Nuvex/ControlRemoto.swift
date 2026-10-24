@@ -38,6 +38,14 @@ final class ControlRemoto {
         disponible = false
     }
 
+    /// El socket normalmente sobrevive al reposo. Si falló al arrancar o dejó
+    /// de estar disponible, el despertar ofrece un punto seguro para abrirlo
+    /// de nuevo sin crear un segundo servidor.
+    func reanudarSiHaceFalta() {
+        guard !disponible else { return }
+        iniciar()
+    }
+
     private var preferencias: AjustesApp { Preferencias.shared.ajustes }
 
     nonisolated private static func esClienteOficial(_ cliente: InfoCliente) -> Bool {
@@ -51,7 +59,10 @@ final class ControlRemoto {
     // MARK: Peticiones
 
     private func atender(_ peticion: Peticion, _ cliente: InfoCliente, _ emisor: Emisor) async -> Mensaje {
-        Log.escribir("\(cliente.origen) pidió \(peticion.comando.rawValue)\(peticion.vpn.map { " «\($0)»" } ?? "")")
+        let operacion = peticion.operacion.map {
+            String($0.filter { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }.prefix(12))
+        }.flatMap { $0.isEmpty ? nil : $0 } ?? "sin-id"
+        Log.escribir("control op=\(operacion) origen=\(cliente.origen) comando=\(peticion.comando.rawValue) vpn=\(peticion.vpn == nil ? "no" : "si")")
         await esperarCarga()
         switch peticion.comando {
         case .estado:
@@ -140,7 +151,7 @@ final class ControlRemoto {
             }
             switch modelo.estado(id: vpn.id) {
             case .conectada:
-                avisar(cliente, "\(cliente.origen) conectó «\(vpn.name)»")
+                avisar(cliente, accion: "conectar", titulo: "\(cliente.origen) conectó «\(vpn.name)»")
                 return .resultado(.ok, vpn: vpn.id, estado: .conectada, motivo: .conectada,
                                   titulo: "«\(vpn.name)» está conectada",
                                   conexiones: conexiones().filter { $0.id == vpn.id })
@@ -279,7 +290,7 @@ final class ControlRemoto {
                               titulo: "No se pudo confirmar la desconexión de \(nombres)",
                               detalle: "El motor no confirmó que todos los túneles estén detenidos. Consulta el estado antes de volver a intentarlo.")
         }
-        avisar(cliente, "\(cliente.origen) desconectó \(nombres)")
+        avisar(cliente, accion: "desconectar", titulo: "\(cliente.origen) desconectó \(nombres)")
         return .resultado(.ok, estado: .desconectada, motivo: conectando.isEmpty ? .desconectada : .cancelada,
                           titulo: conectando.isEmpty ? "Desconectada: \(nombres)" : "Cancelada o desconectada: \(nombres)",
                           conexiones: conexiones())
@@ -300,7 +311,7 @@ final class ControlRemoto {
         }
         guard let texto = peticion.codigo, solicitud.recibirExterno(texto) else {
             return .resultado(.uso, vpn: info.id, motivo: .codigoInvalido, titulo: "Falta el código",
-                              detalle: "Envíalo por la entrada estándar: printf '%s' CODIGO | nuvex codigo \"\(info.nombre)\"")
+                              detalle: "Envía un código imprimible de 4 a 64 caracteres por la entrada estándar: printf '%s' CODIGO | nuvex codigo \"\(info.nombre)\"")
         }
         return .resultado(.ok, vpn: info.id, estado: .conectando, motivo: .conectando,
                           titulo: "Código enviado a «\(info.nombre)»")
@@ -359,8 +370,10 @@ final class ControlRemoto {
         }
     }
 
-    private func avisar(_ cliente: InfoCliente, _ titulo: String) {
-        Log.escribir(titulo)
+    private func avisar(_ cliente: InfoCliente, accion: String, titulo: String) {
+        // El aviso visible puede usar el nombre elegido por la persona; el
+        // registro solo conserva metadatos operativos y no nombres de clientes.
+        Log.escribir("control origen=\(cliente.origen) estado=accion_completada accion=\(accion)")
         guard preferencias.avisarAccionesAsistentes else { return }
         VPNNotifications.shared.accionAsistente(titulo: titulo, cuerpo: "Lo pidió desde la Terminal (proceso \(cliente.pid)).")
     }

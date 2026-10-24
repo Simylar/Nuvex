@@ -15,6 +15,18 @@ enum LectorGmail {
     /// Correos ya usados en esta sesión: un código no se usa dos veces.
     @MainActor private static var usados: Set<String> = []
 
+    private struct FalloPeticion: Error {
+        let problema: ProblemaGmail
+        let retryAfter: TimeInterval?
+    }
+
+    private struct Busqueda {
+        let hallazgos: [Hallazgo]
+        /// Mensajes que se leyeron correctamente, tuvieran código o no. Se
+        /// evita descargarlos de nuevo en cada sondeo de la misma operación.
+        let inspeccionados: Set<String>
+    }
+
     enum Resultado: Equatable, Sendable {
         case codigo(CodigoRecibido)
         /// Se agotó la espera sin que llegara el correo.
@@ -31,40 +43,73 @@ enum LectorGmail {
                         alCambiar: @escaping @MainActor (ProblemaGmail?) -> Void = { _ in }) async -> Resultado {
         let limite = Date().addingTimeInterval(TimeInterval(max(config.espera, 15)))
         let comienzo = Date()
+        let operacion = String(UUID().uuidString.prefix(8)).lowercased()
         var ultimo: ProblemaGmail?
+        var fallosConsecutivos = 0
+        var inspeccionados: Set<String> = []
         while Date() < limite, !Task.isCancelled {
+            var pausa = SoporteGmail.pausaSinCorreo(segundosTranscurridos: Date().timeIntervalSince(comienzo))
             do {
                 let token = try await CuentaGoogle.shared.tokenAcceso()
                 let excluir = await MainActor.run { usados }
-                let hallazgo = try await buscar(config, desde: desde, excluir: excluir, token: token)
+                let busqueda = try await buscar(config, desde: desde,
+                                                excluir: excluir.union(inspeccionados), token: token)
+                inspeccionados.formUnion(busqueda.inspeccionados)
+                fallosConsecutivos = 0
                 if ultimo != nil {
                     ultimo = nil
                     await alCambiar(nil)
+                    Log.escribir("gmail op=\(operacion) estado=recuperado")
                 }
-                if let hallazgo {
-                    await MainActor.run { _ = usados.insert(hallazgo.id) }
-                    Log.escribir("código encontrado en el correo tras \(Int(Date().timeIntervalSince(comienzo))) s")
+                for hallazgo in busqueda.hallazgos {
+                    // La selección y la reserva son una sola operación en el
+                    // actor principal: dos VPN simultáneas no pueden consumir
+                    // el mismo correo aunque lo hayan leído a la vez.
+                    let reservado = await MainActor.run { usados.insert(hallazgo.id).inserted }
+                    guard reservado else {
+                        inspeccionados.insert(hallazgo.id)
+                        continue
+                    }
+                    Log.escribir("gmail op=\(operacion) estado=codigo_encontrado segundos=\(Int(Date().timeIntervalSince(comienzo)))")
                     return .codigo(CodigoRecibido(codigo: hallazgo.codigo, remitente: hallazgo.remitente))
                 }
             } catch {
                 if Task.isCancelled { return .sinCorreo }
                 let problema = problema(de: error)
-                Log.escribir("no se pudo consultar Gmail: \(problema.titulo) (\(error.localizedDescription))")
+                fallosConsecutivos += 1
+                let retryAfter = (error as? FalloPeticion)?.retryAfter
+                pausa = SoporteGmail.pausaTrasError(
+                    fallosConsecutivos: fallosConsecutivos,
+                    problema: problema,
+                    retryAfter: retryAfter,
+                    jitter: Double.random(in: 0...1)
+                )
+                // Registra los cambios de clase y algunos hitos, no cada
+                // sondeo fallido. Nunca incluye token, asunto ni correo.
+                if problema != ultimo || [1, 2, 4, 8].contains(fallosConsecutivos) {
+                    Log.escribir("gmail op=\(operacion) estado=fallo tipo=\(problema.codigoDiagnostico) intento=\(fallosConsecutivos) reintento_s=\(Int(pausa.rounded(.up)))")
+                }
                 if problema.definitivo { return .problema(problema) }
                 if problema != ultimo {
                     ultimo = problema
                     await alCambiar(problema)
                 }
             }
-            var pausa: Duration = Date().timeIntervalSince(comienzo) < 30 ? .seconds(3) : .seconds(5)
-            if ultimo == .limite { pausa = .seconds(10) }
-            try? await Task.sleep(for: pausa)
+            let restante = limite.timeIntervalSinceNow
+            guard restante > 0 else { break }
+            do {
+                try await Task.sleep(for: .seconds(min(pausa, restante)))
+            } catch {
+                return .sinCorreo
+            }
         }
+        Log.escribir("gmail op=\(operacion) estado=agotado segundos=\(Int(Date().timeIntervalSince(comienzo)))")
         return ultimo.map(Resultado.problema) ?? .sinCorreo
     }
 
     /// Traduce cualquier error de la cuenta o de la API a un problema explicable.
     static func problema(de error: Error) -> ProblemaGmail {
+        if let fallo = error as? FalloPeticion { return fallo.problema }
         if let problema = ProblemaGmail.clasificar(error) { return problema }
         switch error {
         case ErrorGoogle.caducada: return .sesionCaducada
@@ -87,20 +132,29 @@ enum LectorGmail {
         var consulta = "from:(\(config.remitente.trimmingCharacters(in: .whitespaces))) newer_than:7d"
         let asunto = config.asunto.trimmingCharacters(in: .whitespaces)
         if !asunto.isEmpty { consulta += " subject:(\(asunto))" }
+        var hallazgos: [Hallazgo] = []
         for id in try await listar(consulta, token: token) {
-            if let hallazgo = try await leer(id, patron: config.patron, token: token) { return hallazgo }
+            if let hallazgo = try await leer(id, patron: config.patron, token: token) { hallazgos.append(hallazgo) }
         }
-        return nil
+        return hallazgos.max { $0.fecha < $1.fecha }
     }
 
-    static func buscar(_ config: ConfigCorreo, desde: Date, excluir: Set<String>, token: String) async throws -> Hallazgo? {
+    private static func buscar(_ config: ConfigCorreo, desde: Date, excluir: Set<String>,
+                               token: String) async throws -> Busqueda {
         let consulta = ExtractorCodigo.consultaGmail(remitente: config.remitente, asunto: config.asunto, desde: desde)
+        var hallazgos: [Hallazgo] = []
+        var inspeccionados: Set<String> = []
         for id in try await listar(consulta, token: token) where !excluir.contains(id) {
-            guard let hallazgo = try await leer(id, patron: config.patron, token: token) else { continue }
+            let hallazgo = try await leer(id, patron: config.patron, token: token)
+            guard let hallazgo else {
+                inspeccionados.insert(id)
+                continue
+            }
             // Gmail redondea after: a segundos; se descarta lo anterior al intento.
-            if hallazgo.fecha >= desde.addingTimeInterval(-30) { return hallazgo }
+            if hallazgo.fecha >= desde.addingTimeInterval(-30) { hallazgos.append(hallazgo) }
+            else { inspeccionados.insert(id) }
         }
-        return nil
+        return Busqueda(hallazgos: hallazgos.sorted { $0.fecha > $1.fecha }, inspeccionados: inspeccionados)
     }
 
     // MARK: API de Gmail
@@ -109,7 +163,7 @@ enum LectorGmail {
 
     private static func listar(_ consulta: String, token: String) async throws -> [String] {
         var url = URLComponents(string: base)!
-        url.queryItems = [URLQueryItem(name: "q", value: consulta), URLQueryItem(name: "maxResults", value: "5")]
+        url.queryItems = [URLQueryItem(name: "q", value: consulta), URLQueryItem(name: "maxResults", value: "10")]
         let json = try await pedir(url.url!, token: token)
         return (json["messages"] as? [[String: Any]] ?? []).compactMap { $0["id"] as? String }
     }
@@ -122,28 +176,43 @@ enum LectorGmail {
             return (nombre, valor)
         }, uniquingKeysWith: { primero, _ in primero })
         let asunto = cabeceras["subject"] ?? ""
-        let texto = asunto + "\n" + cuerpo(carga)
+        let texto = asunto + "\n" + (try await cuerpo(carga, mensajeID: id, token: token))
         guard let codigo = ExtractorCodigo.extraer(de: texto, patron: patron) else { return nil }
         let milisegundos = Double(json["internalDate"] as? String ?? "") ?? 0
         return Hallazgo(id: id, codigo: codigo, remitente: direccion(cabeceras["from"] ?? ""), asunto: asunto,
                         fecha: Date(timeIntervalSince1970: milisegundos / 1000))
     }
 
-    /// Texto plano del correo; si solo hay HTML, convertido a texto.
-    private static func cuerpo(_ parte: [String: Any]) -> String {
-        var plano: [String] = []
-        var html: [String] = []
-        func recorrer(_ parte: [String: Any]) {
-            let tipo = (parte["mimeType"] as? String ?? "").lowercased()
-            if let datos = (parte["body"] as? [String: Any])?["data"] as? String,
-               let decodificado = ExtractorCodigo.decodificarBase64URL(datos) {
-                let texto = String(decoding: decodificado, as: UTF8.self)
-                if tipo == "text/plain" { plano.append(texto) } else if tipo == "text/html" { html.append(texto) }
+    /// Texto plano del correo; si Gmail dejó una parte de texto fuera del
+    /// `payload`, se recupera con attachments.get. Si existe texto plano no se
+    /// descargan variantes HTML redundantes.
+    private static func cuerpo(_ carga: [String: Any], mensajeID: String, token: String) async throws -> String {
+        let partes = SoporteGmail.partesTexto(en: carga)
+        for formato in [ParteTextoGmail.Formato.plano, .html] {
+            let candidatas = partes.filter { $0.formato == formato }
+            guard !candidatas.isEmpty else { continue }
+            var codificadas: [String] = []
+            for parte in candidatas {
+                if let datos = parte.datos, !datos.isEmpty {
+                    codificadas.append(datos)
+                } else if let adjuntoID = parte.adjuntoID, !adjuntoID.isEmpty,
+                          let datos = try await leerAdjunto(adjuntoID, mensajeID: mensajeID, token: token) {
+                    codificadas.append(datos)
+                }
             }
-            (parte["parts"] as? [[String: Any]])?.forEach(recorrer)
+            let texto = SoporteGmail.texto(datosBase64URL: codificadas, formato: formato)
+            if !texto.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return texto }
         }
-        recorrer(parte)
-        return plano.isEmpty ? html.map(ExtractorCodigo.textoDesdeHTML).joined(separator: "\n") : plano.joined(separator: "\n")
+        return ""
+    }
+
+    private static func leerAdjunto(_ adjuntoID: String, mensajeID: String, token: String) async throws -> String? {
+        guard let mensaje = mensajeID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let adjunto = adjuntoID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let url = URL(string: "\(base)/\(mensaje)/attachments/\(adjunto)") else { return nil }
+        let json = try await pedir(url, token: token)
+        guard (json["size"] as? Int ?? 0) <= SoporteGmail.maximoBytesTexto else { return nil }
+        return json["data"] as? String
     }
 
     /// «Fortinet <noreply@empresa.com>» → «noreply@empresa.com».
@@ -164,9 +233,13 @@ enum LectorGmail {
                 // Token de acceso caducado: la próxima consulta lo renueva. Si
                 // la sesión entera caducó, la renovación lo dirá.
                 await MainActor.run { CuentaGoogle.shared.invalidarAcceso() }
-                throw ProblemaGmail.servidor(401)
+                throw FalloPeticion(problema: .servidor(401), retryAfter: nil)
             }
-            throw ProblemaGmail.clasificar(estado: codigo, cuerpo: datos)
+            let problema = ProblemaGmail.clasificar(estado: codigo, cuerpo: datos)
+            let retryAfter = SoporteGmail.retryAfter(
+                (respuesta as? HTTPURLResponse)?.value(forHTTPHeaderField: "Retry-After")
+            )
+            throw FalloPeticion(problema: problema, retryAfter: retryAfter)
         }
         return (try JSONSerialization.jsonObject(with: datos) as? [String: Any]) ?? [:]
     }

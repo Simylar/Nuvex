@@ -178,6 +178,13 @@ enum Espacio {
 /// Medidas fijas de componentes.
 enum Tamano {
     static let panel: CGFloat = 320
+    /// Ventana dedicada al código: admite pantallas estrechas y contenido
+    /// ampliado sin crecer fuera del área visible.
+    static let codigoAnchoIdeal: CGFloat = 360
+    static let codigoAnchoMinimo: CGFloat = 300
+    static let codigoAltoIdeal: CGFloat = 420
+    static let codigoAltoMinimo: CGFloat = 280
+    static let codigoAltoMaximo: CGFloat = 560
     /// Ancho máximo de las secciones de un `Form` agrupado en macOS 27
     /// (medido): a partir de ahí se centran. Lo que acompaña al formulario,
     /// como la barra de acciones, usa la misma columna.

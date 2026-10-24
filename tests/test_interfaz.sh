@@ -14,6 +14,8 @@ mkdir -p "$CLANG_MODULE_CACHE_PATH"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 swiftc -sdk "$SDKROOT" -module-cache-path "$CLANG_MODULE_CACHE_PATH" \
+  "$ROOT/Nuvex/Sources/Nuvex/Diseno.swift" \
+  "$ROOT/Nuvex/Sources/Nuvex/GeometriaVentanaCodigo.swift" \
   "$ROOT/Nuvex/Sources/Nuvex/Modelos.swift" \
   "$ROOT/Nuvex/Tests/InterfazChecks.swift" \
   -o "$tmp/interfaz-checks"

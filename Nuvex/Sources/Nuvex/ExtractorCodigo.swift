@@ -13,11 +13,22 @@ enum ExtractorCodigo {
     /// Código encontrado en el texto, o nil si no hay uno inequívoco.
     static func extraer(de texto: String, patron personalizado: String = "") -> String? {
         if !personalizado.trimmingCharacters(in: .whitespaces).isEmpty {
-            return primeraCoincidencia(personalizado, en: texto)
+            return primeraCoincidencia(personalizado, en: texto).flatMap { codigoValido($0) ? $0 : nil }
         }
         if let codigo = primeraCoincidencia(patronCercano, en: texto) { return codigo }
         let seis = coincidencias(patronSeisDigitos, en: texto)
         return Set(seis).count == 1 ? seis.first : nil
+    }
+
+    /// El formato exacto depende del servidor. Se aceptan códigos imprimibles
+    /// y acotados, pero nunca controles ni entradas capaces de crecer sin
+    /// límite antes de escribirlas en la tubería privada del motor.
+    static func codigoValido(_ codigo: String) -> Bool {
+        let escalares = codigo.unicodeScalars
+        return (4...64).contains(escalares.count) && escalares.allSatisfy {
+            !CharacterSet.whitespacesAndNewlines.contains($0)
+                && !CharacterSet.controlCharacters.contains($0)
+        }
     }
 
     /// true si el patrón personalizado es una expresión regular válida.

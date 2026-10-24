@@ -112,6 +112,21 @@ final class SolicitudCodigo: ObservableObject, Identifiable {
         }
     }
 
+    /// Reinicia sondeos afectados por reposo o pérdida de conectividad. El
+    /// límite global de la solicitud sigue vigente y cancelará esta tarea.
+    static func reanudarLecturasInterrumpidas() {
+        for solicitud in abiertas.values where solicitud.continuacion != nil {
+            switch solicitud.estadoCorreo {
+            case .buscando, .sinResultado:
+                solicitud.empezarLectura()
+            case .problema(let problema) where !problema.definitivo:
+                solicitud.empezarLectura()
+            case .noConfigurado, .encontrado, .problema:
+                break
+            }
+        }
+    }
+
     /// Vuelve a buscar en el correo (tras iniciar sesión, activar la API…).
     func reintentarCorreo() {
         guard continuacion != nil else { return }
@@ -135,7 +150,7 @@ final class SolicitudCodigo: ObservableObject, Identifiable {
 
     func enviar() {
         let limpio = Self.limpiar(codigo)
-        guard !limpio.isEmpty else { return }
+        guard ExtractorCodigo.codigoValido(limpio) else { return }
         resolver(limpio)
     }
 
@@ -147,7 +162,7 @@ final class SolicitudCodigo: ObservableObject, Identifiable {
     /// Respuesta de `nuvex code` (un asistente o la Terminal).
     func recibirExterno(_ texto: String) -> Bool {
         let limpio = Self.limpiar(texto)
-        guard !limpio.isEmpty, continuacion != nil else { return false }
+        guard ExtractorCodigo.codigoValido(limpio), continuacion != nil else { return false }
         Log.escribir("código de \(perfilID) recibido desde la Terminal")
         resolver(limpio)
         return true
@@ -194,17 +209,29 @@ enum VentanaCodigo {
         func windowWillClose(_ notification: Notification) {
             MainActor.assumeIsolated { solicitud?.cancelar() }
         }
+
+        func windowDidChangeScreen(_ notification: Notification) {
+            guard let panel = notification.object as? NSPanel else { return }
+            MainActor.assumeIsolated { VentanaCodigo.ajustar(panel) }
+        }
     }
 
     static func mostrar(_ solicitud: SolicitudCodigo) {
-        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 360, height: 300),
-                            styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
+        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: Tamano.codigoAnchoIdeal,
+                                                height: Tamano.codigoAltoIdeal),
+                            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+                            backing: .buffered, defer: false)
         panel.titlebarAppearsTransparent = true
         panel.titleVisibility = .hidden
         panel.isMovableByWindowBackground = true
-        panel.level = .floating
+        // Una ventana normal permanece visible sin colocarse encima de los
+        // menús de macOS ni de otras opciones de Nuvex.
+        panel.level = .normal
+        panel.isFloatingPanel = false
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
+        panel.isRestorable = false
+        panel.collectionBehavior = [.moveToActiveSpace]
         panel.title = "Código para «\(solicitud.nombre)»"
         panel.contentViewController = NSHostingController(rootView: PanelCodigoView(solicitud: solicitud))
         let delegado = Delegado(solicitud)
@@ -212,9 +239,29 @@ enum VentanaCodigo {
         delegados[solicitud.perfilID] = delegado
         paneles[solicitud.perfilID]?.close()
         paneles[solicitud.perfilID] = panel
-        panel.center()
+        ajustar(panel, indice: max(0, paneles.count - 1))
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
+    }
+
+    fileprivate static func ajustar(_ panel: NSPanel, indice: Int = 0) {
+        let punto = NSEvent.mouseLocation
+        let pantalla = panel.screen
+            ?? NSScreen.screens.first(where: { NSMouseInRect(punto, $0.frame, false) })
+            ?? NSApp.keyWindow?.screen
+            ?? NSScreen.main
+        guard let area = pantalla?.visibleFrame else { return }
+        let alto = min(Tamano.codigoAltoMaximo, max(Tamano.codigoAltoMinimo, area.height * 0.62))
+        let ancho = min(Tamano.codigoAnchoIdeal, max(Tamano.codigoAnchoMinimo, area.width - Espacio.pantalla * 2))
+        panel.contentMinSize = NSSize(width: min(Tamano.codigoAnchoMinimo, ancho),
+                                      height: min(Tamano.codigoAltoMinimo, alto))
+        panel.contentMaxSize = NSSize(width: max(ancho, Tamano.codigoAnchoMinimo),
+                                      height: min(Tamano.codigoAltoMaximo, area.height - Espacio.pantalla))
+        panel.setFrame(GeometriaVentanaCodigo.marco(
+            areaVisible: area,
+            tamanoIdeal: NSSize(width: ancho, height: alto),
+            indice: indice
+        ), display: true)
     }
 
     static func cerrar(_ solicitud: SolicitudCodigo) {
@@ -230,45 +277,49 @@ struct PanelCodigoView: View {
     @FocusState private var enfocado: Bool
 
     var body: some View {
-        VStack(spacing: Espacio.l) {
-            IconoCuadrado(simbolo: "ellipsis.message.fill", color: Paleta.acento, lado: Tamano.iconoDestacado)
-                .sombra(.sutil)
-            VStack(spacing: Espacio.xs) {
-                Text("Código para «\(solicitud.nombre)»").font(Tipo.encabezado)
-                Text("El servidor pidió un código de verificación. Nuvex no lo guarda.")
-                    .font(Tipo.apoyo).foregroundStyle(Paleta.textoSecundario)
+        ScrollView {
+            VStack(spacing: Espacio.l) {
+                IconoCuadrado(simbolo: "ellipsis.message.fill", color: Paleta.acento, lado: Tamano.iconoDestacado)
+                    .sombra(.sutil)
+                VStack(spacing: Espacio.xs) {
+                    Text("Código para «\(solicitud.nombre)»").font(Tipo.encabezado)
+                    Text("El servidor pidió un código de verificación. Nuvex no lo guarda.")
+                        .font(Tipo.apoyo).foregroundStyle(Paleta.textoSecundario)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                TextField("Código", text: $solicitud.codigo, prompt: Text("123456"))
+                    .textContentType(.oneTimeCode)
+                    .font(Tipo.codigo)
+                    .monospacedDigit()
                     .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            TextField("Código", text: $solicitud.codigo, prompt: Text("123456"))
-                .textContentType(.oneTimeCode)
-                .font(Tipo.codigo)
-                .monospacedDigit()
-                .multilineTextAlignment(.center)
-                .campoDestacado(enfocado: enfocado)
-                .focused($enfocado)
-                .onSubmit { solicitud.enviar() }
-                .accessibilityLabel("Código de verificación para \(solicitud.nombre)")
-            estadoCorreo
-            HStack(spacing: Espacio.m) {
-                Button(role: .cancel) { solicitud.cancelar() } label: {
-                    Text("Cancelar").frame(maxWidth: .infinity)
+                    .campoDestacado(enfocado: enfocado)
+                    .focused($enfocado)
+                    .onSubmit { solicitud.enviar() }
+                    .accessibilityLabel("Código de verificación para \(solicitud.nombre)")
+                estadoCorreo
+                HStack(spacing: Espacio.m) {
+                    Button(role: .cancel) { solicitud.cancelar() } label: {
+                        Text("Cancelar").frame(maxWidth: .infinity)
+                    }
+                    .estiloBoton(.secundario)
+                    .keyboardShortcut(.cancelAction)
+                    Button { solicitud.enviar() } label: {
+                        Text("Conectar").frame(maxWidth: .infinity)
+                    }
+                    .estiloBoton(.principal)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!ExtractorCodigo.codigoValido(SolicitudCodigo.limpiar(solicitud.codigo)))
                 }
-                .estiloBoton(.secundario)
-                .keyboardShortcut(.cancelAction)
-                Button { solicitud.enviar() } label: {
-                    Text("Conectar").frame(maxWidth: .infinity)
-                }
-                .estiloBoton(.principal)
-                .keyboardShortcut(.defaultAction)
-                .disabled(SolicitudCodigo.limpiar(solicitud.codigo).isEmpty)
+                .controlSize(.large)
             }
-            .controlSize(.large)
+            .padding(.horizontal, Espacio.xxxl)
+            .padding(.top, Espacio.bloque)
+            .padding(.bottom, Espacio.xxl)
+            .frame(maxWidth: .infinity)
         }
-        .padding(.horizontal, Espacio.xxxl)
-        .padding(.top, Espacio.bloque)
-        .padding(.bottom, Espacio.xxl)
-        .frame(width: 360)
+        .frame(minWidth: Tamano.codigoAnchoMinimo, idealWidth: Tamano.codigoAnchoIdeal,
+               minHeight: Tamano.codigoAltoMinimo, idealHeight: Tamano.codigoAltoIdeal)
         .fondoVentana()
         .onAppear { enfocado = true }
     }

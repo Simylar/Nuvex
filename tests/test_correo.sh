@@ -14,7 +14,7 @@ mkdir -p "$CLANG_MODULE_CACHE_PATH"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 swiftc -sdk "$SDKROOT" -module-cache-path "$CLANG_MODULE_CACHE_PATH" \
-  "$ROOT/Nuvex/Sources/Nuvex/ExtractorCodigo.swift" "$ROOT/Nuvex/Sources/Nuvex/ProblemaGmail.swift" "$ROOT/Nuvex/Sources/Nuvex/Preferencias.swift" "$ROOT/Nuvex/Sources/Nuvex/Soporte.swift" \
+  "$ROOT/Nuvex/Sources/Nuvex/ExtractorCodigo.swift" "$ROOT/Nuvex/Sources/Nuvex/ProblemaGmail.swift" "$ROOT/Nuvex/Sources/Nuvex/GmailSupport.swift" "$ROOT/Nuvex/Sources/Nuvex/Preferencias.swift" "$ROOT/Nuvex/Sources/Nuvex/Soporte.swift" \
   "$ROOT/Nuvex/Tests/CorreoChecks.swift" \
   -o "$tmp/correo-checks"
 "$tmp/correo-checks"

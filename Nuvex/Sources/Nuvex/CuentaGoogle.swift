@@ -50,6 +50,10 @@ final class CuentaGoogle: ObservableObject {
 
     private var guardado: Guardado?
     private var acceso: (token: String, caduca: Date)?
+    /// Comparte una sola renovación entre lectores concurrentes. Al ser un
+    /// actor principal, una espera de red permite reentrada; sin esta tarea dos
+    /// VPN podían renovar el mismo refresh token al mismo tiempo.
+    private var renovacionEnCurso: Task<(token: String, caduca: Date), Error>?
     private var inicio: Task<Void, Never>?
     private var servidor: ServidorRedireccion?
 
@@ -204,17 +208,30 @@ final class CuentaGoogle: ObservableObject {
     /// Token de acceso vigente; lo renueva si caducó.
     func tokenAcceso() async throws -> String {
         if let acceso, acceso.caduca > Date().addingTimeInterval(60) { return acceso.token }
+        if let renovacionEnCurso {
+            let renovado = try await renovacionEnCurso.value
+            acceso = renovado
+            return renovado.token
+        }
         guard let guardado else { throw ErrorGoogle.sinCliente }
         guard let renovacion = guardado.tokenRenovacion else { throw ErrorGoogle.sinSesion }
-        do {
+        let tarea: Task<(token: String, caduca: Date), Error> = Task {
             let tokens = try await Self.pedirToken([
                 "client_id": guardado.clienteID, "client_secret": guardado.secreto,
                 "refresh_token": renovacion, "grant_type": "refresh_token",
             ])
-            guard let token = tokens["access_token"] as? String else { throw ErrorGoogle.respuesta("Google no devolvió un token de acceso.") }
-            acceso = (token, Date().addingTimeInterval(TimeInterval(tokens["expires_in"] as? Int ?? 3000)))
+            guard let token = tokens["access_token"] as? String else {
+                throw ErrorGoogle.respuesta("Google no devolvió un token de acceso.")
+            }
+            return (token: token, caduca: Date().addingTimeInterval(TimeInterval(tokens["expires_in"] as? Int ?? 3000)))
+        }
+        renovacionEnCurso = tarea
+        defer { renovacionEnCurso = nil }
+        do {
+            let renovado = try await tarea.value
+            acceso = renovado
             if case .caducada = estado { recalcular() }
-            return token
+            return renovado.token
         } catch ErrorGoogle.respuesta(let detalle) where detalle.contains("invalid_grant") {
             Log.escribir("la sesión de Google caducó")
             recalcular(caducada: true)
@@ -233,7 +250,7 @@ final class CuentaGoogle: ObservableObject {
     }
 
     private static func pedirToken(_ campos: [String: String]) async throws -> [String: Any] {
-        var peticion = URLRequest(url: URL(string: "https://oauth2.googleapis.com/token")!)
+        var peticion = URLRequest(url: URL(string: "https://oauth2.googleapis.com/token")!, timeoutInterval: 15)
         peticion.httpMethod = "POST"
         peticion.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         peticion.httpBody = formulario(campos)

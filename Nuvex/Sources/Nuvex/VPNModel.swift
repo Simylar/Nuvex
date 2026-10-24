@@ -26,6 +26,7 @@ final class VPNModel: ObservableObject {
     private(set) var actualizaciones: Actualizaciones?
     private(set) var chequeo: ChequeoActualizacion?
     private(set) var control: ControlRemoto?
+    private var cicloVida: CicloVidaMac?
     #if DEBUG
     /// Modelo con datos de ejemplo para capturas: no consulta el motor.
     var esMuestra = false
@@ -98,11 +99,17 @@ final class VPNModel: ObservableObject {
         let control = ControlRemoto(modelo: self)
         control.iniciar()
         self.control = control
+        let cicloVida = CicloVidaMac(modelo: self)
+        cicloVida.iniciar()
+        self.cicloVida = cicloVida
         AppActual.registrar(self)
         // Al salir se retira el socket; si la app termina de golpe, el
         // siguiente arranque lo reemplaza.
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.control?.detener() }
+            MainActor.assumeIsolated {
+                self?.cicloVida?.detener()
+                self?.control?.detener()
+            }
         }
     }
 

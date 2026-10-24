@@ -42,6 +42,20 @@ enum ProblemaGmail: LocalizedError, Equatable, Sendable {
         }
     }
 
+    /// Identificador estable y sin datos personales para el registro.
+    var codigoDiagnostico: String {
+        switch self {
+        case .sesionCaducada: return "sesion_caducada"
+        case .sinCuenta: return "sin_cuenta"
+        case .clienteNoValido: return "cliente_no_valido"
+        case .sinPermiso: return "sin_permiso"
+        case .apiDesactivada: return "api_desactivada"
+        case .limite: return "limite"
+        case .sinRed: return "sin_red"
+        case .servidor(let codigo): return "servidor_\(codigo)"
+        }
+    }
+
     var detalle: String {
         switch self {
         case .sesionCaducada:

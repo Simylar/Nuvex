@@ -1,10 +1,30 @@
 import Foundation
+import AppKit
 
 /// Comprobaciones de la lógica de interfaz que no depende de AppKit:
 /// traducción de fallos del motor, validación de campos y duraciones.
 @main
 struct InterfazChecks {
     static func main() {
+        // La ventana del código permanece dentro del área visible, incluso en
+        // una pantalla pequeña, secundaria o al escalonar varias solicitudes.
+        func contiene(_ exterior: NSRect, _ interior: NSRect) -> Bool {
+            interior.minX >= exterior.minX && interior.maxX <= exterior.maxX
+                && interior.minY >= exterior.minY && interior.maxY <= exterior.maxY
+        }
+        let principal = NSRect(x: 0, y: 40, width: 1_280, height: 680)
+        let marcoPrincipal = GeometriaVentanaCodigo.marco(
+            areaVisible: principal, tamanoIdeal: NSSize(width: 360, height: 420), indice: 0)
+        precondition(contiene(principal, marcoPrincipal))
+        let secundaria = NSRect(x: -1_024, y: 23, width: 1_024, height: 745)
+        let marcoSecundario = GeometriaVentanaCodigo.marco(
+            areaVisible: secundaria, tamanoIdeal: NSSize(width: 360, height: 560), indice: 3)
+        precondition(contiene(secundaria, marcoSecundario))
+        let pequena = NSRect(x: 100, y: 100, width: 320, height: 240)
+        let marcoPequeno = GeometriaVentanaCodigo.marco(
+            areaVisible: pequena, tamanoIdeal: NSSize(width: 360, height: 420), indice: 1)
+        precondition(contiene(pequena, marcoPequeno))
+
         let activa = #"[{"id":"vpn-a","name":"Oficina","connected":true,"pid":123,"ip":"","iface":"","networks":[],"enabled":true,"configured":true,"helperReady":true}]"#
         let detenida = activa.replacingOccurrences(of: "\"connected\":true", with: "\"connected\":false")
         precondition(!EstadoMotor.confirmaDesconexion(["vpn-a"], codigo: 0, salida: activa))

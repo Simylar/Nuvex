@@ -8,6 +8,8 @@ description: Conecta, desconecta y consulta las VPN Fortinet del usuario con Nuv
 
 Nuvex es la app de la barra de menús que gestiona las VPN Fortinet de esta Mac. El comando `nuvex` habla con ella; si no está abierta, la abre. Las contraseñas nunca pasan por ti: Nuvex las toma del Llavero.
 
+La Mac debe estar encendida, con una sesión de usuario iniciada y despierta. Durante la suspensión real macOS no ejecuta Nuvex, el comando ni la red; al despertar, vuelve a ejecutar `nuvex estado` antes de decidir si hace falta reintentar.
+
 Si `nuvex` no está en el PATH, usa `~/.local/bin/nuvex` o `/Applications/Nuvex.app/Contents/Resources/bin/nuvex`.
 
 `nuvex` necesita abrir Nuvex y hablar con ella por un socket local, algo que el sandbox de los asistentes bloquea. Ejecútalo siempre fuera del sandbox: en Codex, pide permisos elevados para el comando; en Claude Code, desactiva el sandbox para ese comando. Nunca abras el ejecutable de Nuvex directamente (`Nuvex.app/Contents/MacOS/…`): heredaría el aislamiento y no podría usar el Llavero ni el ayudante.

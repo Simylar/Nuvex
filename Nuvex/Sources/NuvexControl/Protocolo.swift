@@ -16,6 +16,9 @@ public struct Peticion: Codable, Sendable, Equatable {
     public static let versionActual = 2
 
     public var version = Peticion.versionActual
+    /// Correlación opaca para diagnóstico. Es opcional para conservar
+    /// compatibilidad con clientes de protocolo 2 anteriores.
+    public var operacion: String?
     public var comando: Comando
     /// Nombre, id o prefijo único de la conexión.
     public var vpn: String?
@@ -32,7 +35,9 @@ public struct Peticion: Codable, Sendable, Equatable {
     public var profundo: Bool?
 
     public init(comando: Comando, vpn: String? = nil, todas: Bool? = nil, esperar: Bool? = nil,
-                limite: Int? = nil, codigo: String? = nil, profundo: Bool? = nil) {
+                limite: Int? = nil, codigo: String? = nil, profundo: Bool? = nil,
+                operacion: String? = UUID().uuidString.lowercased()) {
+        self.operacion = operacion
         self.comando = comando
         self.vpn = vpn
         self.todas = todas

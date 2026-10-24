@@ -18,6 +18,8 @@ Nuvex es una app de barra de menús para macOS con la que puedes configurar y co
 - Exportación e importación de conexiones en un archivo cifrado con una frase.
 - Actualizaciones desde la app con sus novedades, sin perder conexiones, contraseñas ni ajustes ([dónde vive cada dato](docs/datos.md)).
 
+La arquitectura, el modelo de permisos, la recuperación y los límites durante el reposo están documentados en [Arquitectura y operación](docs/arquitectura-y-operacion.md).
+
 ## Compilar e instalar
 
 Necesitas **macOS 14 o posterior**, Swift 6, las Command Line Tools de Xcode, Homebrew, `autoconf`, `automake`, `pkgconf` y `openssl@3`. macOS debe proporcionar `/usr/sbin/pppd`.

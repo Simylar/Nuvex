@@ -245,6 +245,8 @@ Retícula de 2 pt (`Espacio`):
 | Token | Valor | Uso |
 | --- | --- | --- |
 | `Tamano.panel` | 320 | Ancho del panel |
+| `Tamano.codigoAnchoIdeal` / `codigoAnchoMinimo` | 360 / 300 | Ventana del código: ancho normal y mínimo en pantallas estrechas |
+| `Tamano.codigoAltoIdeal` / `codigoAltoMinimo` / `codigoAltoMaximo` | 420 / 280 / 560 | Alto adaptativo de la ventana del código; el contenido se desplaza si hace falta |
 | `Tamano.columnaFormulario` | 704 | Ancho máximo de las secciones de un `Form` agrupado en macOS 27 (medido). La barra de acciones usa la misma columna |
 | `Tamano.filaPanel` | 40 | Alto mínimo de una fila del panel |
 | `Tamano.circuloEstado` | 28 | Círculo de cada VPN; columna de símbolos de los avisos |
@@ -257,7 +259,7 @@ Retícula de 2 pt (`Espacio`):
 | `Tamano.botonIcono` | 18 | Área de un botón de solo icono sin borde (copiar) |
 | `Tamano.simboloPequeno` / `simboloCirculo` / `simboloDestacado` | 10 / 12 / 44 | Chevron, símbolo del círculo, símbolo de resultado |
 
-Ventanas: bienvenida, 460 pt de ancho; código, 360; novedades, 480 × 540; exportar, 520 × 600; importar, 540 × 560; Ajustes, mínimo 780 × 580.
+Ventanas: bienvenida, 460 pt de ancho; código, 360 × 420 ideal con rango 300 × 280–560 y límites del `visibleFrame`; novedades, 480 × 540; exportar, 520 × 600; importar, 540 × 560; Ajustes, mínimo 780 × 580. La ventana del código usa nivel normal para no cubrir menús, se centra en la pantalla activa, escalona solicitudes simultáneas y vuelve a ajustarse al cambiar de monitor.
 
 ## 5. Bordes y geometría
 

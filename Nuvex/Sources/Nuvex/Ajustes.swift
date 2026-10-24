@@ -440,8 +440,15 @@ private struct EstiloAvisos: View {
         LabeledContent {
             HStack(spacing: Espacio.m) {
                 Button("Probar") { VPNNotifications.shared.prueba() }
-                    .disabled(estilo == .desactivados)
-                if estilo != .alertas {
+                    .disabled(estilo == .desactivados || estilo == .sinAutorizar)
+                if estilo == .sinAutorizar {
+                    Button("Autorizar…") {
+                        Task {
+                            _ = await VPNNotifications.shared.solicitarAutorizacion()
+                            await leer()
+                        }
+                    }
+                } else if estilo != .alertas {
                     Button(estilo == .desactivados ? "Activar…" : "Cambiar a Alertas…") {
                         NSWorkspace.shared.open(VPNNotifications.ajustesDelSistema)
                     }
@@ -451,6 +458,9 @@ private struct EstiloAvisos: View {
             VStack(alignment: .leading, spacing: Espacio.xxs) {
                 Text("Estilo de los avisos")
                 switch estilo {
+                case .sinAutorizar?:
+                    Label("Pendiente: autoriza los avisos una sola vez", systemImage: "bell.badge.fill")
+                        .font(Tipo.nota).foregroundStyle(Paleta.avisoTexto)
                 case .alertas?:
                     Label("Alertas: se quedan hasta que los cierras", systemImage: "checkmark.circle.fill")
                         .font(Tipo.nota).foregroundStyle(Paleta.exitoTexto)

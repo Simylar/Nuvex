@@ -27,6 +27,12 @@ struct CorreoChecks {
         precondition(!texto.contains("<") && !texto.contains("color"))
         precondition(ExtractorCodigo.extraer(de: texto) == "778899")
         precondition(ExtractorCodigo.extraer(de: "PIN 9988, ref 112233", patron: #"PIN (\d+)"#) == "9988")
+        precondition(ExtractorCodigo.codigoValido("A9-42"))
+        precondition(!ExtractorCodigo.codigoValido(""))
+        precondition(!ExtractorCodigo.codigoValido(String(repeating: "1", count: 65)))
+        precondition(!ExtractorCodigo.codigoValido("123\n456"))
+        precondition(ExtractorCodigo.extraer(de: String(repeating: "A", count: 65),
+                                             patron: #"(A+)"#) == nil)
         precondition(ExtractorCodigo.patronValido(#"codigo (\d{6})"#))
         precondition(!ExtractorCodigo.patronValido("("))
         precondition(ExtractorCodigo.patronValido(""))
@@ -59,6 +65,43 @@ struct CorreoChecks {
         precondition(ExtractorCodigo.correoDeIDToken("no-es-un-token") == nil)
         precondition(String(decoding: ExtractorCodigo.decodificarBase64URL("SG9sYQ")!, as: UTF8.self) == "Hola")
 
+        // Gmail puede entregar una parte de texto inline o mediante
+        // attachmentId, incluso sin que sea un archivo adjunto visible.
+        let mime: [String: Any] = [
+            "mimeType": "multipart/alternative",
+            "parts": [
+                ["mimeType": "text/plain", "body": ["attachmentId": "texto-1", "size": 42]],
+                ["mimeType": "text/html", "body": ["data": ExtractorCodigo.codificarBase64URL(Data("<b>123456</b>".utf8)), "size": 13]],
+                ["mimeType": "image/png", "body": ["attachmentId": "imagen", "size": 2_000]],
+            ],
+        ]
+        let partes = SoporteGmail.partesTexto(en: mime)
+        precondition(partes.count == 2)
+        precondition(partes[0] == ParteTextoGmail(formato: .plano, datos: nil, adjuntoID: "texto-1", tamano: 42))
+        precondition(SoporteGmail.texto(datosBase64URL: [
+            ExtractorCodigo.codificarBase64URL(Data("AuthCode: 246810".utf8)),
+        ], formato: .plano) == "AuthCode: 246810")
+        let demasiadoGrande: [String: Any] = [
+            "mimeType": "text/plain",
+            "body": ["attachmentId": "enorme", "size": SoporteGmail.maximoBytesTexto + 1],
+        ]
+        precondition(SoporteGmail.partesTexto(en: demasiadoGrande).isEmpty)
+
+        // Sondeo normal y backoff truncado, con jitter y Retry-After.
+        precondition(SoporteGmail.pausaSinCorreo(segundosTranscurridos: 0) == 3)
+        precondition(SoporteGmail.pausaSinCorreo(segundosTranscurridos: 45) == 5)
+        precondition(SoporteGmail.pausaSinCorreo(segundosTranscurridos: 120) == 8)
+        precondition(SoporteGmail.pausaTrasError(fallosConsecutivos: 1, problema: .sinRed, jitter: 0) == 1)
+        precondition(SoporteGmail.pausaTrasError(fallosConsecutivos: 4, problema: .sinRed, jitter: 0.5) == 8.5)
+        precondition(SoporteGmail.pausaTrasError(fallosConsecutivos: 1, problema: .limite, jitter: 0) == 5)
+        precondition(SoporteGmail.pausaTrasError(fallosConsecutivos: 8, problema: .limite, jitter: 1) == 30)
+        precondition(SoporteGmail.pausaTrasError(fallosConsecutivos: 1, problema: .sinRed,
+                                                retryAfter: 17, jitter: 0) == 17)
+        precondition(SoporteGmail.retryAfter("12") == 12)
+        let fechaHTTP = Date(timeIntervalSince1970: 1_800_000_030)
+        precondition(SoporteGmail.retryAfter("Fri, 15 Jan 2027 08:00:30 GMT",
+                                             ahora: Date(timeIntervalSince1970: 1_800_000_000)) == fechaHTTP.timeIntervalSince1970 - 1_800_000_000)
+
         // Errores de Gmail: cada uno con su explicación y su salida.
         func cuerpo(_ json: String) -> Data { Data(json.utf8) }
         precondition(ProblemaGmail.clasificar(estado: 403, cuerpo: cuerpo(#"{"error":{"code":403,"message":"Gmail API has not been used in project 123 before or it is disabled.","status":"PERMISSION_DENIED","details":[{"reason":"SERVICE_DISABLED"}]}}"#)) == .apiDesactivada)
@@ -70,6 +113,7 @@ struct CorreoChecks {
         precondition(ProblemaGmail.clasificarToken("invalid_grant") == .sesionCaducada)
         precondition(ProblemaGmail.clasificarToken("invalid_client") == .clienteNoValido)
         precondition(ProblemaGmail.clasificar(URLError(.notConnectedToInternet)) == .sinRed)
+        precondition(ProblemaGmail.sinRed.codigoDiagnostico == "sin_red")
         precondition(ProblemaGmail.apiDesactivada.definitivo && ProblemaGmail.sesionCaducada.definitivo)
         precondition(!ProblemaGmail.sinRed.definitivo && !ProblemaGmail.limite.definitivo)
         precondition(ProblemaGmail.servidor(0).detalle.hasPrefix("Google devolvió un error inesperado."))

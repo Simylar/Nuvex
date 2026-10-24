@@ -47,6 +47,11 @@ struct ControlChecks {
                                         conexiones: [conexiones[1]])
         let decodificado = try Linea.decodificar(Mensaje.self, de: Linea.codificar(mensaje).dropLast())
         precondition(decodificado == mensaje)
+        let peticionConID = Peticion(comando: .estado)
+        precondition(!(peticionConID.operacion ?? "").isEmpty)
+        let peticionAntigua = try Linea.decodificar(Peticion.self,
+            de: Data(#"{"version":2,"comando":"estado"}"#.utf8))
+        precondition(peticionAntigua.operacion == nil, "clientes de protocolo 2 anteriores siguen siendo válidos")
         precondition(CodigoSalida.paraDiagnostico([
             Comprobacion(nombre: "A", ok: true, detalle: "Bien"),
         ]) == .ok)

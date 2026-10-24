@@ -7,7 +7,13 @@ struct AutorizacionAgentesChecks {
         let base = URL(fileURLWithPath: "/private/tmp", isDirectory: true)
             .appendingPathComponent("nuvex-agentes-\(UUID().uuidString)", isDirectory: true)
         defer { try? archivos.removeItem(at: base) }
-        let comando = "~/.local/bin/nuvex"
+        let comando = "/Users/prueba/.local/bin/nuvex"
+        let habilidad = AutorizacionAgentes.personalizarHabilidad(
+            "Ejecuta ~/.local/bin/nuvex estado y ~/.local/bin/nuvex diagnostico.",
+            comando: comando
+        )
+        precondition(!habilidad.contains(AutorizacionAgentes.comandoPlantilla))
+        precondition(habilidad == "Ejecuta \(comando) estado y \(comando) diagnostico.")
 
         let codex = base.appendingPathComponent(".codex", isDirectory: true)
         try archivos.createDirectory(at: codex, withIntermediateDirectories: true)

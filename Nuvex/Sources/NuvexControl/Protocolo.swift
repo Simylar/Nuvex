@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 // Protocolo entre Nuvex y el comando `nuvex`: una petición JSON por línea y
@@ -244,6 +245,16 @@ public enum Linea {
 // MARK: - Rutas
 
 public enum RutaControl {
+    /// Hogar registrado por macOS para el usuario efectivo. Los agentes de IA
+    /// pueden redefinir HOME y Foundation hereda ese valor aislado, por lo que
+    /// no sirve para localizar recursos compartidos con la app.
+    public static var homeUsuarioActual: String {
+        guard let registro = getpwuid(getuid()),
+              let home = String(validatingCString: registro.pointee.pw_dir),
+              home.hasPrefix("/") else { return NSHomeDirectory() }
+        return home
+    }
+
     /// Socket de control: carpeta privada del usuario, permisos 0600.
     public static func socket(home: String) -> String {
         home + "/Library/Application Support/Nuvex/control.sock"

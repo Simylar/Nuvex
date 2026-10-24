@@ -50,8 +50,9 @@ Codex y Claude Code pueden ejecutar Bash dentro de un sandbox de macOS que no de
 
 La autorización persistente resuelve ese límite sin ampliar todos los comandos:
 
-- Codex recibe un archivo propio en `~/.codex/rules/nuvex.rules` cuyo prefijo exacto es `~/.local/bin/nuvex`.
-- Claude Code conserva el resto de `~/.claude/settings.json` y añade solo un permiso `Bash` y una exclusión de sandbox para esa ruta exacta.
+- Codex recibe un archivo propio en `~/.codex/rules/nuvex.rules` cuyo prefijo exacto es la ruta absoluta `/Users/<usuario>/.local/bin/nuvex`.
+- Claude Code conserva el resto de `~/.claude/settings.json` y añade solo un permiso `Bash` y una exclusión de sandbox para esa misma ruta absoluta.
+- La skill instalada usa también la ruta absoluta. Así no depende de `HOME`, que Codex o Claude Code pueden redirigir a un contenedor propio; la interfaz sigue mostrando `~/.local/bin/nuvex` como abreviatura legible para Terminal.
 - La app no activa `danger-full-access`, `bypassPermissions` ni `--dangerously-skip-permissions`. El servidor sigue aceptando únicamente el binario incluido en la misma app y vuelve a aplicar la política interna por conexión.
 
 Las operaciones rutinarias del CLI quedan cubiertas. La entrega manual de un

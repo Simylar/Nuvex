@@ -29,6 +29,7 @@ enum IntegracionAsistentes {
     static var plantilla: String? {
         Bundle.main.url(forResource: "nuvex-vpn-SKILL", withExtension: "md")
             .flatMap { try? String(contentsOf: $0, encoding: .utf8) }
+            .map { AutorizacionAgentes.personalizarHabilidad($0, comando: comandoParaAgentes) }
     }
 
     static func estado(_ destino: Destino) -> Estado {
@@ -58,9 +59,9 @@ enum IntegracionAsistentes {
     // MARK: Comando
 
     static let enlace = home.appendingPathComponent(".local/bin/nuvex")
-    /// Forma que los agentes escriben en Bash y que sus motores de reglas
-    /// comparan antes de que el shell expanda el directorio personal.
-    static let comandoParaAgentes = "~/.local/bin/nuvex"
+    /// Ruta estable del usuario real. No depende de HOME, que los agentes
+    /// pueden redirigir a su propio contenedor.
+    static let comandoParaAgentes = enlace.path
 
     /// El ejecutable dentro de esta app.
     static var comandoIncluido: URL? {

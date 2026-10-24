@@ -68,6 +68,10 @@ struct ControlChecks {
             Comprobacion(nombre: "B", ok: false, detalle: "Pendiente"),
         ]) == .requierePersona, "un diagnóstico incompleto no puede salir con cero")
 
+        let homeRegistrado = getpwuid(getuid()).flatMap { String(validatingCString: $0.pointee.pw_dir) }
+        precondition(RutaControl.homeUsuarioActual == homeRegistrado,
+                     "el CLI no debe heredar un HOME aislado del agente")
+
         // Una confirmación tardía no puede iniciar una operación después de
         // que el comando haya cerrado el socket.
         var par = [Int32](repeating: -1, count: 2)

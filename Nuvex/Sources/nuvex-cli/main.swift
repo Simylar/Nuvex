@@ -226,7 +226,7 @@ func mostrar(_ mensaje: Mensaje, json: Bool) {
 
 signal(SIGPIPE, SIG_IGN)
 let opciones = leerOpciones()
-let ruta = RutaControl.socket(home: NSHomeDirectoryForUser(NSUserName()) ?? NSHomeDirectory())
+let ruta = RutaControl.socket(home: RutaControl.homeUsuarioActual)
 
 var peticion = Peticion(comando: opciones.comando, vpn: opciones.vpn, todas: opciones.todas ? true : nil,
                         esperar: opciones.esperar, limite: opciones.limite,

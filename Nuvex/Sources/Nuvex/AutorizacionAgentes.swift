@@ -5,6 +5,8 @@ import Foundation
 /// de Nuvex fuera del sandbox de Bash. No cambia el modo global de permisos ni
 /// concede acceso a otros comandos.
 enum AutorizacionAgentes {
+    static let comandoPlantilla = "~/.local/bin/nuvex"
+
     enum Estado: Equatable {
         case noDisponible
         case ausente
@@ -107,6 +109,12 @@ enum AutorizacionAgentes {
 
     static func reglaPermisoClaude(_ comando: String) -> String { "Bash(\(comando) *)" }
     static func reglaSandboxClaude(_ comando: String) -> String { "\(comando) *" }
+
+    /// Las shells de los agentes pueden redefinir HOME. La habilidad instalada
+    /// usa la misma ruta absoluta y acotada que sus reglas persistentes.
+    static func personalizarHabilidad(_ plantilla: String, comando: String) -> String {
+        plantilla.replacingOccurrences(of: comandoPlantilla, with: comando)
+    }
 
     private static func archivoCodex(_ raiz: URL) -> URL {
         raiz.appendingPathComponent("rules/nuvex.rules")

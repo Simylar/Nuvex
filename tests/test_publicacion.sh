@@ -36,6 +36,8 @@ fi
 publicador="$ROOT/Nuvex/scripts/publicar.sh"
 linea_limpieza="$(grep -nF 'rm -rf "$SALIDA"' "$publicador" | head -1 | cut -d: -f1)"
 linea_motor="$(grep -nF 'if [ -n "$ANTERIOR" ] && git diff' "$publicador" | cut -d: -f1)"
+linea_version_motor="$(grep -nF 'comparar_versiones.py" --mayor-o-igual' "$publicador" | cut -d: -f1)"
+linea_extraccion_motor="$(grep -nF 'MOTOR_EXTRAIDO="$(mktemp -d' "$publicador" | cut -d: -f1)"
 linea_notas="$(grep -nF 'for paquete in "$SALIDA"/Nuvex-*.zip' "$publicador" | cut -d: -f1)"
 linea_appcast="$(grep -nF 'git fetch --quiet origin gh-pages' "$publicador" | head -1 | cut -d: -f1)"
 linea_appcast_obligatorio="$(grep -nF 'no se pudo recuperar el appcast publicado' "$publicador" | cut -d: -f1)"
@@ -43,6 +45,8 @@ linea_generacion="$(grep -nF '"$SPARKLE_BIN/generate_appcast" "${OPCIONES[@]}" "
 linea_ajuste="$(grep -nF 'scripts/ajustar_appcast.py' "$publicador" | cut -d: -f1)"
 linea_validacion="$(grep -nF 'scripts/verificar_appcast.py' "$publicador" | cut -d: -f1)"
 [ "$linea_limpieza" -lt "$linea_motor" ]
+[ "$linea_motor" -lt "$linea_version_motor" ]
+[ "$linea_version_motor" -lt "$linea_extraccion_motor" ]
 [ "$linea_appcast" -lt "$linea_appcast_obligatorio" ]
 [ "$linea_appcast_obligatorio" -lt "$linea_notas" ]
 [ "$linea_notas" -lt "$linea_generacion" ]

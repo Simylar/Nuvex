@@ -1,4 +1,5 @@
 import importlib.util
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -42,6 +43,26 @@ class VersionesSemVerTests(unittest.TestCase):
         for version in ("03.2.0", "3.02.0", "3.2", "3.2.0-beta.01"):
             with self.subTest(version=version), self.assertRaises(ValueError):
                 analizar(version)
+
+    def test_mayor_o_igual_permite_conservar_dependencia_publicada(self):
+        script = ROOT / "Nuvex/scripts/comparar_versiones.py"
+        for publicada, local in (("3.6.5", "3.6.2"), ("3.6.5", "3.6.5")):
+            with self.subTest(publicada=publicada, local=local):
+                resultado = subprocess.run(
+                    [sys.executable, str(script), "--mayor-o-igual", publicada, local],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(resultado.returncode, 0, resultado.stderr)
+
+        anterior = subprocess.run(
+            [sys.executable, str(script), "--mayor-o-igual", "3.6.2", "3.6.5"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(anterior.returncode, 1)
 
 
 if __name__ == "__main__":

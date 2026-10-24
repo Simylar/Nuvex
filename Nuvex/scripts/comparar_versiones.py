@@ -81,6 +81,11 @@ def main() -> int:
         action="store_true",
         help="imprime la mayor versión leída de la entrada estándar",
     )
+    parser.add_argument(
+        "--mayor-o-igual",
+        action="store_true",
+        help="acepta si la primera versión es mayor o igual que la segunda",
+    )
     argumentos = parser.parse_args()
     try:
         if argumentos.mayor:
@@ -100,6 +105,14 @@ def main() -> int:
             parser.error("se requieren la versión nueva y la anterior")
         nueva = Version.analizar(argumentos.nueva)
         anterior = Version.analizar(argumentos.anterior)
+        if argumentos.mayor_o_igual:
+            if nueva < anterior:
+                print(
+                    f"la versión {argumentos.nueva} es menor que {argumentos.anterior}",
+                    file=sys.stderr,
+                )
+                return 1
+            return 0
         if nueva <= anterior:
             print(
                 f"la versión {argumentos.nueva} no es mayor que {argumentos.anterior}",

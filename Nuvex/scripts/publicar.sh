@@ -106,13 +106,18 @@ fi
 rm -rf "$SALIDA"
 mkdir -p "$SALIDA"
 
-# Motor: si su código y OpenSSL no cambiaron desde la versión anterior, se
-# reutilizan los bytes ya publicados. Compilarlo en otra máquina daría otro
-# hash y obligaría a todos a volver a autorizar el ayudante.
+# Motor: si su código no cambió y la versión publicada de OpenSSL es igual o
+# más nueva que la local, se reutilizan los bytes ya publicados. Compilarlo en
+# otra máquina o degradar OpenSSL daría otro hash y obligaría a todos a volver
+# a autorizar el ayudante. Solo una actualización real de OpenSSL justifica un
+# motor nuevo.
 if [ -n "$ANTERIOR" ] && git diff --quiet "$ANTERIOR" HEAD -- vendor/openfortivpn; then
   MOTOR_PREVIO="$(gh release download "$ANTERIOR" --repo "$REPO" --pattern motor.sha256 --output - 2>/dev/null | head -1 || true)"
   OPENSSL_ACTUAL="$(brew list --versions openssl@3 | awk '{print $2}')"
-  if [ -n "$MOTOR_PREVIO" ] && [ "${MOTOR_PREVIO#* }" = "openssl-$OPENSSL_ACTUAL" ]; then
+  OPENSSL_PREVIO="${MOTOR_PREVIO#* openssl-}"
+  if [ -n "$MOTOR_PREVIO" ] && [ "$OPENSSL_PREVIO" != "$MOTOR_PREVIO" ] \
+     && python3 "$RAIZ_APP/scripts/comparar_versiones.py" --mayor-o-igual \
+       "$OPENSSL_PREVIO" "$OPENSSL_ACTUAL" >/dev/null 2>&1; then
     # Siempre el zip publicado, nunca una copia local que pueda ser distinta.
     MOTOR_EXTRAIDO="$(mktemp -d /private/tmp/nuvex-motor-publicado.XXXXXX)"
     gh release download "$ANTERIOR" --repo "$REPO" --pattern "Nuvex-${ANTERIOR#v}.zip" --dir "$MOTOR_EXTRAIDO" \
@@ -126,6 +131,12 @@ if [ -n "$ANTERIOR" ] && git diff --quiet "$ANTERIOR" HEAD -- vendor/openfortivp
     codesign --verify --strict "$NUVEX_MOTOR_PUBLICADO/openfortivpn" \
       || falla "la firma del motor de Nuvex-${ANTERIOR#v}.zip no es válida"
     paso "Motor reutilizado de $ANTERIOR (${MOTOR_PREVIO%% *})"
+  elif [ -n "$MOTOR_PREVIO" ] && [ "$OPENSSL_PREVIO" != "$MOTOR_PREVIO" ]; then
+    python3 "$RAIZ_APP/scripts/comparar_versiones.py" "$OPENSSL_ACTUAL" "$OPENSSL_PREVIO" >/dev/null \
+      || falla "las versiones de OpenSSL del motor publicado o del entorno no son comparables"
+    paso "Motor nuevo por actualización de OpenSSL ($OPENSSL_PREVIO → $OPENSSL_ACTUAL)"
+  elif [ -n "$MOTOR_PREVIO" ]; then
+    falla "motor.sha256 de $ANTERIOR no declara una versión de OpenSSL válida"
   fi
 fi
 

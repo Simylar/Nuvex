@@ -1,6 +1,6 @@
 # Arquitectura, permisos y operación de Nuvex
 
-Este documento describe la implementación real de Nuvex 3.2.1. No sustituye
+Este documento describe la implementación real de Nuvex 3.3.0. No sustituye
 la guía de publicación ni promete ejecución durante la suspensión física de
 macOS.
 
@@ -40,43 +40,56 @@ arbitrarios del mismo usuario.
   30 segundos de margen por el redondeo de Gmail.
 - Se examinan hasta diez candidatos y se elige el más reciente por
   `internalDate`, no por el orden incidental de procesamiento.
-- Se recorren árboles MIME `multipart/*`. Las partes `text/plain` se prefieren
-  a HTML; si Gmail entrega el texto con `attachmentId`, se obtiene mediante
-  `messages.attachments.get`. Cada parte de texto está limitada a 256 KiB.
+- Se recorren árboles MIME `multipart/*`. Las partes `text/plain` se prueban
+  primero y, si no contienen un código, se prueba HTML; si Gmail entrega el
+  texto con `attachmentId`, se obtiene mediante `messages.attachments.get`. El
+  cuerpo acumulado está limitado a 256 KiB.
 - La extracción requiere un patrón explícito o un OTP inequívoco. No se
   registran contenido, dirección, asunto ni código.
 - Un ID de mensaje usado se conserva en memoria durante la sesión para no
   reutilizarlo. El filtro temporal evita correos antiguos después de reiniciar.
 - Un sondeo correcto espera 3, 5 y después 8 segundos. Red, cuota y errores 5xx
-  aplican backoff exponencial truncado, jitter y `Retry-After`, con límites.
+  aplican backoff exponencial truncado y jitter. `Retry-After` se respeta sin
+  acortarlo; el límite total de la operación evita esperas ilimitadas.
 - 401 invalida solo el token de acceso. La renovación OAuth está serializada
-  para que dos conexiones no usen el refresh token simultáneamente.
+  para que dos conexiones no usen el refresh token simultáneamente. Cerrar la
+  sesión o reemplazar el cliente cancela la renovación y descarta respuestas
+  tardías antes de revocar el token.
 - Errores permanentes (sesión revocada, cliente inválido, scope o API) detienen
   el sondeo y muestran una acción concreta; los transitorios siguen hasta el
   límite configurado.
 
 ## Automatización: Codex y Claude Code
 
-La integración usa dos piezas deliberadamente pequeñas:
+La integración usa tres piezas deliberadamente pequeñas:
 
 1. El CLI local `nuvex`, con salida humana o JSON, motivos y códigos de salida
    estables, timeouts y diagnóstico.
 2. Una habilidad `nuvex-vpn/SKILL.md` instalada en `~/.codex/skills` y
    `~/.claude/skills`, que enseña descubrimiento, permisos y recuperación.
+3. Reglas opcionales, explícitas y revocables que sacan únicamente
+   `~/.local/bin/nuvex` del sandbox de Bash: un archivo propio de Codex y dos
+   entradas acotadas en los ajustes de Claude Code.
 
 No se añade MCP: las capacidades son acciones locales, acotadas y ya tienen un
 contrato CLI seguro. Mantener además un servidor MCP duplicaría transporte,
-autorización y ciclo de vida sin exponer una capacidad nueva.
+autorización y ciclo de vida sin exponer una capacidad nueva. Los servidores
+MCP locales también necesitarían configuración y una política de herramientas;
+no resolverían la suspensión real ni la ausencia de una sesión iniciada.
 
 **Preparar** instala o actualiza el comando y las habilidades detectadas, sin
-reemplazar archivos ajenos ni cambiar la política de permisos. Después ejecuta
-el diagnóstico real. Cada petición lleva un identificador opaco de operación
-para correlacionar el registro; clientes anteriores del protocolo 2 siguen
-siendo compatibles.
+reemplazar archivos ajenos ni cambiar la política de permisos. Una habilidad
+ajena se informa pero no impide preparar el otro agente. Después se ejecuta el
+diagnóstico real. Cada petición lleva un identificador opaco de operación para
+correlacionar el registro; clientes anteriores del protocolo 2 siguen siendo
+compatibles.
 
 Cuando el sandbox del agente impide abrir apps o acceder al socket, el CLI sale
-con código 7. Solo ese comando debe repetirse fuera del sandbox conforme a las
-reglas del agente; Nuvex no intenta modificar ni evadir sus políticas.
+con código 7. Desde Ajustes, la persona puede autorizar una regla persistente
+para la ruta exacta del CLI. Codex la ejecuta fuera del sandbox por prefijo;
+Claude Code combina `permissions.allow` con `sandbox.excludedCommands`. Nuvex
+preserva las demás reglas, no habilita modos globales y permite revocar lo que
+añadió.
 
 ## Modelo de permisos
 
@@ -89,7 +102,7 @@ reglas del agente; Nuvex no intenta modificar ni evadir sus políticas.
 | Gmail | Google OAuth | Refresh token en Llavero | Revocación, cliente borrado o app OAuth en prueba |
 | Inicio de sesión | `SMAppService.mainApp` | Registro de macOS | Si el usuario lo desactiva o macOS exige aprobación |
 | Asistentes | Política interna de Nuvex | `ajustes.json` | Solo al cambiarla; puede limitarse por conexión |
-| Sandbox de agentes | Codex o Claude Code | Configuración de cada herramienta | Según la política del agente y el comando |
+| Sandbox de agentes | Codex o Claude Code | Regla exacta y revocable para el CLI | Si se revoca, se mueve la ruta o una política administrada la prohíbe |
 
 `Conectar sin preguntar` es el perfil global de confianza interno para
 operaciones rutinarias, combinado con la lista de conexiones permitidas. No
@@ -104,7 +117,7 @@ solicita autorización únicamente al pulsar **Autorizar…** en Ajustes.
 | App minimizada/no visible | Continúan socket, sondeo de estado y Gmail si hay una solicitud |
 | Sesión bloqueada | Procesos y túnel pueden continuar; no se pueden aceptar diálogos interactivos |
 | Pantalla apagada | Igual que sesión activa mientras el sistema no duerma |
-| App cerrada | Un túnel ya creado puede continuar; no hay socket, Gmail ni nuevas operaciones hasta abrir Nuvex |
+| App cerrada | Un túnel ya creado puede continuar; al ejecutar el CLI, este abre Nuvex en segundo plano y espera hasta 15 s por el socket |
 | Pérdida de red | Gmail aplica backoff; al recuperarse se adelantan reconciliación y lectura pendiente |
 | Suspensión real | CPU y red locales no ejecutan trabajo; no se consulta Gmail ni se atienden agentes |
 | Reactivación | Se reinicia el socket si falló, se consulta el túnel y se reanuda una lectura transitoria |
@@ -117,6 +130,14 @@ servicio remoto siempre activo que custodie autorización y, posiblemente,
 credenciales. Eso añade infraestructura, costo, superficie de ataque, gestión
 de secretos y controles de revocación; no forma parte de la arquitectura local.
 
+Un LaunchAgent separado mediante `SMAppService.agent` permitiría que el motor
+de automatización sobreviviera al cierre explícito de la app, pero hoy
+duplicaría el dueño de perfiles, operaciones, socket, OAuth y Llavero. También
+introduciría otra identidad de código capaz de provocar autorizaciones y no
+aportaría ejecución durante reposo. `SMAppService.mainApp` más el arranque en
+segundo plano desde el CLI cubre el caso observado con menor superficie; XPC es
+adecuado para separar privilegios, no para prometer persistencia durante sueño.
+
 ## Recuperación y observabilidad
 
 El registro `~/Library/Logs/Nuvex.log` rota a 2 MiB, conserva una generación y
@@ -127,14 +148,17 @@ pero nunca OTP, contraseña, token OAuth, cuerpo, asunto o dirección de correo.
 `nuvex diagnostico` revisa control, ayudante, política, Touch ID, firma,
 Llavero y cada perfil sin conectar. `--profundo` prueba la lectura real del
 Llavero y puede requerir presencia. Ajustes también comprueba el enlace del CLI
-y las habilidades instaladas.
+y las habilidades instaladas. El servidor del socket reinicia la escucha si
+`accept` termina inesperadamente. Al despertar o recuperar la red también
+detecta una ruta de socket perdida y la recrea, sin abrir dos escuchas.
 
 ## Pruebas y límites
 
-Las pruebas automatizadas cubren extracción y HTML, árboles MIME inline y con
-`attachmentId`, tamaño máximo, clasificación de errores, backoff, protocolo
-compatible, socket privado, clientes rechazados, concurrencia remota y
-geometría en pantallas pequeñas/secundarias.
+Las pruebas automatizadas cubren extracción y fallback a HTML, árboles MIME
+inline y con `attachmentId`, tamaño acumulado máximo, clasificación de errores,
+backoff y `Retry-After`, protocolo compatible, socket privado, detección de una
+ruta de socket perdida, clientes rechazados, concurrencia remota y geometría en
+pantallas pequeñas/secundarias.
 
 Requieren validación manual o infraestructura externa: OAuth y correo reales,
 VPN Fortinet real, suspensión física, bloqueo de sesión, revocaciones TCC,

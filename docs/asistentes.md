@@ -13,19 +13,20 @@ En **Ajustes de Nuvex › Automatización**:
    Una instalación nueva empieza en **Pedir confirmación en la Mac**. Elegir
    **Conectar sin preguntar** es una decisión explícita para uso desatendido.
 2. En **Conexiones disponibles para asistentes**, desactiva las que no quieras que usen.
-3. Pulsa **Preparar**. Nuvex instala o actualiza `~/.local/bin/nuvex` y las habilidades de Claude Code y Codex que detecte. No reemplaza archivos que no haya creado ni cambia la política elegida.
-4. Revisa el diagnóstico automático. También puedes instalar o quitar cada componente por separado y pulsar **Comprobar preparación** sin iniciar una VPN.
+3. Pulsa **Preparar**. Nuvex instala o actualiza `~/.local/bin/nuvex` y las habilidades de Claude Code y Codex que detecte. No reemplaza archivos que no haya creado ni cambia la política elegida. Si una herramienta ya tiene una habilidad `nuvex-vpn` ajena, la conserva y continúa preparando la otra.
+4. En **Acceso persistente de agentes**, pulsa **Autorizar** para cada agente que quieras usar. Nuvex crea una regla limitada al CLI; no desactiva el sandbox completo. Reinicia el agente para que cargue la regla. Puedes revocarla desde la misma pantalla.
+5. Revisa el diagnóstico automático. También puedes instalar o quitar cada componente por separado y pulsar **Comprobar preparación** sin iniciar una VPN.
 
 ## Comandos
 
 ```sh
-nuvex estado
-nuvex conectar oficina
-nuvex desconectar oficina
-nuvex desconectar --todas
-printf '%s' 123456 | nuvex codigo oficina
-nuvex diagnostico
-nuvex diagnostico --profundo
+~/.local/bin/nuvex estado
+~/.local/bin/nuvex conectar oficina
+~/.local/bin/nuvex desconectar oficina
+~/.local/bin/nuvex desconectar --todas
+printf '%s' 123456 | ~/.local/bin/nuvex codigo oficina
+~/.local/bin/nuvex diagnostico
+~/.local/bin/nuvex diagnostico --profundo
 ```
 
 `oficina` puede ser el nombre completo, una parte única del nombre o el id de la conexión. Si una conexión está arrancando o esperando un código, `desconectar` cancela ese intento. Con `--json`, cada evento y el resultado salen como una línea JSON. Los campos `estado`, `evento` y `motivo` son códigos estables; cada petición incorpora un id opaco de operación para diagnóstico y los textos son para mostrarlos a la persona. Si Nuvex no está abierta, `nuvex` la abre.
@@ -45,23 +46,37 @@ El diagnóstico normal no conecta ninguna VPN ni lee el valor de las contraseña
 
 ### Sandbox de Codex y Claude Code
 
-Codex y Claude Code pueden ejecutar comandos dentro de un sandbox de macOS que no deje abrir apps ni conectar con el socket de Nuvex. Desde ahí, `open` responde `kLSNoExecutableErr` aunque la app esté instalada. `nuvex` lo detecta y sale con el código 7 y el motivo `aislamiento`, y la habilidad indica al asistente que repita solo ese comando fuera del sandbox conforme a sus mecanismos de autorización. No es un problema de la cuenta ni del servidor VPN. Tras actualizar Nuvex, pulsa **Preparar** en **Ajustes › Automatización** para actualizar ambas habilidades.
+Codex y Claude Code pueden ejecutar Bash dentro de un sandbox de macOS que no deja abrir apps ni conectar con el socket Unix de Nuvex. Desde ahí, `open` puede responder `kLSNoExecutableErr` aunque la app esté instalada. `nuvex` lo detecta y sale con el código 7 y el motivo `aislamiento`; no es un fallo de la cuenta ni del servidor VPN.
+
+La autorización persistente resuelve ese límite sin ampliar todos los comandos:
+
+- Codex recibe un archivo propio en `~/.codex/rules/nuvex.rules` cuyo prefijo exacto es `~/.local/bin/nuvex`.
+- Claude Code conserva el resto de `~/.claude/settings.json` y añade solo un permiso `Bash` y una exclusión de sandbox para esa ruta exacta.
+- La app no activa `danger-full-access`, `bypassPermissions` ni `--dangerously-skip-permissions`. El servidor sigue aceptando únicamente el binario incluido en la misma app y vuelve a aplicar la política interna por conexión.
+
+Las operaciones rutinarias del CLI quedan cubiertas. La entrega manual de un
+OTP usa una tubería con `printf`; Claude Code exige que cada subcomando de una
+tubería esté excluido para sacarla completa del sandbox. Esa operación
+excepcional puede requerir una aprobación puntual: Nuvex no autoriza `printf`
+globalmente porque ampliaría la confianza a un comando ajeno.
+
+Tras actualizar Nuvex, pulsa **Preparar** para actualizar ambas habilidades. Las reglas continúan siendo válidas porque apuntan al enlace estable; **Comprobar preparación** informa si falta alguna.
 
 ## Antes de salir de casa
 
 Ejecuta `nuvex diagnostico`. Para conectar a distancia hace falta:
 
-- La Mac encendida, con tu sesión iniciada y sin dormir.
+- La Mac encendida y con tu sesión iniciada. El menú puede estar cerrado y la sesión puede estar bloqueada; el equipo no puede estar en suspensión real.
 - El ayudante de red al día. Si una actualización lo cambió, Nuvex lo avisa para autorizarlo con la contraseña de administrador.
 - La confirmación inicial con Touch ID ya hecha: conecta una vez desde el menú.
 - Acceso al Llavero permitido. Tras cambiar la firma de la app, pulsa **Probar** en el menú y elige «Permitir siempre».
 - Si la VPN pide un código, que Nuvex lo lea del correo o que se lo des al asistente en el chat.
 
-Con la pantalla apagada o la sesión bloqueada, los procesos pueden continuar, pero no se pueden aceptar diálogos. Durante la suspensión real no se ejecutan Nuvex, Gmail, el CLI ni los agentes. Al despertar se reconcilian socket, VPN y lecturas pendientes. Para operar mientras la Mac duerme sería necesario un servicio remoto siempre activo; Nuvex no simula esa capacidad ni evita el reposo indefinidamente.
+Con la pantalla apagada o la sesión bloqueada, la app de barra de menús y el ayudante pueden continuar, pero no se pueden aceptar diálogos. Si el proceso de Nuvex fue cerrado, el CLI lo vuelve a abrir en segundo plano; **Abrir al iniciar sesión** usa `SMAppService.mainApp` para recuperarlo después de reiniciar e iniciar sesión. Durante la suspensión real no se ejecutan Nuvex, Gmail, el CLI ni los agentes. Al despertar se reconcilian socket, VPN y lecturas pendientes. Para operar mientras la Mac duerme sería necesario un servicio remoto siempre activo; Nuvex no simula esa capacidad ni evita el reposo indefinidamente.
 
 ## Seguridad
 
-- El socket de control está en `~/Library/Application Support/Nuvex/control.sock`, con permisos 0600. Además de comprobar que el proceso pertenece a tu usuario, Nuvex solo acepta órdenes del comando incluido en esa misma copia de la app, valida la versión del protocolo y limita el tiempo de espera del cliente.
+- El socket de control está en `~/Library/Application Support/Nuvex/control.sock`, con permisos 0600. Además de comprobar que el proceso pertenece a tu usuario, Nuvex solo acepta órdenes del comando incluido en esa misma copia de la app, valida la versión del protocolo y limita el tiempo de espera del cliente. Si la escucha termina inesperadamente, Nuvex la reinicia; al despertar o recuperar la red también recrea una ruta perdida.
 - `nuvex` nunca recibe ni muestra contraseñas. Los códigos de verificación llegan por la entrada estándar, así no quedan en el historial ni en la lista de procesos.
 - Cada conexión o desconexión hecha por un asistente queda en el registro y, si lo eliges, en un aviso que dice quién la pidió.
 - Si llegan dos órdenes para la misma conexión, Nuvex conserva la primera y rechaza la segunda para que no se crucen.

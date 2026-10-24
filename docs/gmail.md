@@ -51,7 +51,7 @@ Si el código no aparece, abre **Patrón avanzado** y escribe una expresión reg
 3. Al encontrar el código, lo escribe y conecta. Puedes pulsar **Revisar** para detenerlo.
 4. Si no llega a tiempo, puedes escribirlo a mano o un asistente puede enviarlo con `nuvex codigo`.
 
-Nuvex revisa el árbol MIME completo, incluidas partes de texto que Gmail entrega mediante `attachmentId`, elige el candidato más reciente por la fecha interna de Gmail y no reutiliza el mismo mensaje durante la sesión. Cada cuerpo de texto tiene un límite de 256 KiB. Tras perder red o reactivar la Mac, una búsqueda pendiente se reanuda automáticamente si el intento de conexión sigue vigente.
+Nuvex revisa el árbol MIME completo, incluidas partes de texto que Gmail entrega mediante `attachmentId`. Prueba primero el texto plano y también HTML si el primero no contiene un código. Elige el candidato más reciente por la fecha interna de Gmail y no reutiliza el mismo mensaje durante la sesión. El cuerpo acumulado tiene un límite de 256 KiB. Tras perder red o reactivar la Mac, una búsqueda pendiente se reanuda automáticamente si el intento de conexión sigue vigente.
 
 El equipo debe estar despierto para consultar Gmail. Durante una suspensión real macOS detiene CPU y red; Nuvex reconcilia el estado al reactivarse, pero no puede recibir el correo mientras está dormido.
 

@@ -68,7 +68,7 @@ La prueba `tests/test_actualizacion_e2e.sh` levanta un servidor local y actualiz
 
 El lenguaje visual (tokens, Liquid Glass, componentes y reglas para pantallas nuevas) está documentado en [STYLE_GUIDE.md](STYLE_GUIDE.md) e implementado en `Nuvex/Sources/Nuvex/Diseno.swift`. El código de la app está en `Nuvex/Sources/Nuvex/`; el protocolo del comando `nuvex` en `Nuvex/Sources/NuvexControl/` y el comando en `Nuvex/Sources/nuvex-cli/`. Para generar capturas con datos ficticios, ejecuta `bash Nuvex/scripts/capturas.sh` desde la raíz; las imágenes quedan en `.build-cache/capturas/`. Los scripts de configuración y del ayudante están en la raíz; el motor `openfortivpn` está en `vendor/openfortivpn/`. El paquete generado `Nuvex/Nuvex.app` y los datos locales quedan fuera de Git.
 
-Para comprobar una conexión con un servidor real y un recurso interno autorizado, sigue [la guía de validación en vivo](docs/validacion-en-vivo.md). Las pruebas automáticas comprueban la configuración y el código; no establecen túneles contra servidores de terceros.
+Para comprobar una conexión con un servidor real y un recurso interno autorizado, sigue [la guía de validación en vivo](docs/validacion-en-vivo.md). Antes de publicar un sucesor de 3.2.1, ejecuta también el [plan de validación de producción](docs/plan-validacion-produccion.md). Las pruebas automáticas comprueban la configuración y el código; no establecen túneles contra servidores de terceros.
 
 ## Licencias
 

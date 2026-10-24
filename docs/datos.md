@@ -12,6 +12,8 @@ Nada de lo que configuras vive dentro de `Nuvex.app`. Por eso actualizar, reinst
 | Preferencias de la interfaz | UserDefaults `local.gertcode.nuvex` | Avisos, intervalo, Touch ID, actualizaciones. |
 | Ayudante y motor | `/Library/PrivilegedHelperTools/Nuvex` | Instalado con autorización de administrador. |
 | Registro | `~/Library/Logs/Nuvex.log` | Nunca incluye contraseñas ni códigos. Se rota a una generación al alcanzar 2 MB. |
+| Regla de Codex (opcional) | `~/.codex/rules/nuvex.rules` | Gestionada y revocable por Nuvex; autoriza solo el prefijo estable de su CLI. |
+| Regla de Claude Code (opcional) | Entradas concretas de `~/.claude/settings.json` | Se mezclan sin borrar otras claves; permiten y excluyen del sandbox solo el CLI. |
 
 ## Reglas que no cambian entre versiones
 

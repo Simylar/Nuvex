@@ -262,7 +262,7 @@ printf '%s\n' \
   "engine_sha256=${MOTOR%% *}" \
   "openssl=$OPENSSL_VERSION" > "$MANIFIESTO"
 
-paso "Appcast firmado"
+paso "Artefactos Sparkle firmados"
 OPCIONES=(--download-url-prefix "https://github.com/$REPO/releases/download/$ETIQUETA/"
           --embed-release-notes --maximum-deltas 3 --link "https://github.com/$REPO")
 $BETA && OPCIONES+=(--channel beta)

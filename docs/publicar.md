@@ -29,7 +29,7 @@ Nuvex/.build/artifacts/sparkle/Sparkle/bin/generate_keys -f Nuvex-EdDSA-clave-pr
 `.github/workflows/publicar.yml` publica cada versión cuando se sube una etiqueta `vX.Y.Z`. Usa tres secretos del repositorio, que guarda `configurar-publicacion.sh`:
 
 - `NUVEX_CERTIFICADO_P12` y `NUVEX_CERTIFICADO_FRASE`: el certificado «Nuvex Release» y su frase, que se importan en un llavero temporal que se borra al terminar.
-- `SPARKLE_ED_PRIVATE_KEY`: la clave que firma el appcast y cada actualización. Llega a `generate_appcast` por la entrada estándar.
+- `SPARKLE_ED_PRIVATE_KEY`: la clave que firma cada ZIP y delta; esas firmas se registran en el appcast. Llega a `generate_appcast` por la entrada estándar.
 
 El flujo pasa las pruebas, compila, firma, crea el GitHub Release y actualiza `appcast.xml` en la rama `gh-pages`. Una etiqueta cuyo mensaje contenga «beta» se publica en el canal beta. El artefacto incluye `release-manifest.txt`, que fija versión, build, commit, bundle, canal y motor, y `SHA256SUMS` para verificar localmente el ZIP, los deltas, las notas y el appcast.
 
@@ -44,7 +44,13 @@ El flujo pasa las pruebas, compila, firma, crea el GitHub Release y actualiza `a
    Nuvex/scripts/publicar.sh --simular
    ```
 
-5. Publica:
+5. Cuando se autorice la publicación, sube primero el commit exacto que se simuló:
+
+   ```sh
+   git push origin main
+   ```
+
+6. Publica:
 
    ```sh
    Nuvex/scripts/publicar.sh
@@ -59,6 +65,14 @@ Al comenzar, el script congela el commit y calcula el build como `100 + git rev-
 Cada intento limpia primero su directorio de salida y descarga de nuevo el appcast publicado; así no puede subir residuos de una simulación anterior. Al generar el appcast conserva las notas de todas las versiones cuyos ZIP se usan para crear deltas y restaura la URL propia de cada versión histórica.
 
 Antes de subir archivos, valida el appcast ya corregido: la entrada exacta de la nueva versión debe existir una sola vez, sin colisiones de versión o compilación, coincidir con su canal, apuntar al ZIP esperado mediante HTTPS, declarar su tamaño real y tener firma EdDSA. Cada delta también debe pertenecer a la publicación actual, declarar origen, tamaño y firma, existir en disco y estar referenciado exactamente desde el appcast.
+
+El canal actual autentica criptográficamente el ZIP completo y cada delta. El
+XML del appcast se entrega mediante HTTPS, pero no activa todavía
+`SURequireSignedFeed`; por tanto, su contenido completo no tiene una firma
+end-to-end. Sparkle considera esa protección adicional opcional. Adoptarla
+requiere probar en conjunto `SURequireSignedFeed`,
+`SUVerifyUpdateBeforeExtraction`, las notas firmadas y la rotación de claves
+antes de exigirla a instalaciones existentes.
 
 ## Qué ve quien tiene Nuvex instalado
 

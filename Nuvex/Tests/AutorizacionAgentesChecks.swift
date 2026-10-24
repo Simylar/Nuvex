@@ -17,6 +17,16 @@ struct AutorizacionAgentesChecks {
 
         let codex = base.appendingPathComponent(".codex", isDirectory: true)
         try archivos.createDirectory(at: codex, withIntermediateDirectories: true)
+        let codexApp = base.appendingPathComponent(
+            "Library/Application Support/Parall/ChatGPT (X)/.codex", isDirectory: true
+        )
+        try archivos.createDirectory(at: codexApp, withIntermediateDirectories: true)
+        let otraApp = base.appendingPathComponent(
+            "Library/Application Support/Parall/Otra/.codex", isDirectory: true
+        )
+        try archivos.createDirectory(at: otraApp, withIntermediateDirectories: true)
+        precondition(AutorizacionAgentes.raicesCodex(home: base) == [codex, codexApp],
+                     "se prepara Codex CLI y el hogar aislado de Codex Desktop")
         precondition(AutorizacionAgentes.estadoCodex(raiz: codex, comando: comando) == .ausente)
         try AutorizacionAgentes.instalarCodex(raiz: codex, comando: comando)
         precondition(AutorizacionAgentes.estadoCodex(raiz: codex, comando: comando) == .instalada)

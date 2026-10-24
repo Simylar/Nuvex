@@ -17,6 +17,36 @@ enum AutorizacionAgentes {
 
     static let marcaCodex = "# nuvex-vpn: gestionado por Nuvex."
 
+    /// Codex CLI usa `~/.codex`; la app de escritorio puede ejecutar sus
+    /// agentes con un hogar aislado bajo Application Support. Si ambos están
+    /// presentes, el onboarding debe preparar los dos para que una sesión
+    /// nueva descubra la misma habilidad y regla.
+    static func raicesCodex(home: URL, archivos: FileManager = .default) -> [URL] {
+        var resultado = [home.appendingPathComponent(".codex", isDirectory: true)]
+        let parall = home.appendingPathComponent(
+            "Library/Application Support/Parall", isDirectory: true
+        )
+        guard let aplicaciones = try? archivos.contentsOfDirectory(
+            at: parall, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+            options: [.skipsHiddenFiles]
+        ) else { return resultado }
+        for aplicacion in aplicaciones.sorted(by: { $0.path < $1.path })
+        where aplicacion.lastPathComponent.hasPrefix("ChatGPT") {
+            let valores = try? aplicacion.resourceValues(
+                forKeys: [.isDirectoryKey, .isSymbolicLinkKey]
+            )
+            guard valores?.isDirectory == true, valores?.isSymbolicLink != true else { continue }
+            let raiz = aplicacion.appendingPathComponent(".codex", isDirectory: true)
+            var esDirectorio: ObjCBool = false
+            guard archivos.fileExists(atPath: raiz.path, isDirectory: &esDirectorio),
+                  esDirectorio.boolValue else { continue }
+            if !resultado.contains(where: { $0.standardizedFileURL == raiz.standardizedFileURL }) {
+                resultado.append(raiz)
+            }
+        }
+        return resultado
+    }
+
     static func estadoCodex(raiz: URL, comando: String,
                             archivos: FileManager = .default) -> Estado {
         guard archivos.fileExists(atPath: raiz.path) else { return .noDisponible }

@@ -11,10 +11,15 @@ enum IntegracionAsistentes {
     struct Destino: Identifiable {
         let id: String
         let nombre: String
-        /// Carpeta de configuración de la herramienta (~/.claude, ~/.codex).
-        let raiz: URL
-        var carpeta: URL { raiz.appendingPathComponent("skills/nuvex-vpn", isDirectory: true) }
-        var archivo: URL { carpeta.appendingPathComponent("SKILL.md") }
+        /// Una herramienta puede tener más de una raíz activa. Codex Desktop
+        /// aísla su hogar, mientras Codex CLI conserva `~/.codex`.
+        let raices: [URL]
+
+        func carpeta(en raiz: URL) -> URL {
+            raiz.appendingPathComponent("skills/nuvex-vpn", isDirectory: true)
+        }
+
+        func archivo(en raiz: URL) -> URL { carpeta(en: raiz).appendingPathComponent("SKILL.md") }
     }
 
     enum Estado: Equatable {
@@ -22,8 +27,10 @@ enum IntegracionAsistentes {
     }
 
     static let destinos = [
-        Destino(id: "claude", nombre: "Claude Code", raiz: home.appendingPathComponent(".claude", isDirectory: true)),
-        Destino(id: "codex", nombre: "Codex", raiz: home.appendingPathComponent(".codex", isDirectory: true)),
+        Destino(id: "claude", nombre: "Claude Code", raices: [
+            home.appendingPathComponent(".claude", isDirectory: true),
+        ]),
+        Destino(id: "codex", nombre: "Codex", raices: AutorizacionAgentes.raicesCodex(home: home)),
     ]
 
     static var plantilla: String? {
@@ -34,26 +41,35 @@ enum IntegracionAsistentes {
 
     static func estado(_ destino: Destino) -> Estado {
         let archivos = FileManager.default
-        guard archivos.fileExists(atPath: destino.raiz.path) else { return .sinHerramienta }
-        switch ArchivoGestionado.estado(carpeta: destino.carpeta, archivo: destino.archivo, marca: marca) {
-        case .ausente:
-            return .ausente
-        case .gestionado(let actual):
-            return actual == plantilla ? .instalada : .desactualizada
-        case .ajeno:
-            return .ajena
-        }
+        let raices = destino.raices.filter { archivos.fileExists(atPath: $0.path) }
+        guard !raices.isEmpty else { return .sinHerramienta }
+        let estados = raices.map { estado(destino, en: $0, archivos: archivos) }
+        if estados.contains(.ajena) { return .ajena }
+        if estados.allSatisfy({ $0 == .instalada }) { return .instalada }
+        if estados.contains(.desactualizada) { return .desactualizada }
+        return .ausente
     }
 
     static func instalar(_ destino: Destino) throws {
         guard let plantilla else { throw CocoaError(.fileNoSuchFile) }
-        guard estado(destino) != .ajena else { throw CocoaError(.fileWriteFileExists) }
-        try FileManager.default.createDirectory(at: destino.carpeta, withIntermediateDirectories: true)
-        try plantilla.write(to: destino.archivo, atomically: true, encoding: .utf8)
+        let archivos = FileManager.default
+        let raices = destino.raices.filter { archivos.fileExists(atPath: $0.path) }
+        guard !raices.isEmpty else { throw CocoaError(.fileNoSuchFile) }
+        guard !raices.contains(where: { estado(destino, en: $0, archivos: archivos) == .ajena })
+        else { throw CocoaError(.fileWriteFileExists) }
+        for raiz in raices {
+            let carpeta = destino.carpeta(en: raiz)
+            try archivos.createDirectory(at: carpeta, withIntermediateDirectories: true)
+            try plantilla.write(to: destino.archivo(en: raiz), atomically: true, encoding: .utf8)
+        }
     }
 
     static func quitar(_ destino: Destino) throws {
-        try ArchivoGestionado.quitar(carpeta: destino.carpeta, archivo: destino.archivo, marca: marca)
+        let archivos = FileManager.default
+        for raiz in destino.raices where archivos.fileExists(atPath: raiz.path) {
+            try ArchivoGestionado.quitar(carpeta: destino.carpeta(en: raiz),
+                                         archivo: destino.archivo(en: raiz), marca: marca)
+        }
     }
 
     // MARK: Comando
@@ -115,27 +131,67 @@ enum IntegracionAsistentes {
 
     static func estadoAutorizacion(_ destino: Destino) -> AutorizacionAgentes.Estado {
         guard estadoComando() == .instalado else { return .noDisponible }
-        switch destino.id {
-        case "codex": return AutorizacionAgentes.estadoCodex(raiz: destino.raiz, comando: comandoParaAgentes)
-        case "claude": return AutorizacionAgentes.estadoClaude(raiz: destino.raiz, comando: comandoParaAgentes)
-        default: return .noDisponible
-        }
+        let archivos = FileManager.default
+        let raices = destino.raices.filter { archivos.fileExists(atPath: $0.path) }
+        guard !raices.isEmpty else { return .noDisponible }
+        let estados = raices.map { estadoAutorizacion(destino, en: $0) }
+        if estados.contains(.ajena) { return .ajena }
+        if estados.allSatisfy({ $0 == .instalada }) { return .instalada }
+        if estados.allSatisfy({ $0 == .ausente }) { return .ausente }
+        return .parcial
     }
 
     static func autorizar(_ destino: Destino) throws {
         guard estadoComando() == .instalado else { throw CocoaError(.fileNoSuchFile) }
-        switch destino.id {
-        case "codex": try AutorizacionAgentes.instalarCodex(raiz: destino.raiz, comando: comandoParaAgentes)
-        case "claude": try AutorizacionAgentes.instalarClaude(raiz: destino.raiz, comando: comandoParaAgentes)
-        default: throw CocoaError(.featureUnsupported)
+        let archivos = FileManager.default
+        let raices = destino.raices.filter { archivos.fileExists(atPath: $0.path) }
+        guard !raices.isEmpty else { throw CocoaError(.fileNoSuchFile) }
+        guard !raices.contains(where: { estadoAutorizacion(destino, en: $0) == .ajena })
+        else { throw CocoaError(.fileWriteFileExists) }
+        for raiz in raices {
+            switch destino.id {
+            case "codex":
+                try AutorizacionAgentes.instalarCodex(raiz: raiz, comando: comandoParaAgentes)
+            case "claude":
+                try AutorizacionAgentes.instalarClaude(raiz: raiz, comando: comandoParaAgentes)
+            default:
+                throw CocoaError(.featureUnsupported)
+            }
         }
     }
 
     static func revocar(_ destino: Destino) throws {
+        let archivos = FileManager.default
+        for raiz in destino.raices where archivos.fileExists(atPath: raiz.path) {
+            switch destino.id {
+            case "codex": try AutorizacionAgentes.quitarCodex(raiz: raiz)
+            case "claude":
+                try AutorizacionAgentes.quitarClaude(raiz: raiz, comando: comandoParaAgentes)
+            default: break
+            }
+        }
+    }
+
+    private static func estado(_ destino: Destino, en raiz: URL,
+                               archivos: FileManager) -> Estado {
+        switch ArchivoGestionado.estado(carpeta: destino.carpeta(en: raiz),
+                                        archivo: destino.archivo(en: raiz),
+                                        marca: marca, archivos: archivos) {
+        case .ausente: return .ausente
+        case .gestionado(let actual): return actual == plantilla ? .instalada : .desactualizada
+        case .ajeno: return .ajena
+        }
+    }
+
+    private static func estadoAutorizacion(_ destino: Destino,
+                                            en raiz: URL) -> AutorizacionAgentes.Estado {
         switch destino.id {
-        case "codex": try AutorizacionAgentes.quitarCodex(raiz: destino.raiz)
-        case "claude": try AutorizacionAgentes.quitarClaude(raiz: destino.raiz, comando: comandoParaAgentes)
-        default: break
+        case "codex":
+            return AutorizacionAgentes.estadoCodex(raiz: raiz, comando: comandoParaAgentes)
+        case "claude":
+            return AutorizacionAgentes.estadoClaude(raiz: raiz, comando: comandoParaAgentes)
+        default:
+            return .noDisponible
         }
     }
 

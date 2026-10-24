@@ -10,7 +10,7 @@ Nuvex permite iniciar varias VPN a la vez. Cada conexión tiene sus propias opci
 
 ## Compilar
 
-En `Nuvex/`, ejecuta `./build.sh`. Se requiere Swift, las Command Line Tools, `automake`, `autoconf`, `pkgconf` y OpenSSL 3 de Homebrew **solo para compilar**. La app resultante es `Nuvex/Nuvex.app` y lleva el motor y sus bibliotecas dentro. El código fuente y la licencia GPL de `openfortivpn` están en `vendor/openfortivpn/`. La licencia Apache-2.0 de las bibliotecas OpenSSL incluidas se copia desde esa instalación al paquete compilado.
+En `Nuvex/`, ejecuta `./build.sh`. Los artefactos oficiales actuales son para **Apple Silicon (arm64)** y requieren macOS 14 o posterior. Se requiere Swift, las Command Line Tools, `automake`, `autoconf`, `pkgconf` y OpenSSL 3 de Homebrew **solo para compilar**. La app resultante es `Nuvex/Nuvex.app` y lleva el motor y sus bibliotecas dentro. El código fuente y la licencia GPL de `openfortivpn` están en `vendor/openfortivpn/`. La licencia Apache-2.0 de las bibliotecas OpenSSL incluidas se copia desde esa instalación al paquete compilado.
 
 `build.sh` no instala nada en `/Applications` ni modifica la configuración VPN de macOS.
 

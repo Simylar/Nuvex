@@ -40,6 +40,7 @@ Este archivo sigue el formato de [Keep a Changelog](https://keepachangelog.com/e
 - El icono de Nuvex conserva el logotipo correcto en los tamaños pequeños usados por Ítems de inicio y otras vistas del sistema.
 
 ### Compatibilidad y limitaciones conocidas
+- Los artefactos oficiales de esta versión son para Mac con Apple Silicon (arm64) y macOS 14 o posterior.
 - Perfiles, preferencias, credenciales del Llavero, cuenta Gmail, políticas de automatización y protocolo del CLI conservan sus formatos actuales; la actualización no requiere migración destructiva.
 - macOS no ejecuta Nuvex, Gmail ni los agentes durante una suspensión real. Al despertar se reanudan únicamente las operaciones que continúen vigentes; antes de iniciar sesión tampoco están disponibles la automatización por usuario ni su Llavero.
 - En Claude Code, enviar manualmente un código mediante una tubería puede requerir una aprobación puntual; Nuvex no amplía la autorización a comandos ajenos como `printf`.

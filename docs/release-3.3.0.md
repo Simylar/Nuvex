@@ -54,7 +54,9 @@ o alteración. El pipeline vuelve a ejecutarlas antes de generar artefactos.
 
 ## Compatibilidad y rollback
 
-No cambian el bundle ID, el protocolo 2, el formato de perfiles ni el modelo de
-datos del Llavero. El ZIP completo siempre acompaña a cualquier delta. El
-instalador conserva una copia recuperable y valida firma, versión, apertura y
-socket antes de confirmar el reemplazo.
+Los artefactos oficiales actuales requieren Apple Silicon (`arm64`) y macOS 14
+o posterior; no se certifica una instalación Intel. No cambian el bundle ID,
+el protocolo 2, el formato de perfiles ni el modelo de datos del Llavero. El
+ZIP completo siempre acompaña a cualquier delta. El instalador conserva una
+copia recuperable y valida firma, versión, apertura y socket antes de confirmar
+el reemplazo.

@@ -22,7 +22,7 @@ La arquitectura, el modelo de permisos, la recuperación y los límites durante 
 
 ## Compilar e instalar
 
-Necesitas **macOS 14 o posterior**, Swift 6, las Command Line Tools de Xcode, Homebrew, `autoconf`, `automake`, `pkgconf` y `openssl@3`. macOS debe proporcionar `/usr/sbin/pppd`.
+Los artefactos oficiales actuales requieren una Mac con **Apple Silicon (arm64)** y **macOS 14 o posterior**. Para compilar necesitas Swift 6, las Command Line Tools de Xcode, Homebrew, `autoconf`, `automake`, `pkgconf` y `openssl@3`. macOS debe proporcionar `/usr/sbin/pppd`.
 
 ```sh
 brew install autoconf automake pkgconf openssl@3

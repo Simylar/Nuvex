@@ -183,6 +183,7 @@ COMPILACION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST")"
 COMMIT_PAQUETE="$(/usr/libexec/PlistBuddy -c 'Print :NuvexCommit' "$PLIST")"
 CANAL_PAQUETE="$(/usr/libexec/PlistBuddy -c 'Print :NuvexCanal' "$PLIST")"
 BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$PLIST")"
+ARQUITECTURAS="$(lipo -archs "$APP/Contents/MacOS/Nuvex")"
 [ "$VERSION_PAQUETE" = "$VERSION" ] \
   || falla "la app declara versión $VERSION_PAQUETE y se esperaba $VERSION"
 [ "$COMPILACION" = "$COMPILACION_ESPERADA" ] \
@@ -193,6 +194,8 @@ BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$PLIST")"
   || falla "la app no fue compilada para el canal publicado"
 [ "$BUNDLE_ID" = local.gertcode.nuvex ] \
   || falla "la app declara un identificador inesperado: $BUNDLE_ID"
+[ "$ARQUITECTURAS" = arm64 ] \
+  || falla "el artefacto oficial debe declarar explícitamente su arquitectura arm64: $ARQUITECTURAS"
 OPENSSL_VERSION="$(brew list --versions openssl@3 | awk '{print $2}')"
 MOTOR="$(shasum -a 256 "$APP/Contents/Resources/openfortivpn" | cut -d' ' -f1) openssl-$OPENSSL_VERSION"
 
@@ -254,6 +257,7 @@ printf '%s\n' \
   "build=$COMPILACION" \
   "commit=$COMMIT_INICIAL" \
   "bundle_id=$BUNDLE_ID" \
+  "architectures=$ARQUITECTURAS" \
   "channel=$CANAL_PAQUETE" \
   "engine_sha256=${MOTOR%% *}" \
   "openssl=$OPENSSL_VERSION" > "$MANIFIESTO"

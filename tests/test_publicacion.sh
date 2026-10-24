@@ -61,6 +61,7 @@ linea_publicacion="$(grep -nF 'gh release create "$ETIQUETA"' "$publicador" | cu
 ! grep -qF '|| rm -f "$SALIDA/appcast.xml"' "$publicador"
 grep -qF '[ "$COMPILACION" = "$COMPILACION_ESPERADA" ]' "$publicador"
 grep -qF '[ "$COMMIT_PAQUETE" = "$COMMIT_CORTO" ]' "$publicador"
+grep -qF '[ "$ARQUITECTURAS" = arm64 ]' "$publicador"
 grep -qF '"$MANIFIESTO" "$SUMAS"' "$publicador"
 
 echo 'Publicación: candidato congelado, artefactos y checksums conservan el orden seguro'

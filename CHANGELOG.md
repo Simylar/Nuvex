@@ -2,6 +2,41 @@
 
 Este archivo sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y Nuvex usa [versionado semántico](https://semver.org/lang/es/). Cada sección `## [X.Y.Z]` se muestra en la app como «Novedades» y se publica como notas de la versión.
 
+## [3.3.0] - 2026-10-24
+
+### Nuevo diseño y experiencia
+- Nuvex estrena un sistema visual unificado inspirado en macOS y Liquid Glass, con materiales, color, tipografía, espaciado, sombras y estados interactivos coherentes.
+- El panel, la bienvenida, Ajustes, actualización de software, exportación y los diálogos se adaptan mejor a los modos claro y oscuro.
+- La ventana del código de verificación permanece dentro del área visible, permite desplazamiento y conserva sus acciones accesibles en pantallas pequeñas y configuraciones con varios monitores.
+- La navegación, los mensajes de estado y los componentes reutilizables ofrecen una experiencia más clara sin cambiar las conexiones existentes.
+
+### Nuevas capacidades
+- Nuvex recupera automáticamente el control local y reconcilia el estado de las VPN después de reactivar la Mac o recuperar la conexión de red.
+- La lectura de Gmail admite árboles MIME completos, contenido mediante `attachmentId` y fallback de texto plano a HTML, con límites de tamaño y selección temporal más estrictos.
+- El diagnóstico muestra el estado del comando, las habilidades y las autorizaciones de Codex y Claude Code sin iniciar una VPN.
+
+### Mejoras de automatización
+- Codex y Claude Code pueden recibir una autorización persistente, acotada y revocable para `~/.local/bin/nuvex`, sin desactivar globalmente sus sandboxes.
+- El comando abre Nuvex en segundo plano cuando hace falta; la app continúa atendiendo con el menú oculto o la sesión bloqueada mientras la sesión de usuario siga iniciada.
+- Las habilidades explican recuperación, códigos de salida y límites reales de macOS, y se actualizan sin reemplazar archivos ajenos.
+
+### Correcciones de errores
+- El socket de control se recrea si su escucha se interrumpe o desaparece su ruta, evitando que el CLI quede bloqueado hasta reiniciar la app.
+- Gmail respeta `Retry-After`, limita el cuerpo acumulado y no descarta un código válido presente solo en la parte HTML.
+- Cerrar la sesión de Google o reemplazar el cliente ya no permite que una renovación OAuth tardía restaure el acceso anterior.
+- Las solicitudes simultáneas, desconexiones y reactivaciones conservan un estado consistente sin duplicar operaciones.
+
+### Seguridad y estabilidad
+- Las reglas de agentes se escriben con permisos privados, son idempotentes, preservan configuraciones ajenas y se eliminan al revocar el acceso o quitar el CLI gestionado.
+- El servidor mantiene la validación del usuario, del binario oficial, del protocolo y de la política configurada para cada VPN.
+- Los diagnósticos y registros evitan guardar contraseñas, tokens OAuth, códigos, cuerpos de correo y otros secretos.
+
+### Compatibilidad y limitaciones conocidas
+- Perfiles, preferencias, credenciales del Llavero, cuenta Gmail, políticas de automatización y protocolo del CLI conservan sus formatos actuales; la actualización no requiere migración destructiva.
+- macOS no ejecuta Nuvex, Gmail ni los agentes durante una suspensión real. Al despertar se reanudan únicamente las operaciones que continúen vigentes; antes de iniciar sesión tampoco están disponibles la automatización por usuario ni su Llavero.
+- En Claude Code, enviar manualmente un código mediante una tubería puede requerir una aprobación puntual; Nuvex no amplía la autorización a comandos ajenos como `printf`.
+- Antes de publicar deben validarse en hardware real la actualización firmada desde 3.2.1, la continuidad del Llavero, Gmail, una VPN Fortinet, bloqueo de sesión, suspensión y reactivación.
+
 ## [3.2.1] - 2026-10-20
 
 ### Correcciones

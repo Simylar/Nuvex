@@ -110,6 +110,20 @@ struct CorreoChecks {
             config: configFortinet
         ))
 
+        // La consulta exacta ya incorpora `after:` y no vuelve a comparar
+        // internalDate. Solo los mensajes del fallback sin `q` necesitan el
+        // límite local; IDs usados o repetidos quedan fuera desde el inicio.
+        let limiteFallback = Date(timeIntervalSince1970: 1_800_000_000)
+        let candidatos = SoporteGmail.candidatos(
+            filtrados: ["exacto", "usado"],
+            recientes: ["exacto", "reciente", "usado"],
+            excluidos: ["usado"], desdeMinimaRecientes: limiteFallback
+        )
+        precondition(candidatos == [
+            CandidatoMensajeGmail(id: "exacto", desdeMinima: nil),
+            CandidatoMensajeGmail(id: "reciente", desdeMinima: limiteFallback),
+        ])
+
         // Un mensaje nuevo sin código se relee de forma acotada: Gmail puede
         // haber listado su ID antes de terminar de propagar las partes MIME.
         var inspeccion = RegistroInspeccionGmail()

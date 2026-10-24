@@ -25,14 +25,23 @@ enum LectorGmail {
         /// Mensajes recientes cuyo contenido todavía no expuso un código. Se
         /// releen de forma acotada por si Gmail aún propagaba sus partes MIME.
         let sinCodigo: Set<String>
-        /// Mensajes con código pero anteriores a la ventana del intento.
-        let descartados: Set<String>
+        /// Mensajes que no pertenecen al intento, separados para que el
+        /// diagnóstico pueda explicar el filtro sin registrar sus datos.
+        let descartadosCabecera: Set<String>
+        let descartadosFecha: Set<String>
+
+        var descartados: Set<String> { descartadosCabecera.union(descartadosFecha) }
+    }
+
+    private enum MotivoDescarte {
+        case cabecera
+        case fecha
     }
 
     private enum Lectura {
         case hallazgo(Hallazgo)
         case sinCodigo
-        case descartada
+        case descartada(MotivoDescarte)
     }
 
     enum Resultado: Equatable, Sendable {
@@ -68,6 +77,11 @@ enum LectorGmail {
                                                 incluirRecientes: usarFallback)
                 inspeccion.registrarSinCodigo(busqueda.sinCodigo)
                 inspeccion.descartar(busqueda.descartados)
+                if !busqueda.descartados.isEmpty {
+                    Log.escribir("gmail op=\(operacion) estado=mensajes_descartados "
+                        + "cabecera=\(busqueda.descartadosCabecera.count) "
+                        + "fecha=\(busqueda.descartadosFecha.count)")
+                }
                 if !busqueda.sinCodigo.isEmpty {
                     let mayor = busqueda.sinCodigo.map { inspeccion.lecturas(de: $0) }.max() ?? 0
                     Log.escribir("gmail op=\(operacion) estado=mensaje_sin_codigo "
@@ -162,30 +176,38 @@ enum LectorGmail {
         let consulta = ExtractorCodigo.consultaGmail(remitente: config.remitente, asunto: config.asunto, desde: desde)
         var hallazgos: [Hallazgo] = []
         var sinCodigo: Set<String> = []
-        var descartados: Set<String> = []
-        var ids = try await listar(consulta, token: token)
+        var descartadosCabecera: Set<String> = []
+        var descartadosFecha: Set<String> = []
+        let filtrados = try await listar(consulta, token: token)
+        var recientes: [String] = []
         if incluirRecientes {
-            let filtrados = Set(ids)
-            let recientes = try await listar(nil, maximo: 25, token: token)
-            let adicionales = recientes.filter { !filtrados.contains($0) }
-            if !adicionales.isEmpty {
-                Log.escribir("gmail estado=fallback_recientes candidatos=\(adicionales.count)")
-                ids.append(contentsOf: adicionales)
-            }
+            recientes = try await listar(nil, maximo: 25, token: token)
         }
-        for id in ids where !excluir.contains(id) {
-            switch try await leer(id, config: config,
-                                   desdeMinima: desde.addingTimeInterval(-30), token: token) {
+        let candidatos = SoporteGmail.candidatos(
+            filtrados: filtrados, recientes: recientes, excluidos: excluir,
+            desdeMinimaRecientes: desde.addingTimeInterval(-30)
+        )
+        let adicionales = candidatos.filter { $0.desdeMinima != nil }.count
+        if adicionales > 0 {
+            Log.escribir("gmail estado=fallback_recientes candidatos=\(adicionales)")
+        }
+        for candidato in candidatos {
+            switch try await leer(candidato.id, config: config,
+                                   desdeMinima: candidato.desdeMinima, token: token) {
             case .hallazgo(let hallazgo):
                 hallazgos.append(hallazgo)
             case .sinCodigo:
-                sinCodigo.insert(id)
-            case .descartada:
-                descartados.insert(id)
+                sinCodigo.insert(candidato.id)
+            case .descartada(.cabecera):
+                descartadosCabecera.insert(candidato.id)
+            case .descartada(.fecha):
+                descartadosFecha.insert(candidato.id)
             }
         }
         return Busqueda(hallazgos: hallazgos.sorted { $0.fecha > $1.fecha },
-                        sinCodigo: sinCodigo, descartados: descartados)
+                        sinCodigo: sinCodigo,
+                        descartadosCabecera: descartadosCabecera,
+                        descartadosFecha: descartadosFecha)
     }
 
     // MARK: API de Gmail
@@ -215,8 +237,8 @@ enum LectorGmail {
         let milisegundos = Double(json["internalDate"] as? String ?? "") ?? 0
         let fecha = Date(timeIntervalSince1970: milisegundos / 1000)
         guard SoporteGmail.coincide(remitenteCabecera: remitente, asuntoCabecera: asunto,
-                                    config: config),
-              desdeMinima.map({ fecha >= $0 }) ?? true else { return .descartada }
+                                    config: config) else { return .descartada(.cabecera) }
+        guard desdeMinima.map({ fecha >= $0 }) ?? true else { return .descartada(.fecha) }
         var codigo = ExtractorCodigo.extraer(de: asunto, patron: config.patron)
         if codigo == nil {
             for formato in [ParteTextoGmail.Formato.plano, .html] {

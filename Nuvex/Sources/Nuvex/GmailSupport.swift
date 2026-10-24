@@ -14,6 +14,14 @@ struct ParteTextoGmail: Equatable {
     let tamano: Int
 }
 
+/// Mensaje que debe inspeccionarse y el límite temporal que todavía necesita
+/// validarse localmente. Los resultados de la consulta exacta ya fueron
+/// filtrados por Gmail; el fallback sin consulta sí requiere ese límite.
+struct CandidatoMensajeGmail: Equatable {
+    let id: String
+    let desdeMinima: Date?
+}
+
 /// Estado local de una espera de OTP. Gmail puede listar un mensaje nuevo
 /// antes de que todas sus partes MIME estén disponibles. En ese caso se vuelve
 /// a leer un número pequeño y acotado de veces; los mensajes definitivamente
@@ -49,6 +57,22 @@ enum SoporteGmail {
     /// Un correo OTP legítimo es pequeño. El límite evita descargar o procesar
     /// adjuntos inesperados como si fueran el cuerpo del mensaje.
     static let maximoBytesTexto = 256 * 1_024
+
+    /// Combina la consulta exacta con el respaldo de mensajes recientes sin
+    /// perder el origen de cada ID. Esto evita volver a descartar por una
+    /// marca temporal distinta un mensaje que Gmail ya aceptó con `after:`.
+    static func candidatos(filtrados: [String], recientes: [String],
+                           excluidos: Set<String>, desdeMinimaRecientes: Date) -> [CandidatoMensajeGmail] {
+        var vistos = excluidos
+        var resultado: [CandidatoMensajeGmail] = []
+        for id in filtrados where vistos.insert(id).inserted {
+            resultado.append(CandidatoMensajeGmail(id: id, desdeMinima: nil))
+        }
+        for id in recientes where vistos.insert(id).inserted {
+            resultado.append(CandidatoMensajeGmail(id: id, desdeMinima: desdeMinimaRecientes))
+        }
+        return resultado
+    }
 
     /// Repite localmente las restricciones de la consulta de Gmail. El
     /// fallback sin `q` nunca procesa el cuerpo de mensajes ajenos al perfil.

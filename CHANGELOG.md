@@ -21,7 +21,7 @@ Este archivo sigue el formato de [Keep a Changelog](https://keepachangelog.com/e
 - Las habilidades explican recuperación, códigos de salida y límites reales de macOS, y se actualizan sin reemplazar archivos ajenos.
 
 ### Correcciones de errores
-- Gmail vuelve a leer de forma acotada un mensaje recién llegado si su contenido todavía no expone el código y consulta los mensajes más recientes como respaldo cuando el índice de búsqueda aún no lo devuelve, evitando que la conexión espere aunque el correo ya sea visible.
+- Gmail vuelve a leer de forma acotada un mensaje recién llegado si su contenido todavía no expone el código, consulta los mensajes más recientes como respaldo cuando el índice de búsqueda aún no lo devuelve y no descarta por segunda vez la fecha de un resultado exacto, evitando que la conexión espere aunque el correo ya sea visible.
 - El temporizador de confirmación de un túnel ya no puede marcar como fallida una reconexión posterior del mismo perfil, y una espera de código activa puede cancelarse aunque la fila haya cambiado a error.
 - La ventana del código inicia con una altura compacta y permanece sobre las ventanas normales mientras la verificación está en curso.
 - La preparación de actualizaciones conserva el motor ya autorizado cuando el release anterior incluye una versión igual o más reciente de OpenSSL, evitando degradaciones y solicitudes administrativas innecesarias.

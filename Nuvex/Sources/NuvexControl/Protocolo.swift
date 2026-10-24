@@ -82,7 +82,7 @@ public enum CodigoSalida: Int32, Codable, Sendable {
     case tiempoAgotado = 5
     case sinApp = 6
     /// El comando corre dentro del sandbox de un asistente que no le deja
-    /// abrir Nuvex ni hablar con ella. Hay que repetirlo fuera del sandbox.
+    /// abrir Nuvex ni hablar con ella. Requiere autorizar solo el CLI fuera del sandbox.
     case aislado = 7
 
     /// Un diagnóstico incompleto nunca debe parecer satisfactorio a scripts o

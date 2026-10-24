@@ -46,14 +46,24 @@ enum SoporteGmail {
     }
 
     static func texto(datosBase64URL: [String], formato: ParteTextoGmail.Formato) -> String {
-        let fragmentos = datosBase64URL.compactMap { codificado -> String? in
+        var fragmentos: [String] = []
+        var bytesAcumulados = 0
+        for codificado in datosBase64URL {
             guard codificado.utf8.count <= maximoBytesTexto * 2,
                   let datos = ExtractorCodigo.decodificarBase64URL(codificado),
-                  datos.count <= maximoBytesTexto else { return nil }
-            return String(decoding: datos, as: UTF8.self)
+                  datos.count <= maximoBytesTexto else { continue }
+            guard bytesAcumulados + datos.count <= maximoBytesTexto else { break }
+            bytesAcumulados += datos.count
+            fragmentos.append(String(decoding: datos, as: UTF8.self))
         }
         let texto = fragmentos.joined(separator: "\n")
         return formato == .html ? ExtractorCodigo.textoDesdeHTML(texto) : texto
+    }
+
+    /// Conserva la prioridad del texto plano, pero permite probar la variante
+    /// HTML cuando el cuerpo plano existe y no contiene ningún código.
+    static func extraerCodigo(asunto: String, cuerpo: String, patron: String) -> String? {
+        ExtractorCodigo.extraer(de: asunto + "\n" + cuerpo, patron: patron)
     }
 
     /// Sondeo normal cuando Gmail respondió correctamente pero el mensaje aún
@@ -63,12 +73,14 @@ enum SoporteGmail {
     }
 
     /// Backoff exponencial truncado con jitter para fallos transitorios. Un
-    /// `Retry-After` válido siempre se respeta, con un tope compatible con la
-    /// espera total del código.
+    /// `Retry-After` válido siempre se respeta; el llamador lo acota al tiempo
+    /// que todavía queda en la operación.
     static func pausaTrasError(fallosConsecutivos: Int, problema: ProblemaGmail,
                                retryAfter: TimeInterval? = nil, jitter: TimeInterval) -> TimeInterval {
         if let retryAfter, retryAfter > 0 {
-            return min(60, max(1, retryAfter))
+            // El límite total de la operación se aplica al dormir. Acortar aquí
+            // la indicación del servidor provocaría una petición prematura.
+            return max(1, retryAfter)
         }
         let exponente = min(max(fallosConsecutivos - 1, 0), 5)
         let base = min(30, pow(2, Double(exponente)))

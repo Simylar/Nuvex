@@ -81,6 +81,16 @@ struct CorreoChecks {
         precondition(SoporteGmail.texto(datosBase64URL: [
             ExtractorCodigo.codificarBase64URL(Data("AuthCode: 246810".utf8)),
         ], formato: .plano) == "AuthCode: 246810")
+        precondition(SoporteGmail.extraerCodigo(asunto: "AuthCode", cuerpo: "Este cuerpo no incluye cifras",
+                                                patron: "") == nil)
+        precondition(SoporteGmail.extraerCodigo(asunto: "AuthCode", cuerpo: "<b>975310</b>",
+                                                patron: "") == "975310",
+                     "si la parte plana no tiene código se debe poder probar la variante HTML")
+        let fragmentoGrande = ExtractorCodigo.codificarBase64URL(
+            Data(String(repeating: "a", count: SoporteGmail.maximoBytesTexto / 2 + 1).utf8))
+        let textoAcotado = SoporteGmail.texto(datosBase64URL: [fragmentoGrande, fragmentoGrande], formato: .plano)
+        precondition(textoAcotado.utf8.count <= SoporteGmail.maximoBytesTexto,
+                     "el límite se aplica al cuerpo completo, no a cada fragmento por separado")
         let demasiadoGrande: [String: Any] = [
             "mimeType": "text/plain",
             "body": ["attachmentId": "enorme", "size": SoporteGmail.maximoBytesTexto + 1],
@@ -97,6 +107,9 @@ struct CorreoChecks {
         precondition(SoporteGmail.pausaTrasError(fallosConsecutivos: 8, problema: .limite, jitter: 1) == 30)
         precondition(SoporteGmail.pausaTrasError(fallosConsecutivos: 1, problema: .sinRed,
                                                 retryAfter: 17, jitter: 0) == 17)
+        precondition(SoporteGmail.pausaTrasError(fallosConsecutivos: 1, problema: .limite,
+                                                retryAfter: 120, jitter: 0) == 120,
+                     "Retry-After no se acorta; el límite global se aplica al dormir")
         precondition(SoporteGmail.retryAfter("12") == 12)
         let fechaHTTP = Date(timeIntervalSince1970: 1_800_000_030)
         precondition(SoporteGmail.retryAfter("Fri, 15 Jan 2027 08:00:30 GMT",

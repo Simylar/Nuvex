@@ -53,7 +53,11 @@ final class CuentaGoogle: ObservableObject {
     /// Comparte una sola renovación entre lectores concurrentes. Al ser un
     /// actor principal, una espera de red permite reentrada; sin esta tarea dos
     /// VPN podían renovar el mismo refresh token al mismo tiempo.
-    private var renovacionEnCurso: Task<(token: String, caduca: Date), Error>?
+    private struct RenovacionEnCurso {
+        let id: UUID
+        let tarea: Task<(token: String, caduca: Date), Error>
+    }
+    private var renovacionEnCurso: RenovacionEnCurso?
     private var inicio: Task<Void, Never>?
     private var servidor: ServidorRedireccion?
 
@@ -88,8 +92,8 @@ final class CuentaGoogle: ObservableObject {
             error = "No se pudo guardar el cliente en el Llavero."
             return false
         }
+        invalidarRenovacion()
         guardado = nuevo
-        acceso = nil
         error = nil
         recalcular()
         return true
@@ -189,18 +193,22 @@ final class CuentaGoogle: ObservableObject {
 
     /// Revoca el acceso en Google y lo borra del Llavero. Conserva el cliente.
     func cerrarSesion() async {
-        if let token = guardado?.tokenRenovacion {
+        let token = guardado?.tokenRenovacion
+        invalidarRenovacion()
+        guardado?.tokenRenovacion = nil
+        guardado?.correo = nil
+        if let guardado, !Self.escribirLlavero(guardado) {
+            error = "No se pudo actualizar la sesión guardada en el Llavero."
+        }
+        recalcular()
+        if let token {
             var peticion = URLRequest(url: URL(string: "https://oauth2.googleapis.com/revoke")!)
+            peticion.timeoutInterval = 15
             peticion.httpMethod = "POST"
             peticion.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
             peticion.httpBody = Self.formulario(["token": token])
             _ = try? await URLSession.shared.data(for: peticion)
         }
-        guardado?.tokenRenovacion = nil
-        guardado?.correo = nil
-        if let guardado { _ = Self.escribirLlavero(guardado) }
-        acceso = nil
-        recalcular()
     }
 
     func invalidarAcceso() { acceso = nil }
@@ -209,7 +217,13 @@ final class CuentaGoogle: ObservableObject {
     func tokenAcceso() async throws -> String {
         if let acceso, acceso.caduca > Date().addingTimeInterval(60) { return acceso.token }
         if let renovacionEnCurso {
-            let renovado = try await renovacionEnCurso.value
+            let renovado: (token: String, caduca: Date)
+            do { renovado = try await renovacionEnCurso.tarea.value }
+            catch {
+                guard self.renovacionEnCurso?.id == renovacionEnCurso.id else { throw ErrorGoogle.sinSesion }
+                throw error
+            }
+            guard self.renovacionEnCurso?.id == renovacionEnCurso.id else { throw ErrorGoogle.sinSesion }
             acceso = renovado
             return renovado.token
         }
@@ -225,10 +239,14 @@ final class CuentaGoogle: ObservableObject {
             }
             return (token: token, caduca: Date().addingTimeInterval(TimeInterval(tokens["expires_in"] as? Int ?? 3000)))
         }
-        renovacionEnCurso = tarea
-        defer { renovacionEnCurso = nil }
+        let idRenovacion = UUID()
+        renovacionEnCurso = RenovacionEnCurso(id: idRenovacion, tarea: tarea)
+        defer {
+            if renovacionEnCurso?.id == idRenovacion { renovacionEnCurso = nil }
+        }
         do {
             let renovado = try await tarea.value
+            guard renovacionEnCurso?.id == idRenovacion else { throw ErrorGoogle.sinSesion }
             acceso = renovado
             if case .caducada = estado { recalcular() }
             return renovado.token
@@ -237,6 +255,14 @@ final class CuentaGoogle: ObservableObject {
             recalcular(caducada: true)
             throw ErrorGoogle.caducada
         }
+    }
+
+    /// Impide que una respuesta tardía de OAuth restaure un token de acceso
+    /// después de cerrar sesión o reemplazar el cliente configurado.
+    private func invalidarRenovacion() {
+        renovacionEnCurso?.tarea.cancel()
+        renovacionEnCurso = nil
+        acceso = nil
     }
 
     // MARK: Red

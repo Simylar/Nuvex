@@ -28,7 +28,7 @@ También se aceptan status, connect, disconnect, code y doctor.
 
 Códigos de salida: 0 bien · 1 error · 2 uso incorrecto · 3 no permitido ·
 4 hace falta la persona o hay pendientes · 5 tiempo agotado · 6 Nuvex no responde ·
-7 el sandbox del asistente bloquea Nuvex: repite el comando fuera del sandbox.
+7 el sandbox del asistente bloquea Nuvex: autoriza solo este CLI desde Nuvex.
 """
 
 struct Opciones {
@@ -136,7 +136,8 @@ func procesoAislado() -> Bool {
 func salirAislado(json: Bool) -> Never {
     let titulo = "El sandbox del asistente bloquea Nuvex"
     let detalle = "Este comando corre en un entorno aislado que no permite abrir Nuvex ni comunicarse con ella. "
-        + "Repite el mismo comando fuera del sandbox (en Codex, con permisos elevados). "
+        + "Autoriza de forma persistente solo ~/.local/bin/nuvex desde Ajustes de Nuvex › Automatización, "
+        + "o aprueba únicamente este comando una vez. No desactives globalmente el sandbox. "
         + "No abras el ejecutable de Nuvex directamente."
     if json, let datos = try? Linea.codificar(Mensaje.resultado(.aislado, motivo: .aislamiento, titulo: titulo, detalle: detalle)) {
         FileHandle.standardOutput.write(datos)

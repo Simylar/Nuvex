@@ -158,6 +158,15 @@ struct ControlChecks {
         precondition(rechazado.salida == .noPermitido)
         restringido.detener()
 
+        // Un descriptor puede seguir abierto aunque el nodo del socket haya
+        // desaparecido. Debe detectarse para que ControlRemoto pueda recrearlo.
+        let recuperable = ServidorSocket(ruta: ruta) { _, _, _ in .resultado(.ok) }
+        try recuperable.iniciar()
+        precondition(recuperable.estaDisponible)
+        unlink(ruta)
+        precondition(!recuperable.estaDisponible, "un socket sin ruta ya no está disponible para clientes")
+        recuperable.detener()
+
         print("Control: comprobaciones superadas")
     }
 }

@@ -58,6 +58,9 @@ enum IntegracionAsistentes {
     // MARK: Comando
 
     static let enlace = home.appendingPathComponent(".local/bin/nuvex")
+    /// Forma que los agentes escriben en Bash y que sus motores de reglas
+    /// comparan antes de que el shell expanda el directorio personal.
+    static let comandoParaAgentes = "~/.local/bin/nuvex"
 
     /// El ejecutable dentro de esta app.
     static var comandoIncluido: URL? {
@@ -98,7 +101,39 @@ enum IntegracionAsistentes {
 
     static func quitarComando() throws {
         switch estadoComando() {
-        case .instalado, .otraCopia: try FileManager.default.removeItem(at: enlace)
+        case .instalado, .otraCopia:
+            // Una regla fuera del sandbox nunca debe quedar apuntando a una
+            // ruta que Nuvex ya no administra.
+            for destino in destinos { try revocar(destino) }
+            try FileManager.default.removeItem(at: enlace)
+        default: break
+        }
+    }
+
+    // MARK: Autorización persistente del agente
+
+    static func estadoAutorizacion(_ destino: Destino) -> AutorizacionAgentes.Estado {
+        guard estadoComando() == .instalado else { return .noDisponible }
+        switch destino.id {
+        case "codex": return AutorizacionAgentes.estadoCodex(raiz: destino.raiz, comando: comandoParaAgentes)
+        case "claude": return AutorizacionAgentes.estadoClaude(raiz: destino.raiz, comando: comandoParaAgentes)
+        default: return .noDisponible
+        }
+    }
+
+    static func autorizar(_ destino: Destino) throws {
+        guard estadoComando() == .instalado else { throw CocoaError(.fileNoSuchFile) }
+        switch destino.id {
+        case "codex": try AutorizacionAgentes.instalarCodex(raiz: destino.raiz, comando: comandoParaAgentes)
+        case "claude": try AutorizacionAgentes.instalarClaude(raiz: destino.raiz, comando: comandoParaAgentes)
+        default: throw CocoaError(.featureUnsupported)
+        }
+    }
+
+    static func revocar(_ destino: Destino) throws {
+        switch destino.id {
+        case "codex": try AutorizacionAgentes.quitarCodex(raiz: destino.raiz)
+        case "claude": try AutorizacionAgentes.quitarClaude(raiz: destino.raiz, comando: comandoParaAgentes)
         default: break
         }
     }
@@ -108,8 +143,15 @@ enum IntegracionAsistentes {
     /// de autorización elegida por la persona.
     static func preparar() throws {
         try instalarComando()
-        for destino in destinos where estado(destino) != .sinHerramienta && estado(destino) != .instalada {
-            try instalar(destino)
+        for destino in destinos {
+            switch estado(destino) {
+            case .ausente, .desactualizada:
+                try instalar(destino)
+            case .sinHerramienta, .instalada, .ajena:
+                // Una habilidad ajena se conserva y no impide preparar el
+                // resto de herramientas detectadas.
+                continue
+            }
         }
     }
 
@@ -161,6 +203,7 @@ struct AjustesAutomatizacion: View {
     @ObservedObject private var preferencias = Preferencias.shared
     @State private var estadoComando = IntegracionAsistentes.estadoComando()
     @State private var estados: [String: IntegracionAsistentes.Estado] = [:]
+    @State private var autorizaciones: [String: AutorizacionAgentes.Estado] = [:]
     @State private var comprobaciones: [Comprobacion]?
     @State private var error: String?
     @State private var errorPreferencias: String?
@@ -174,6 +217,9 @@ struct AjustesAutomatizacion: View {
     private func refrescar() {
         estadoComando = IntegracionAsistentes.estadoComando()
         estados = Dictionary(uniqueKeysWithValues: IntegracionAsistentes.destinos.map { ($0.id, IntegracionAsistentes.estado($0)) })
+        autorizaciones = Dictionary(uniqueKeysWithValues: IntegracionAsistentes.destinos.map {
+            ($0.id, IntegracionAsistentes.estadoAutorizacion($0))
+        })
     }
 
     private func intentar(_ accion: () throws -> Void) {
@@ -197,6 +243,7 @@ struct AjustesAutomatizacion: View {
         ]
         resultado.append(await IntegracionAsistentes.comprobarComando())
         resultado.append(contentsOf: IntegracionAsistentes.destinos.compactMap(comprobacionHabilidad))
+        resultado.append(contentsOf: IntegracionAsistentes.destinos.compactMap(comprobacionAutorizacion))
         comprobaciones = resultado
     }
 
@@ -324,6 +371,32 @@ struct AjustesAutomatizacion: View {
             }
 
             Section {
+                ForEach(IntegracionAsistentes.destinos) { destino in
+                    LabeledContent {
+                        switch autorizaciones[destino.id] ?? .noDisponible {
+                        case .ausente, .parcial:
+                            Button("Autorizar") { intentar { try IntegracionAsistentes.autorizar(destino) } }
+                        case .instalada:
+                            Button("Revocar") { intentar { try IntegracionAsistentes.revocar(destino) } }
+                        case .noDisponible, .ajena:
+                            EmptyView()
+                        }
+                    } label: {
+                        VStack(alignment: .leading, spacing: Espacio.xxs) {
+                            Text(destino.nombre)
+                            Text(descripcion(autorizaciones[destino.id] ?? .noDisponible, destino))
+                                .font(Tipo.nota).foregroundStyle(Paleta.textoSecundario)
+                        }
+                    }
+                }
+            } header: {
+                Text("Acceso persistente de agentes")
+            } footer: {
+                Text("Autorizar crea una regla revocable limitada a ~/.local/bin/nuvex. Las operaciones rutinarias ejecutan únicamente ese CLI fuera del sandbox sin volver a preguntar; el resto de comandos conserva su aislamiento y Nuvex sigue aplicando la política y las conexiones permitidas de arriba. Reinicia el agente después de cambiarla.")
+                    .foregroundStyle(Paleta.textoSecundario)
+            }
+
+            Section {
                 Button { Task { await comprobarPreparacion() } } label: {
                     if comprobando { ProgressView().controlSize(.small) }
                     else { Text("Comprobar preparación") }
@@ -350,7 +423,7 @@ struct AjustesAutomatizacion: View {
             }
 
             Section("Ejemplos") {
-                ForEach(["nuvex estado", "nuvex conectar oficina", "nuvex desconectar --todas", "nuvex diagnostico"], id: \.self) { ejemplo in
+                ForEach(["~/.local/bin/nuvex estado", "~/.local/bin/nuvex conectar oficina", "~/.local/bin/nuvex desconectar --todas", "~/.local/bin/nuvex diagnostico"], id: \.self) { ejemplo in
                     HStack {
                         Text(ejemplo).font(Tipo.mono).textSelection(.enabled)
                         Spacer()
@@ -384,10 +457,28 @@ struct AjustesAutomatizacion: View {
         }
     }
 
+    private func descripcion(_ estado: AutorizacionAgentes.Estado,
+                             _ destino: IntegracionAsistentes.Destino) -> String {
+        switch estado {
+        case .noDisponible: return "Instala primero el comando y \(destino.nombre)."
+        case .ausente: return "Pedirá autorización del agente al salir de su sandbox."
+        case .parcial: return "La regla está incompleta o pertenece a otra versión; puedes repararla."
+        case .instalada: return "Autorizado para las operaciones rutinarias del CLI de Nuvex."
+        case .ajena: return "La configuración existente no tiene una estructura segura para modificarla."
+        }
+    }
+
     private func comprobacionHabilidad(_ destino: IntegracionAsistentes.Destino) -> Comprobacion? {
         let estado = IntegracionAsistentes.estado(destino)
         guard estado != .sinHerramienta else { return nil }
         return Comprobacion(nombre: "Habilidad para \(destino.nombre)", ok: estado == .instalada,
+                            detalle: descripcion(estado, destino))
+    }
+
+    private func comprobacionAutorizacion(_ destino: IntegracionAsistentes.Destino) -> Comprobacion? {
+        let estado = IntegracionAsistentes.estadoAutorizacion(destino)
+        guard estado != .noDisponible else { return nil }
+        return Comprobacion(nombre: "Acceso persistente para \(destino.nombre)", ok: estado == .instalada,
                             detalle: descripcion(estado, destino))
     }
 }

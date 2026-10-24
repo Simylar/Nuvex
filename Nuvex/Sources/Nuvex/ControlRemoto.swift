@@ -9,6 +9,7 @@ final class ControlRemoto {
     private unowned let modelo: VPNModel
     private var servidor: ServidorSocket?
     private var operaciones = CoordinadorOperacionesRemotas()
+    private var generacionServidor: UUID?
     private(set) var disponible = false
 
     init(modelo: VPNModel) {
@@ -16,17 +17,24 @@ final class ControlRemoto {
     }
 
     func iniciar() {
+        guard servidor == nil else { return }
+        let generacion = UUID()
         let servidor = ServidorSocket(ruta: RutaControl.socket(home: Paths.userHome),
                                       registro: { Log.escribir($0) },
-                                      autorizarCliente: Self.esClienteOficial) { [weak self] peticion, cliente, emisor in
+                                      autorizarCliente: Self.esClienteOficial,
+                                      alInterrumpirse: { [weak self] in
+                                          Task { @MainActor in self?.recuperarServidor(generacion: generacion) }
+                                      }) { [weak self] peticion, cliente, emisor in
             guard let self else { return .resultado(.sinApp, titulo: "Nuvex se está cerrando") }
             return await self.atender(peticion, cliente, emisor)
         }
         do {
             try servidor.iniciar()
             self.servidor = servidor
+            generacionServidor = generacion
             disponible = true
         } catch {
+            generacionServidor = nil
             disponible = false
             Log.escribir("no se inició el control por Terminal: \(error)")
         }
@@ -35,6 +43,7 @@ final class ControlRemoto {
     func detener() {
         servidor?.detener()
         servidor = nil
+        generacionServidor = nil
         disponible = false
     }
 
@@ -42,7 +51,17 @@ final class ControlRemoto {
     /// de estar disponible, el despertar ofrece un punto seguro para abrirlo
     /// de nuevo sin crear un segundo servidor.
     func reanudarSiHaceFalta() {
-        guard !disponible else { return }
+        guard !disponible || servidor?.estaDisponible != true else { return }
+        detener()
+        iniciar()
+    }
+
+    private func recuperarServidor(generacion: UUID) {
+        guard generacionServidor == generacion else { return }
+        servidor = nil
+        generacionServidor = nil
+        disponible = false
+        Log.escribir("control estado=reinicio_automatico")
         iniciar()
     }
 

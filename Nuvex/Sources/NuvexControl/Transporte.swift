@@ -77,17 +77,30 @@ public final class ServidorSocket: @unchecked Sendable {
     private let manejador: Manejador
     private let registro: @Sendable (String) -> Void
     private let autorizarCliente: AutorizarCliente
+    private let alInterrumpirse: @Sendable () -> Void
     private let cerrojo = NSLock()
     private var fd: Int32 = -1
     private var activo = false
 
     public init(ruta: String, registro: @escaping @Sendable (String) -> Void = { _ in },
                 autorizarCliente: @escaping AutorizarCliente = { _ in true },
+                alInterrumpirse: @escaping @Sendable () -> Void = {},
                 manejador: @escaping Manejador) {
         self.ruta = ruta
         self.registro = registro
         self.autorizarCliente = autorizarCliente
+        self.alInterrumpirse = alInterrumpirse
         self.manejador = manejador
+    }
+
+    /// Estado operativo real, no solo el resultado del arranque. El archivo
+    /// puede desaparecer mientras el descriptor sigue abierto, dejando un
+    /// servidor imposible de alcanzar si no se comprueba explícitamente.
+    public var estaDisponible: Bool {
+        cerrojo.lock()
+        let escuchando = activo && fd >= 0
+        cerrojo.unlock()
+        return escuchando && FileManager.default.fileExists(atPath: ruta)
     }
 
     public func iniciar() throws {
@@ -139,10 +152,26 @@ public final class ServidorSocket: @unchecked Sendable {
             let cliente = accept(servidor, nil, nil)
             guard cliente >= 0 else {
                 if errno == EINTR { continue }
-                break
+                if errno == ECONNABORTED || errno == EAGAIN || errno == EWOULDBLOCK {
+                    continue
+                }
+                interrumpir(servidor, error: errno)
+                return
             }
             DispatchQueue.global(qos: .userInitiated).async { [self] in atender(cliente) }
         }
+    }
+
+    private func interrumpir(_ servidor: Int32, error: Int32) {
+        cerrojo.lock()
+        guard activo, fd == servidor else { cerrojo.unlock(); return }
+        activo = false
+        fd = -1
+        cerrojo.unlock()
+        close(servidor)
+        unlink(ruta)
+        registro("servidor de control interrumpido en accept: \(String(cString: strerror(error)))")
+        alInterrumpirse()
     }
 
     private func atender(_ cliente: Int32) {

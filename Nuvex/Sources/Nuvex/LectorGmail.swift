@@ -176,34 +176,38 @@ enum LectorGmail {
             return (nombre, valor)
         }, uniquingKeysWith: { primero, _ in primero })
         let asunto = cabeceras["subject"] ?? ""
-        let texto = asunto + "\n" + (try await cuerpo(carga, mensajeID: id, token: token))
-        guard let codigo = ExtractorCodigo.extraer(de: texto, patron: patron) else { return nil }
+        var codigo = ExtractorCodigo.extraer(de: asunto, patron: patron)
+        if codigo == nil {
+            for formato in [ParteTextoGmail.Formato.plano, .html] {
+                let texto = try await cuerpo(carga, formato: formato, mensajeID: id, token: token)
+                if let encontrado = SoporteGmail.extraerCodigo(asunto: asunto, cuerpo: texto, patron: patron) {
+                    codigo = encontrado
+                    break
+                }
+            }
+        }
+        guard let codigo else { return nil }
         let milisegundos = Double(json["internalDate"] as? String ?? "") ?? 0
         return Hallazgo(id: id, codigo: codigo, remitente: direccion(cabeceras["from"] ?? ""), asunto: asunto,
                         fecha: Date(timeIntervalSince1970: milisegundos / 1000))
     }
 
-    /// Texto plano del correo; si Gmail dejó una parte de texto fuera del
-    /// `payload`, se recupera con attachments.get. Si existe texto plano no se
-    /// descargan variantes HTML redundantes.
-    private static func cuerpo(_ carga: [String: Any], mensajeID: String, token: String) async throws -> String {
-        let partes = SoporteGmail.partesTexto(en: carga)
-        for formato in [ParteTextoGmail.Formato.plano, .html] {
-            let candidatas = partes.filter { $0.formato == formato }
-            guard !candidatas.isEmpty else { continue }
-            var codificadas: [String] = []
-            for parte in candidatas {
-                if let datos = parte.datos, !datos.isEmpty {
-                    codificadas.append(datos)
-                } else if let adjuntoID = parte.adjuntoID, !adjuntoID.isEmpty,
-                          let datos = try await leerAdjunto(adjuntoID, mensajeID: mensajeID, token: token) {
-                    codificadas.append(datos)
-                }
+    /// Texto del formato solicitado; si Gmail dejó una parte fuera del
+    /// `payload`, se recupera con attachments.get. El llamador prueba HTML solo
+    /// cuando ni el asunto ni el texto plano contienen un código válido.
+    private static func cuerpo(_ carga: [String: Any], formato: ParteTextoGmail.Formato,
+                               mensajeID: String, token: String) async throws -> String {
+        let candidatas = SoporteGmail.partesTexto(en: carga).filter { $0.formato == formato }
+        var codificadas: [String] = []
+        for parte in candidatas {
+            if let datos = parte.datos, !datos.isEmpty {
+                codificadas.append(datos)
+            } else if let adjuntoID = parte.adjuntoID, !adjuntoID.isEmpty,
+                      let datos = try await leerAdjunto(adjuntoID, mensajeID: mensajeID, token: token) {
+                codificadas.append(datos)
             }
-            let texto = SoporteGmail.texto(datosBase64URL: codificadas, formato: formato)
-            if !texto.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return texto }
         }
-        return ""
+        return SoporteGmail.texto(datosBase64URL: codificadas, formato: formato)
     }
 
     private static func leerAdjunto(_ adjuntoID: String, mensajeID: String, token: String) async throws -> String? {

@@ -69,12 +69,13 @@ struct VistaExportar: View {
         Form {
             if let guardado {
                 Section {
-                    Label("Conexiones exportadas", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-                    Text(resumen(guardado)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Label("Conexiones exportadas", systemImage: "checkmark.circle.fill").foregroundStyle(Paleta.exitoTexto)
+                    Text(resumen(guardado)).foregroundStyle(Paleta.textoSecundario).fixedSize(horizontal: false, vertical: true)
                     HStack {
                         Button("Mostrar en Finder") { NSWorkspace.shared.activateFileViewerSelecting([guardado.url]) }
+                            .estiloBoton(.secundario)
                         Spacer()
-                        Button("Listo", action: cerrar).buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                        Button("Listo", action: cerrar).estiloBoton(.principal).keyboardShortcut(.defaultAction)
                     }
                 }
             } else {
@@ -82,9 +83,9 @@ struct VistaExportar: View {
                     ForEach(modelo.profiles) { perfil in
                         Toggle(isOn: Binding(get: { seleccion.contains(perfil.id) },
                                              set: { if $0 { seleccion.insert(perfil.id) } else { seleccion.remove(perfil.id) } })) {
-                            Label { VStack(alignment: .leading, spacing: 1) {
+                            Label { VStack(alignment: .leading, spacing: Espacio.xxs / 2) {
                                 Text(perfil.name)
-                                Text(perfil.server).font(.caption).foregroundStyle(.secondary)
+                                Text(perfil.server).font(Tipo.nota).foregroundStyle(Paleta.textoSecundario)
                             } } icon: { IconoCuadrado(simbolo: "lock.fill", color: ColorConexion.para(perfil.id)) }
                         }
                     }
@@ -96,50 +97,50 @@ struct VistaExportar: View {
                     Text(incluirContrasenas
                          ? "macOS pedirá Touch ID o la contraseña del equipo para leerlas del Llavero. Viajan cifradas dentro del archivo."
                          : "Sin contraseñas, tendrás que escribirlas al importar. La cuenta de Google nunca se exporta.")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Paleta.textoSecundario)
                 }
                 Section {
                     SecureField("Frase", text: $frase, prompt: Text("Al menos \(CifradoExportacion.longitudMinima) caracteres"))
                     SecureField("Repítela", text: $repetir)
                     if !frase.isEmpty {
-                        HStack(spacing: 8) {
+                        HStack(spacing: Espacio.m) {
                             ForEach(0..<3, id: \.self) { nivel in
-                                Capsule().fill(nivel < fuerza ? colorFuerza : Color.secondary.opacity(0.2)).frame(height: 4)
+                                Capsule().fill(nivel < fuerza ? colorFuerza : Paleta.rellenoIntenso).frame(height: Espacio.xs)
                             }
-                            Text(textoFuerza).font(.caption).foregroundStyle(.secondary).frame(width: 90, alignment: .trailing)
+                            Text(textoFuerza).font(Tipo.nota).foregroundStyle(Paleta.textoSecundario).frame(width: 90, alignment: .trailing)
                         }
                     }
                     if !repetir.isEmpty && frase != repetir {
                         Label("Las frases no coinciden.", systemImage: "exclamationmark.triangle.fill")
-                            .font(.callout).foregroundStyle(.orange)
+                            .font(Tipo.apoyo).foregroundStyle(Paleta.avisoTexto)
                     }
                 } header: {
                     Text("Frase para cifrar el archivo")
                 } footer: {
                     Text("El archivo siempre va cifrado. Sin la frase nadie puede abrirlo, tampoco Nuvex: guárdala en tu gestor de contraseñas. Una frase de varias palabras es fácil de recordar y difícil de adivinar.")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Paleta.textoSecundario)
                 }
                 if let error {
-                    Section { Label(error, systemImage: "xmark.octagon.fill").foregroundStyle(.red).textSelection(.enabled) }
+                    Section { Label(error, systemImage: "xmark.octagon.fill").foregroundStyle(Paleta.errorTexto).textSelection(.enabled) }
                 }
                 Section {
                     HStack {
-                        Button("Cancelar", action: cerrar).keyboardShortcut(.cancelAction)
+                        Button("Cancelar", action: cerrar).estiloBoton(.secundario).keyboardShortcut(.cancelAction)
                         Spacer()
                         if exportando { ProgressView().controlSize(.small) }
                         Button("Exportar…", action: exportar)
-                            .buttonStyle(.borderedProminent)
+                            .estiloBoton(.principal)
                             .keyboardShortcut(.defaultAction)
                             .disabled(!puedeExportar)
                     }
                 }
             }
         }
-        .formStyle(.grouped)
+        .formularioNuvex()
         .frame(width: 520, height: 600)
     }
 
-    private var colorFuerza: Color { [Color.red, .orange, .yellow, .green][fuerza] }
+    private var colorFuerza: Color { [Paleta.error, Paleta.aviso, Paleta.precaucion, Paleta.exito][fuerza] }
     private var textoFuerza: String { ["Demasiado corta", "Débil", "Aceptable", "Muy buena"][fuerza] }
 
     private func resumen(_ guardado: (url: URL, contrasenas: Int, faltantes: Int)) -> String {
@@ -235,9 +236,9 @@ struct VistaImportar: View {
         Form {
             if let terminado {
                 Section {
-                    Label("Importación completa", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-                    Text(terminado).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    HStack { Spacer(); Button("Listo", action: cerrar).buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction) }
+                    Label("Importación completa", systemImage: "checkmark.circle.fill").foregroundStyle(Paleta.exitoTexto)
+                    Text(terminado).foregroundStyle(Paleta.textoSecundario).fixedSize(horizontal: false, vertical: true)
+                    HStack { Spacer(); Button("Listo", action: cerrar).estiloBoton(.principal).keyboardShortcut(.defaultAction) }
                 }
             } else if let elementos {
                 vistaPrevia(elementos)
@@ -245,31 +246,31 @@ struct VistaImportar: View {
                 Section {
                     LabeledContent("Archivo") {
                         HStack {
-                            Text(archivo?.lastPathComponent ?? "Ninguno").foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                            Text(archivo?.lastPathComponent ?? "Ninguno").foregroundStyle(Paleta.textoSecundario).lineLimit(1).truncationMode(.middle)
                             Button("Elegir…", action: elegir)
                         }
                     }
                     SecureField("Frase", text: $frase, prompt: Text("La que se usó al exportar"))
                         .onSubmit(abrir)
                 } footer: {
-                    Text("Nada cambia hasta que revises las conexiones y pulses Importar.").foregroundStyle(.secondary)
+                    Text("Nada cambia hasta que revises las conexiones y pulses Importar.").foregroundStyle(Paleta.textoSecundario)
                 }
                 if let error {
-                    Section { Label(error, systemImage: "xmark.octagon.fill").foregroundStyle(.red).textSelection(.enabled) }
+                    Section { Label(error, systemImage: "xmark.octagon.fill").foregroundStyle(Paleta.errorTexto).textSelection(.enabled) }
                 }
                 Section {
                     HStack {
-                        Button("Cancelar", action: cerrar).keyboardShortcut(.cancelAction)
+                        Button("Cancelar", action: cerrar).estiloBoton(.secundario).keyboardShortcut(.cancelAction)
                         Spacer()
                         if abriendo { ProgressView().controlSize(.small) }
                         Button("Abrir", action: abrir)
-                            .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                            .estiloBoton(.principal).keyboardShortcut(.defaultAction)
                             .disabled(archivo == nil || frase.isEmpty || abriendo)
                     }
                 }
             }
         }
-        .formStyle(.grouped)
+        .formularioNuvex()
         .frame(width: 540, height: 560)
         .onChange(of: busy) { antes, ahora in
             guard importando, antes, !ahora else { return }
@@ -282,17 +283,17 @@ struct VistaImportar: View {
         Section {
             ForEach(lista.indices, id: \.self) { indice in
                 let elemento = lista[indice]
-                HStack(alignment: .top, spacing: 10) {
+                HStack(alignment: .top, spacing: Espacio.m) {
                     IconoCuadrado(simbolo: "lock.fill", color: ColorConexion.para(elemento.perfil.id))
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: Espacio.xxs) {
                         Text(elemento.perfil.name)
                         Text([elemento.perfil.server, elemento.perfil.username,
                               elemento.contrasena == nil ? "sin contraseña" : "con contraseña",
                               elemento.correo == nil ? nil : "código por correo"]
                             .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(Tipo.nota).foregroundStyle(Paleta.textoSecundario)
                         if let motivo = elemento.motivoInvalido {
-                            Text(motivo).font(.caption).foregroundStyle(.red)
+                            Text(motivo).font(Tipo.nota).foregroundStyle(Paleta.errorTexto)
                         }
                     }
                     Spacer()
@@ -315,23 +316,23 @@ struct VistaImportar: View {
             Text("Conexiones del archivo")
         } footer: {
             Text("Reemplazar actualiza la conexión que ya tienes con ese mismo origen. Importar como copia crea una nueva y conserva la actual.")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Paleta.textoSecundario)
         }
         if let activa = modelo.vpns.first(where: \.connected) {
             Section { Label("Desconecta «\(activa.name)» para importar: las conexiones no pueden cambiar con una VPN activa.",
-                            systemImage: "lock.fill").foregroundStyle(.orange) }
+                            systemImage: "lock.fill").foregroundStyle(Paleta.avisoTexto) }
         }
         if let error {
-            Section { Label(error, systemImage: "xmark.octagon.fill").foregroundStyle(.red).textSelection(.enabled) }
+            Section { Label(error, systemImage: "xmark.octagon.fill").foregroundStyle(Paleta.errorTexto).textSelection(.enabled) }
         }
         Section {
             HStack {
-                Button("Cancelar", action: cerrar).keyboardShortcut(.cancelAction)
+                Button("Cancelar", action: cerrar).estiloBoton(.secundario).keyboardShortcut(.cancelAction)
                 Spacer()
                 if busy { ProgressView().controlSize(.small) }
                 let cuenta = lista.filter { $0.accion != .omitir && $0.motivoInvalido == nil }.count
                 Button(cuenta == 1 ? "Importar 1 conexión" : "Importar \(cuenta) conexiones", action: importar)
-                    .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                    .estiloBoton(.principal).keyboardShortcut(.defaultAction)
                     .disabled(cuenta == 0 || busy || modelo.hayAlgunaConectada)
             }
         }

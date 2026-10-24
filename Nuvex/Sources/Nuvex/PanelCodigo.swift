@@ -230,45 +230,46 @@ struct PanelCodigoView: View {
     @FocusState private var enfocado: Bool
 
     var body: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "ellipsis.message.fill")
-                .font(.system(size: 26, weight: .medium))
-                .foregroundStyle(.white)
-                .frame(width: 52, height: 52)
-                .background(Color.accentColor.gradient, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-                .accessibilityHidden(true)
-            VStack(spacing: 4) {
-                Text("Código para «\(solicitud.nombre)»").font(.headline)
+        VStack(spacing: Espacio.l) {
+            IconoCuadrado(simbolo: "ellipsis.message.fill", color: Paleta.acento, lado: Tamano.iconoDestacado)
+                .sombra(.sutil)
+            VStack(spacing: Espacio.xs) {
+                Text("Código para «\(solicitud.nombre)»").font(Tipo.encabezado)
                 Text("El servidor pidió un código de verificación. Nuvex no lo guarda.")
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(Tipo.apoyo).foregroundStyle(Paleta.textoSecundario)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
             }
             TextField("Código", text: $solicitud.codigo, prompt: Text("123456"))
                 .textContentType(.oneTimeCode)
-                .font(.system(.title2, design: .monospaced).weight(.semibold))
+                .font(Tipo.codigo)
+                .monospacedDigit()
                 .multilineTextAlignment(.center)
-                .textFieldStyle(.roundedBorder)
+                .campoDestacado(enfocado: enfocado)
                 .focused($enfocado)
                 .onSubmit { solicitud.enviar() }
                 .accessibilityLabel("Código de verificación para \(solicitud.nombre)")
             estadoCorreo
-            HStack(spacing: 10) {
-                Button("Cancelar", role: .cancel) { solicitud.cancelar() }
-                    .keyboardShortcut(.cancelAction)
-                    .frame(maxWidth: .infinity)
-                Button("Conectar") { solicitud.enviar() }
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(SolicitudCodigo.limpiar(solicitud.codigo).isEmpty)
-                    .frame(maxWidth: .infinity)
+            HStack(spacing: Espacio.m) {
+                Button(role: .cancel) { solicitud.cancelar() } label: {
+                    Text("Cancelar").frame(maxWidth: .infinity)
+                }
+                .estiloBoton(.secundario)
+                .keyboardShortcut(.cancelAction)
+                Button { solicitud.enviar() } label: {
+                    Text("Conectar").frame(maxWidth: .infinity)
+                }
+                .estiloBoton(.principal)
+                .keyboardShortcut(.defaultAction)
+                .disabled(SolicitudCodigo.limpiar(solicitud.codigo).isEmpty)
             }
             .controlSize(.large)
         }
-        .padding(.horizontal, 24)
-        .padding(.top, 28)
-        .padding(.bottom, 20)
+        .padding(.horizontal, Espacio.xxxl)
+        .padding(.top, Espacio.bloque)
+        .padding(.bottom, Espacio.xxl)
         .frame(width: 360)
+        .fondoVentana()
         .onAppear { enfocado = true }
     }
 
@@ -278,54 +279,54 @@ struct PanelCodigoView: View {
         case .noConfigurado:
             EmptyView()
         case .buscando(let desde, let cuenta, let aviso):
-            VStack(spacing: 4) {
+            VStack(spacing: Espacio.xs) {
                 TimelineView(.periodic(from: desde, by: 1)) { contexto in
                     let segundos = max(0, Int(contexto.date.timeIntervalSince(desde)))
-                    HStack(spacing: 6) {
+                    HStack(spacing: Espacio.s) {
                         ProgressView().controlSize(.small)
                         Text("Buscando en \(cuenta)… \(segundos / 60):\(String(format: "%02d", segundos % 60))")
                             .monospacedDigit()
                     }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(Tipo.nota)
+                    .foregroundStyle(Paleta.textoSecundario)
                 }
                 if let aviso {
                     Text("\(aviso.titulo). Reintentando…")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
+                        .font(Tipo.nota)
+                        .foregroundStyle(Paleta.avisoTexto)
                         .help(aviso.detalle)
                 }
             }
         case .encontrado(let remitente):
             if solicitud.envioAutomatico != nil {
-                HStack(spacing: 6) {
+                HStack(spacing: Espacio.s) {
                     Label("Código recibido de \(remitente). Conectando…", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
+                        .foregroundStyle(Paleta.exitoTexto)
                     Button("Revisar") { solicitud.detenerEnvio() }
                         .buttonStyle(.link)
                 }
-                .font(.caption)
+                .font(Tipo.nota)
             } else {
                 Label("Código recibido de \(remitente)", systemImage: "checkmark.circle.fill")
-                    .font(.caption).foregroundStyle(.green)
+                    .font(Tipo.nota).foregroundStyle(Paleta.exitoTexto)
             }
         case .sinResultado(let mensaje):
-            VStack(spacing: 4) {
+            VStack(spacing: Espacio.xs) {
                 Label(mensaje, systemImage: "envelope.badge")
-                    .font(.caption).foregroundStyle(.orange)
+                    .font(Tipo.nota).foregroundStyle(Paleta.avisoTexto)
                     .multilineTextAlignment(.center)
                 Button("Volver a buscar") { solicitud.reintentarCorreo() }
-                    .buttonStyle(.link).font(.caption)
+                    .buttonStyle(.link).font(Tipo.nota)
             }
         case .problema(let problema):
-            VStack(spacing: 4) {
+            VStack(spacing: Espacio.xs) {
                 Label(problema.titulo, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption.weight(.semibold)).foregroundStyle(.orange)
+                    .font(Tipo.nota.weight(.semibold)).foregroundStyle(Paleta.avisoTexto)
                 Text(problema.detalle + " Mientras tanto, puedes escribir el código.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(Tipo.nota).foregroundStyle(Paleta.textoSecundario)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 12) {
+                HStack(spacing: Espacio.l) {
                     switch problema.accion {
                     case .cuentaGoogle:
                         Button("Abrir Cuenta de Google") { AppActual.abrirAjustes(pagina: .cuentaGoogle) }
@@ -336,7 +337,7 @@ struct PanelCodigoView: View {
                     }
                     Button("Volver a buscar") { solicitud.reintentarCorreo() }
                 }
-                .buttonStyle(.link).font(.caption)
+                .buttonStyle(.link).font(Tipo.nota)
             }
         }
     }

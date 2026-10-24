@@ -51,6 +51,9 @@ struct NuvexApp: App {
             Captura.ejecutar(en: args[i + 1])
             exit(0)
         }
+        if args.contains("--guia-estilo") {
+            GuiaEstilo.ejecutar()
+        }
         #endif
     }
 

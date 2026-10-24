@@ -56,7 +56,8 @@ struct BienvenidaView: View {
             }
         }
         .frame(width: 460)
-        .animation(.snappy(duration: 0.25), value: paso)
+        .fondoVentana()
+        .animacion(Movimiento.suave, value: paso)
         .onChange(of: busy) { antes, ahora in
             // Al terminar de guardar (y de instalar el ayudante), decide el paso.
             guard paso == .preparando, antes, !ahora else { return }
@@ -74,43 +75,46 @@ struct BienvenidaView: View {
     // MARK: Pasos
 
     private var inicio: some View {
-        VStack(spacing: 14) {
-            LogoNuvex(lado: 72)
+        VStack(spacing: Espacio.l) {
+            LogoNuvex(lado: Tamano.logoPantalla)
+                .padding(.bottom, Espacio.xs)
             Text("Te damos la bienvenida a Nuvex")
-                .font(.title2).fontWeight(.bold)
+                .font(Tipo.pantalla)
             Text("Conecta tus VPN Fortinet desde la barra de menús. Configurarlo lleva un par de minutos.")
-                .foregroundStyle(.secondary)
+                .font(Tipo.entradilla)
+                .foregroundStyle(Paleta.textoSecundario)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-            VStack(spacing: 8) {
-                PasoBienvenida(numero: 1, titulo: "Añade tu servidor y usuario",
+            VStack(alignment: .leading, spacing: Espacio.xl) {
+                PasoBienvenida(numero: 1, simbolo: "server.rack", titulo: "Añade tu servidor y usuario",
                                detalle: "La contraseña se guarda en el Llavero de macOS.")
-                PasoBienvenida(numero: 2, titulo: "Autoriza el ayudante de red",
+                PasoBienvenida(numero: 2, simbolo: "lock.shield", titulo: "Autoriza el ayudante de red",
                                detalle: "macOS pedirá tu contraseña de administrador una vez.")
-                PasoBienvenida(numero: 3, titulo: "Conecta desde la barra de menús",
+                PasoBienvenida(numero: 3, simbolo: "menubar.arrow.up.rectangle", titulo: "Conecta desde la barra de menús",
                                detalle: "Busca el icono de Nuvex arriba a la derecha.")
             }
-            .padding(.vertical, 6)
+            .padding(.horizontal, Espacio.m)
+            .padding(.vertical, Espacio.xl)
             Button("Añadir primera conexión") { paso = .formulario }
-                .buttonStyle(.borderedProminent)
+                .estiloBoton(.principal)
                 .controlSize(.large)
                 .keyboardShortcut(.defaultAction)
             Button("Ahora no", action: cerrar)
                 .buttonStyle(.link)
         }
-        .padding(.horizontal, 36)
-        .padding(.top, 40)
-        .padding(.bottom, 26)
+        .padding(.horizontal, Espacio.pantalla)
+        .padding(.top, Espacio.pantalla)
+        .padding(.bottom, Espacio.xxxl)
     }
 
     private var formulario: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 4) {
-                Text("Tu primera conexión").font(.title3).fontWeight(.semibold)
+            VStack(spacing: Espacio.xs) {
+                Text("Tu primera conexión").font(Tipo.titulo)
                 Text("Podrás ajustar rutas, DNS y más opciones en Ajustes.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Paleta.textoSecundario)
             }
-            .padding(.top, 34)
+            .padding(.top, Espacio.bloque)
             Form {
                 Section {
                     TextField("Nombre", text: $perfil.name, prompt: Text("Oficina"))
@@ -129,31 +133,32 @@ struct BienvenidaView: View {
                     }
                 } footer: {
                     Text("Para fijar una huella SHA-256, usa Ajustes después de guardar.")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Paleta.textoSecundario)
                 }
             }
-            .formStyle(.grouped)
+            .formularioNuvex()
             .scrollDisabled(true)
             .frame(height: 300)
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: Espacio.m) {
                 if let mensaje = mensajeFormulario {
                     Label(mensaje, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(errorGuardado != nil ? .red : .orange)
-                        .font(.callout)
+                        .foregroundStyle(errorGuardado != nil ? Paleta.errorTexto : Paleta.avisoTexto)
+                        .font(Tipo.apoyo)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 }
                 HStack {
                     Button("Atrás") { paso = .inicio }
+                        .estiloBoton(.secundario)
                     Spacer()
                     Button("Guardar y continuar", action: guardar)
-                        .buttonStyle(.borderedProminent)
+                        .estiloBoton(.principal)
                         .keyboardShortcut(.defaultAction)
                 }
             }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 20)
+            .padding(.horizontal, Espacio.xxxl)
+            .padding(.bottom, Espacio.xxl)
         }
     }
 
@@ -179,84 +184,87 @@ struct BienvenidaView: View {
     }
 
     private var preparando: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: Espacio.l) {
             ProgressView().controlSize(.large)
             Text(modelo.instalandoAyudante ? "Esperando la autorización de macOS…" : "Guardando la conexión…")
-                .font(.headline)
+                .font(Tipo.encabezado)
             Text("macOS pedirá tu contraseña de administrador para instalar el ayudante de red. Nuvex no la ve ni la guarda.")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Paleta.textoSecundario)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, 40)
-        .padding(.vertical, 90)
+        .padding(.horizontal, Espacio.pantalla)
+        .padding(.vertical, Espacio.pantalla * 2)
     }
 
     private var listo: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: Espacio.l) {
             let conAviso = avisoAyudante != nil || modelo.resumenGuardado?.hayProblemas == true
             Image(systemName: conAviso ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                .font(.system(size: 48))
-                .foregroundStyle(conAviso ? Color.orange : Color.green)
+                .font(.system(size: Tamano.simboloDestacado))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(conAviso ? Paleta.aviso : Paleta.exito)
             Text(conAviso ? "Conexión guardada" : "Todo listo")
-                .font(.title2).fontWeight(.bold)
+                .font(Tipo.pantalla)
             Text("Encontrarás Nuvex en la barra de menús, arriba a la derecha. Desde ahí conectas y desconectas con un clic.")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Paleta.textoSecundario)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
             if let resumen = modelo.resumenGuardado, resumen.hayProblemas {
-                ListaResumenGuardado(modelo: modelo, resumen: resumen)
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                GroupBox {
+                    ListaResumenGuardado(modelo: modelo, resumen: resumen)
+                        .padding(Espacio.s)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             } else if let avisoAyudante {
                 Text("\(avisoAyudante) Nuvex lo intentará de nuevo al conectar.")
-                    .font(.callout)
-                    .foregroundStyle(.orange)
+                    .font(Tipo.apoyo)
+                    .foregroundStyle(Paleta.avisoTexto)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
             }
-            HStack(spacing: 10) {
+            HStack(spacing: Espacio.m) {
                 Button("Cerrar", action: cerrar)
+                    .estiloBoton(.secundario)
                 Button("Conectar ahora") {
                     modelo.conectar(id: perfil.id)
                     cerrar()
                 }
-                .buttonStyle(.borderedProminent)
+                .estiloBoton(.principal)
                 .keyboardShortcut(.defaultAction)
                 .disabled(!modelo.vpns.contains { $0.id == perfil.id })
             }
             .controlSize(.large)
-            .padding(.top, 6)
+            .padding(.top, Espacio.s)
         }
-        .padding(.horizontal, 40)
-        .padding(.vertical, 60)
+        .padding(.horizontal, Espacio.pantalla)
+        .padding(.vertical, Espacio.pantalla + Espacio.xxl)
     }
 }
 
+/// Un paso de la presentación: símbolo en la columna del acento, título y
+/// detalle. Sin contenedor: la alineación y el espacio bastan para agruparlos.
 private struct PasoBienvenida: View {
     let numero: Int
+    let simbolo: String
     let titulo: String
     let detalle: String
 
     var body: some View {
-        HStack(spacing: 12) {
-            Text("\(numero)")
-                .font(.callout.weight(.semibold))
-                .foregroundStyle(.white)
-                .frame(width: 22, height: 22)
-                .background(Color.accentColor, in: Circle())
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(titulo).fontWeight(.medium)
-                Text(detalle).font(.caption).foregroundStyle(.secondary)
+        HStack(alignment: .firstTextBaseline, spacing: Espacio.l) {
+            Image(systemName: simbolo)
+                .font(Tipo.titulo)
+                .foregroundStyle(Paleta.acento)
+                .frame(width: Espacio.bloque)
+            VStack(alignment: .leading, spacing: Espacio.xxs) {
+                Text(titulo).font(Tipo.cuerpoEnfasis)
+                Text(detalle).font(Tipo.apoyo).foregroundStyle(Paleta.textoSecundario)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer()
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Paso \(numero): \(titulo). \(detalle)")
     }
 }

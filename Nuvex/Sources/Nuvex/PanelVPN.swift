@@ -22,6 +22,7 @@ struct FilaVPN: View {
 
     @State private var hover = false
     @State private var expandida = false
+    @Environment(\.accessibilityReduceMotion) private var reducirMovimiento
 
     private enum Situacion {
         case conectada, conectando, caida(Date), error(Fallo)
@@ -54,15 +55,17 @@ struct FilaVPN: View {
     private var tinte: Color {
         switch situacion {
         case .conectada, .conectando, .desconectada: return .primary
-        case .error: return .red
-        case .caida, .faltaContrasena, .faltaConfigurar: return .orange
+        case .error: return Paleta.error
+        case .caida, .faltaContrasena, .faltaConfigurar: return Paleta.aviso
         }
     }
 
+    /// El panel ya es vidrio del sistema: el círculo es un relleno opaco,
+    /// como los controles del Centro de control. Acento al conectar.
     private var fondoCirculo: Color {
         switch situacion {
-        case .conectada: return .accentColor
-        case .conectando, .desconectada: return .primary.opacity(0.09)
+        case .conectada: return Paleta.acento
+        case .conectando, .desconectada: return Paleta.rellenoIntenso
         default: return tinte.opacity(0.16)
         }
     }
@@ -88,8 +91,8 @@ struct FilaVPN: View {
 
     private var colorDescripcion: Color {
         switch situacion {
-        case .error: return .red
-        case .caida, .faltaContrasena, .faltaConfigurar: return .orange
+        case .error: return Paleta.errorTexto
+        case .caida, .faltaContrasena, .faltaConfigurar: return Paleta.avisoTexto
         default: return .secondary
         }
     }
@@ -117,14 +120,17 @@ struct FilaVPN: View {
 
             if expandida && puedeExpandir {
                 detalles
-                    .padding(.leading, 44)
-                    .padding(.trailing, 10)
-                    .padding(.bottom, 7)
-                    .transition(.opacity)
+                    // Alineados con el nombre: margen + círculo + separación.
+                    .padding(.leading, Espacio.m + Tamano.circuloEstado + Espacio.l)
+                    .padding(.trailing, Espacio.l)
+                    .padding(.bottom, Espacio.m)
+                    .transition(Movimiento.aparicion(reducir: reducirMovimiento))
             }
         }
-        .background(hover ? Color.primary.opacity(0.06) : .clear, in: RoundedRectangle(cornerRadius: 6))
+        // Una fila que conecta entera ya resalta con su estilo de botón.
+        .background(RoundedRectangle.nuvex(Radio.m).fill(hover && !conectaDesdeFila ? Paleta.relleno : .clear))
         .onHover { hover = $0 }
+        .animacion(Movimiento.rapida, value: hover)
         .help(ayuda)
         .accessibilityElement(children: .contain)
     }
@@ -135,7 +141,7 @@ struct FilaVPN: View {
             Button(action: accionCirculo) {
                 contenidoEncabezado
             }
-            .buttonStyle(.plain)
+            .buttonStyle(EstiloFila())
             .disabled(bloqueada)
             .accessibilityLabel(etiquetaCirculo)
             .accessibilityValue(descripcion)
@@ -146,13 +152,14 @@ struct FilaVPN: View {
     }
 
     private var contenidoEncabezado: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: Espacio.l) {
             circulo
             textos
             accesorio
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
+        .padding(.horizontal, Espacio.m)
+        .padding(.vertical, Espacio.s)
+        .frame(minHeight: Tamano.filaPanel)
         .contentShape(Rectangle())
     }
 
@@ -168,12 +175,14 @@ struct FilaVPN: View {
     }
 
     private var contenidoTextos: some View {
-        VStack(alignment: .leading, spacing: 1) {
+        VStack(alignment: .leading, spacing: Espacio.xxs / 2) {
             Text(vpn.name)
+                .font(Tipo.cuerpoEnfasis)
                 .lineLimit(1)
             TimelineView(.periodic(from: .now, by: estado == .conectando ? 1 : 30)) { _ in
                 Text(descripcion)
-                    .font(.caption)
+                    .font(Tipo.nota)
+                    .monospacedDigit()
                     .foregroundStyle(colorDescripcion)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
@@ -183,7 +192,7 @@ struct FilaVPN: View {
     }
 
     private func alternarDetalles() {
-        withAnimation(.snappy(duration: 0.2)) { expandida.toggle() }
+        withAnimation(reducirMovimiento ? Movimiento.reducida : Movimiento.estandar) { expandida.toggle() }
     }
 
     private var ayuda: String {
@@ -211,7 +220,7 @@ struct FilaVPN: View {
             Button(action: accionCirculo) {
                 contenidoCirculo
             }
-            .buttonStyle(.plain)
+            .buttonStyle(EstiloPresion())
             .disabled(bloqueada || estado == .conectando)
             .accessibilityLabel(etiquetaCirculo)
             .accessibilityValue(descripcion)
@@ -221,13 +230,15 @@ struct FilaVPN: View {
 
     private var contenidoCirculo: some View {
         ZStack {
-            Circle().fill(fondoCirculo)
             Image(systemName: simbolo)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: Tamano.simboloCirculo, weight: .semibold))
                 .foregroundStyle(estado == .conectada ? Color.white : tinte)
+                .contentTransition(.symbolEffect(.replace))
             if case .conectando = situacion { AnilloGiratorio() }
         }
-        .frame(width: 26, height: 26)
+        .frame(width: Tamano.circuloEstado, height: Tamano.circuloEstado)
+        .background(Circle().fill(fondoCirculo))
+        .animacion(Movimiento.estandar, value: estado == .conectada)
         .contentShape(Circle())
     }
 
@@ -253,7 +264,7 @@ struct FilaVPN: View {
         case .desconectada:
             if let atajo, atajo <= 9 {
                 Text("⌘\(atajo)")
-                    .font(.caption)
+                    .font(Tipo.nota)
                     .foregroundStyle(.tertiary)
                     .accessibilityHidden(true)
             }
@@ -265,7 +276,7 @@ struct FilaVPN: View {
             alternarDetalles()
         } label: {
             Image(systemName: "chevron.right")
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: Tamano.simboloPequeno, weight: .semibold))
                 .rotationEffect(.degrees(expandida ? 90 : 0))
                 .foregroundStyle(.secondary)
                 .frame(width: 18, height: 18)
@@ -278,31 +289,24 @@ struct FilaVPN: View {
     @ViewBuilder
     private var detalles: some View {
         if case .error(let fallo) = situacion {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: Espacio.s) {
                 Text(fallo.detalle)
-                    .font(.caption)
+                    .font(Tipo.nota)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
                 Button("Mostrar registro") { Log.mostrar() }
                     .buttonStyle(.link)
-                    .font(.caption)
+                    .font(Tipo.nota)
             }
         } else {
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 3) {
+            Grid(alignment: .leading, horizontalSpacing: Espacio.l, verticalSpacing: Espacio.xs) {
                 if !vpn.ip.isEmpty {
                     GridRow {
                         Text("IP").foregroundStyle(.secondary)
-                        HStack(spacing: 4) {
+                        HStack(spacing: Espacio.xs) {
                             Text(vpn.ip).monospaced().textSelection(.enabled)
-                            Button {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(vpn.ip, forType: .string)
-                            } label: { Image(systemName: "doc.on.doc") }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.secondary)
-                            .help("Copiar IP")
-                            .accessibilityLabel("Copiar IP")
+                            BotonCopiar(texto: vpn.ip, etiqueta: "Copiar IP")
                         }
                     }
                 }
@@ -322,7 +326,7 @@ struct FilaVPN: View {
                     Text("No se pudieron leer los detalles del túnel.").foregroundStyle(.secondary)
                 }
             }
-            .font(.caption)
+            .font(Tipo.nota)
         }
     }
 }
@@ -345,8 +349,8 @@ private struct AnilloGiratorio: View {
     var body: some View {
         Circle()
             .trim(from: 0, to: reducirMovimiento ? 1 : 0.28)
-            .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-            .frame(width: 30, height: 30)
+            .stroke(Paleta.acento, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+            .frame(width: Tamano.circuloEstado + Espacio.xs, height: Tamano.circuloEstado + Espacio.xs)
             .rotationEffect(.degrees(girando ? 360 : 0))
             .animation(reducirMovimiento ? nil : .linear(duration: 0.9).repeatForever(autoreverses: false), value: girando)
             .onAppear { girando = true }
@@ -358,7 +362,7 @@ private struct BotonFila: View {
     let accion: () -> Void
     var body: some View {
         Button(titulo, action: accion)
-            .buttonStyle(.bordered)
+            .estiloBoton(.secundario)
             .controlSize(.small)
     }
 }
@@ -381,10 +385,10 @@ private struct ElementoMenu: View {
                 Spacer()
                 Text(atajo).foregroundStyle(hover ? Color.white.opacity(0.8) : Color.secondary)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
+            .padding(.horizontal, Espacio.m)
+            .padding(.vertical, Espacio.xs)
             .foregroundStyle(hover ? Color.white : Color.primary)
-            .background(hover ? Color.accentColor : .clear, in: RoundedRectangle(cornerRadius: 5))
+            .background(RoundedRectangle.nuvex(Radio.s).fill(hover ? Paleta.acento : .clear))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -429,13 +433,13 @@ struct PanelVPN: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
-                Text("Nuvex").fontWeight(.semibold)
+                Text("Nuvex").font(Tipo.encabezado)
                 Spacer()
-                Text(resumen).font(.caption).foregroundStyle(.secondary)
+                Text(resumen).font(Tipo.nota).foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 10)
-            .padding(.top, 6)
-            .padding(.bottom, 4)
+            .padding(.horizontal, Espacio.m)
+            .padding(.top, Espacio.s)
+            .padding(.bottom, Espacio.s)
 
             if modelo.vpnsVisibles.isEmpty {
                 vacio
@@ -445,7 +449,7 @@ struct PanelVPN: View {
                 if modelo.vpnsVisibles.count <= 8 {
                     filas
                 } else {
-                    ScrollView { filas }.frame(height: 8 * 37)
+                    ScrollView { filas }.frame(height: 8 * Tamano.filaPanel)
                 }
             }
 
@@ -453,7 +457,7 @@ struct PanelVPN: View {
                 Nota(simbolo: nil, color: .secondary,
                      texto: "Preparando el ayudante de red. Autoriza el cambio en el diálogo de macOS.")
             } else if modelo.ayudanteListo == false && !modelo.profiles.isEmpty {
-                NotaConAccion(simbolo: "shield.lefthalf.filled", color: .orange,
+                NotaConAccion(simbolo: "shield.lefthalf.filled", color: Paleta.aviso,
                               texto: "El ayudante de red necesita tu autorización.",
                               accion: "Autorizar") { modelo.instalarAyudante() }
             }
@@ -464,21 +468,21 @@ struct PanelVPN: View {
                 AvisoActualizacion(actualizaciones: actualizaciones)
             }
             if let aviso = modelo.avisoConvivencia {
-                Nota(simbolo: "exclamationmark.triangle.fill", color: .orange, texto: aviso)
+                Nota(simbolo: "exclamationmark.triangle.fill", color: Paleta.aviso, texto: aviso)
             }
             if let error = errorGeneral, !modelo.vpnsVisibles.isEmpty {
-                Nota(simbolo: "exclamationmark.circle.fill", color: .red, texto: error, seleccionable: true)
+                Nota(simbolo: "exclamationmark.circle.fill", color: Paleta.error, texto: error, seleccionable: true)
             }
 
-            Divider().padding(.horizontal, 10).padding(.vertical, 5)
+            Divider().padding(.horizontal, Espacio.m).padding(.vertical, Espacio.s)
             if let actualizaciones = modelo.actualizaciones, actualizaciones.configuradas {
                 ElementoMenu(titulo: "Buscar actualizaciones…", atajo: "", tecla: nil) { actualizaciones.mostrar() }
             }
             ElementoMenu(titulo: "Ajustes de Nuvex…", atajo: "⌘,", tecla: ",") { abrirAjustes() }
             ElementoMenu(titulo: "Salir de Nuvex", atajo: "⌘Q", tecla: "q") { NSApp.terminate(nil) }
         }
-        .padding(6)
-        .frame(width: 320)
+        .padding(Espacio.s)
+        .frame(width: Tamano.panel)
     }
 
     private var filas: some View {
@@ -502,31 +506,27 @@ struct PanelVPN: View {
 
     @ViewBuilder
     private var vacio: some View {
-        VStack(spacing: 6) {
+        Group {
             if let error = modelo.errorConsulta {
-                Image(systemName: "network.slash").font(.title2).foregroundStyle(.secondary)
-                Text("No se pudo leer el estado").fontWeight(.semibold)
-                Text(error).font(.caption).foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center).textSelection(.enabled)
-                Button("Mostrar registro") { Log.mostrar() }.controlSize(.small).padding(.top, 4)
+                EstadoVacio("No se pudo leer el estado", detalle: error, simbolo: "network.slash") {
+                    Button("Mostrar registro") { Log.mostrar() }.estiloBoton(.secundario)
+                }
+                .textSelection(.enabled)
             } else if modelo.profiles.isEmpty {
-                LogoNuvex(lado: 34)
-                Text("Aún no hay conexiones").fontWeight(.semibold)
-                Text("Añade tu servidor Fortinet para conectarte desde aquí.")
-                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                Button("Añadir conexión…") { Bienvenida.mostrar(modelo: modelo) }
-                    .buttonStyle(.borderedProminent).controlSize(.small).padding(.top, 4)
+                EstadoVacio("Aún no hay conexiones",
+                            detalle: "Añade tu servidor Fortinet para conectarte desde aquí.",
+                            icono: { LogoNuvex(lado: Tamano.iconoCabecera) }) {
+                    Button("Añadir conexión…") { Bienvenida.mostrar(modelo: modelo) }.estiloBoton(.principal)
+                }
             } else {
-                Image(systemName: "eye.slash").font(.title2).foregroundStyle(.secondary)
-                Text("No hay conexiones visibles").fontWeight(.semibold)
-                Text("Activa «Mostrar en la barra de menús» en Ajustes.")
-                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                Button("Abrir Ajustes…") { abrirAjustes() }.controlSize(.small).padding(.top, 4)
+                EstadoVacio("No hay conexiones visibles",
+                            detalle: "Activa «Mostrar en la barra de menús» en Ajustes.", simbolo: "eye.slash") {
+                    Button("Abrir Ajustes…") { abrirAjustes() }.estiloBoton(.secundario)
+                }
             }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 16)
+        .padding(.horizontal, Espacio.xl)
+        .padding(.vertical, Espacio.xxl)
     }
 }
 
@@ -537,20 +537,24 @@ private struct Nota: View {
     var seleccionable = false
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 7) {
-            if let simbolo {
-                Image(systemName: simbolo).foregroundStyle(color)
-            } else {
-                ProgressView().controlSize(.mini)
+        HStack(alignment: .firstTextBaseline, spacing: Espacio.l) {
+            Group {
+                if let simbolo {
+                    Image(systemName: simbolo).foregroundStyle(color)
+                } else {
+                    ProgressView().controlSize(.mini)
+                }
             }
+            .frame(width: Tamano.circuloEstado)
             Text(texto)
-                .foregroundStyle(simbolo == nil ? Color.secondary : (color == .red ? Color.red : Color.secondary))
+                .foregroundStyle(simbolo != nil && color == Paleta.error ? Paleta.errorTexto : Color.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .modifier(Seleccionable(activo: seleccionable))
         }
-        .font(.caption)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
+        .font(Tipo.nota)
+        .padding(.horizontal, Espacio.m)
+        .padding(.vertical, Espacio.s)
     }
 }
 
@@ -564,8 +568,9 @@ private struct NotaConAccion: View {
     let alPulsar: () -> Void
 
     var body: some View {
-        HStack(alignment: .center, spacing: 7) {
+        HStack(alignment: .center, spacing: Espacio.l) {
             Image(systemName: simbolo).foregroundStyle(color)
+                .frame(width: Tamano.circuloEstado)
             Text(texto)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -574,13 +579,13 @@ private struct NotaConAccion: View {
                 ProgressView().controlSize(.mini)
             } else {
                 Button(accion, action: alPulsar)
-                    .buttonStyle(.bordered)
+                    .estiloBoton(.secundario)
                     .controlSize(.small)
             }
         }
-        .font(.caption)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 4)
+        .font(Tipo.nota)
+        .padding(.horizontal, Espacio.m)
+        .padding(.vertical, Espacio.xs)
     }
 }
 
@@ -591,17 +596,17 @@ private struct AvisosChequeo: View {
 
     var body: some View {
         if chequeo.llaveroPendiente {
-            NotaConAccion(simbolo: "key.fill", color: .orange,
+            NotaConAccion(simbolo: "key.fill", color: Paleta.aviso,
                           texto: chequeo.firmaEstable
                             ? "Nuvex cambió de firma. Pruébalo ahora y elige «Permitir siempre» para que el Llavero no vuelva a preguntar."
                             : "Esta compilación no tiene firma estable: macOS pedirá acceso al Llavero tras cada actualización.",
                           accion: "Probar", ocupado: chequeo.probandoLlavero) { chequeo.probarLlavero(modelo) }
             if let error = chequeo.errorLlavero {
-                Nota(simbolo: "exclamationmark.circle.fill", color: .red, texto: error, seleccionable: true)
+                Nota(simbolo: "exclamationmark.circle.fill", color: Paleta.error, texto: error, seleccionable: true)
             }
         }
         if let version = chequeo.novedades {
-            NotaConAccion(simbolo: "sparkles", color: .accentColor,
+            NotaConAccion(simbolo: "sparkles", color: Paleta.acento,
                           texto: "Nuvex se actualizó a la versión \(version).", accion: "Novedades") {
                 VentanaNovedades.mostrar(version: version)
                 chequeo.novedadesVistas()
@@ -615,12 +620,12 @@ private struct AvisoActualizacion: View {
 
     var body: some View {
         if actualizaciones.requiereAtencion {
-            NotaConAccion(simbolo: "exclamationmark.triangle.fill", color: .orange,
+            NotaConAccion(simbolo: "exclamationmark.triangle.fill", color: Paleta.aviso,
                           texto: "La última actualización necesita atención.", accion: "Revisar") {
                 actualizaciones.mostrar()
             }
         } else if let version = actualizaciones.disponible {
-            NotaConAccion(simbolo: "arrow.down.circle.fill", color: .accentColor,
+            NotaConAccion(simbolo: "arrow.down.circle.fill", color: Paleta.acento,
                           texto: "Nuvex \(version) está disponible.", accion: "Ver") {
                 actualizaciones.mostrar()
             }

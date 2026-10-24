@@ -155,32 +155,35 @@ struct NovedadesView: View {
     let cerrar: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            VStack(spacing: 8) {
-                IconoNuvex(lado: 72)
-                Text("Novedades de Nuvex \(version)")
-                    .font(.title2).fontWeight(.bold)
-                Text("Nuvex se actualizó correctamente. Tus conexiones y ajustes siguen igual.")
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.horizontal, 32)
-            .padding(.top, 36)
-            .padding(.bottom, 18)
-            Divider()
-            ScrollView {
+        // Sin separadores: la cabecera se desplaza con las notas y el botón va
+        // en la barra de acciones del sistema, sobre la que el texto se funde.
+        ScrollView {
+            VStack(spacing: Espacio.xxl) {
+                VStack(spacing: Espacio.m) {
+                    IconoNuvex(lado: Tamano.logoPantalla)
+                        .padding(.bottom, Espacio.xs)
+                    Text("Novedades de Nuvex \(version)")
+                        .font(Tipo.pantalla)
+                    Text("Nuvex se actualizó correctamente. Tus conexiones y ajustes siguen igual.")
+                        .font(Tipo.entradilla)
+                        .foregroundStyle(Paleta.textoSecundario)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 NotasVersion(texto: notas.isEmpty ? "Mejoras de estabilidad y rendimiento." : notas)
-                    .padding(.horizontal, 32)
-                    .padding(.vertical, 18)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            Divider()
+            .padding(.horizontal, Espacio.pantalla)
+            .padding(.top, Espacio.pantalla)
+            .padding(.bottom, Espacio.xxl)
+        }
+        .barraAcciones {
             Button("Continuar", action: cerrar)
-                .buttonStyle(.borderedProminent)
+                .estiloBoton(.principal)
                 .controlSize(.large)
                 .keyboardShortcut(.defaultAction)
-                .padding(18)
         }
         .frame(width: 480, height: 540)
+        .fondoVentana()
     }
 }

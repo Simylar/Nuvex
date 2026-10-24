@@ -15,24 +15,24 @@ struct AjustesCuentaGoogle: View {
     var body: some View {
         Form {
             Section {
-                HStack(spacing: 12) {
-                    IconoCuadrado(simbolo: "envelope.fill", color: .red, lado: 40)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(titulo).font(.title3).fontWeight(.semibold)
-                        Text(subtitulo).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: Espacio.l) {
+                    IconoCuadrado(simbolo: "envelope.fill", color: Paleta.iconoCorreo, lado: Tamano.iconoCabecera)
+                    VStack(alignment: .leading, spacing: Espacio.xxs) {
+                        Text(titulo).font(Tipo.titulo)
+                        Text(subtitulo).foregroundStyle(Paleta.textoSecundario).fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 8)
                     accionPrincipal
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, Espacio.xs)
                 if let error = cuenta.error {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red).textSelection(.enabled)
+                        .foregroundStyle(Paleta.errorTexto).textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             } footer: {
                 Text("Nuvex solo pide permiso para leer Gmail: no puede enviar, mover ni borrar correos. Busca únicamente los correos del remitente que indiques en cada conexión, recibidos después de empezar a conectar.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Paleta.textoSecundario)
             }
 
             if cuenta.estado == .sinCliente || cambiandoCliente {
@@ -48,30 +48,31 @@ struct AjustesCuentaGoogle: View {
                                 clienteID = ""; secreto = ""; cambiandoCliente = false
                             }
                         }
-                        .buttonStyle(.borderedProminent)
+                        .estiloBoton(.principal)
                         .disabled(clienteID.isEmpty || secreto.isEmpty)
                     }
                 } header: {
                     Text("Cliente OAuth de Google")
                 } footer: {
                     Text("Créalo una vez en Google Cloud como «App de escritorio» y publica el proyecto para uso personal; si queda en modo de prueba, Google pide volver a iniciar sesión cada 7 días. El aviso «Google no verificó esta app» es normal en un cliente propio.")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Paleta.textoSecundario)
                 }
             } else {
                 Section("Cliente OAuth") {
                     LabeledContent("ID de cliente") {
-                        Text(cuenta.clienteID ?? "").font(.caption.monospaced()).lineLimit(1).truncationMode(.middle)
+                        Text(cuenta.clienteID ?? "").font(Tipo.monoNota).lineLimit(1).truncationMode(.middle)
                             .textSelection(.enabled)
                     }
                     HStack {
                         Button("Cambiar cliente…") { cambiandoCliente = true }
                         Spacer()
                         Button("Olvidar cuenta y cliente…", role: .destructive) { confirmarOlvido = true }
+                            .estiloBoton(.destructivo)
                     }
                 }
             }
         }
-        .formStyle(.grouped)
+        .formularioNuvex()
         .navigationTitle("Cuenta de Google")
         .confirmationDialog("¿Olvidar la cuenta de Google?", isPresented: $confirmarOlvido) {
             Button("Olvidar", role: .destructive) { Task { await cuenta.olvidarCliente() } }
@@ -107,9 +108,9 @@ struct AjustesCuentaGoogle: View {
             EmptyView()
         case .desconectada, .caducada:
             Button("Iniciar sesión con Google") { cuenta.iniciarSesion() }
-                .buttonStyle(.borderedProminent)
+                .estiloBoton(.principal)
         case .esperandoNavegador:
-            HStack(spacing: 8) {
+            HStack(spacing: Espacio.m) {
                 ProgressView().controlSize(.small)
                 Button("Cancelar") { cuenta.cancelarInicio() }
             }
@@ -166,7 +167,7 @@ struct SeccionCodigoCorreo: View {
                 TextField("Remitente", text: campo(\.remitente), prompt: Text("noreply@empresa.com"))
                 if config.remitente.trimmingCharacters(in: .whitespaces).isEmpty {
                     Label("Indica quién envía el código; Nuvex solo busca sus correos.", systemImage: "exclamationmark.triangle.fill")
-                        .font(.callout).foregroundStyle(.orange)
+                        .font(Tipo.apoyo).foregroundStyle(Paleta.avisoTexto)
                 }
                 TextField("Asunto contiene", text: campo(\.asunto), prompt: Text("Opcional"))
                 if config.remitente != ConfigCorreo.fortinet.remitente || config.asunto != ConfigCorreo.fortinet.asunto {
@@ -180,17 +181,17 @@ struct SeccionCodigoCorreo: View {
                 }
                 DisclosureGroup("Patrón avanzado") {
                     TextField("Expresión regular", text: campo(\.patron), prompt: Text(#"Opcional, p. ej. Código: (\d{6})"#))
-                        .font(.body.monospaced())
+                        .font(Tipo.mono)
                     if !ExtractorCodigo.patronValido(config.patron) {
                         Label("La expresión regular no es válida.", systemImage: "exclamationmark.triangle.fill")
-                            .font(.callout).foregroundStyle(.red)
+                            .font(Tipo.apoyo).foregroundStyle(Paleta.errorTexto)
                     }
                 }
                 HStack {
                     Button("Probar con el último correo") { probar(config) }
                         .disabled(probando || cuenta.correo == nil || config.remitente.isEmpty)
                     if probando { ProgressView().controlSize(.small) }
-                    if let prueba { Text(prueba).font(.callout).foregroundStyle(.secondary).textSelection(.enabled) }
+                    if let prueba { Text(prueba).font(Tipo.apoyo).foregroundStyle(Paleta.textoSecundario).textSelection(.enabled) }
                 }
             }
         } header: {
@@ -201,7 +202,7 @@ struct SeccionCodigoCorreo: View {
                  : config == nil
                     ? "Si el servidor pide un código, Nuvex te lo preguntará al conectar."
                     : "Al conectar, Nuvex buscará en \(cuenta.correo ?? "Gmail") el correo del remitente y usará el código; si no llega a tiempo, te lo pedirá. Se guarda al momento.")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Paleta.textoSecundario)
         }
     }
 

@@ -193,7 +193,7 @@ struct AjustesAutomatizacion: View {
     var body: some View {
         Form {
             if let aviso = preferencias.soloLectura {
-                Section { Label(aviso, systemImage: "lock.fill").foregroundStyle(.orange) }
+                Section { Label(aviso, systemImage: "lock.fill").foregroundStyle(Paleta.avisoTexto) }
             }
             Section {
                 Picker("Terminal y asistentes", selection: politica) {
@@ -206,13 +206,13 @@ struct AjustesAutomatizacion: View {
                     set: { valor in modificarPreferencias { $0.avisarAccionesAsistentes = valor } }))
                 if let errorPreferencias {
                     Label(errorPreferencias, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
+                        .foregroundStyle(Paleta.errorTexto)
                 }
             } header: {
                 Text("Permisos")
             } footer: {
                 Text("Con «Conectar sin preguntar», Claude Code o Codex pueden conectar tus VPN aunque no estés frente a la Mac. Consultar el estado siempre está permitido y no muestra servidores, usuarios ni contraseñas.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Paleta.textoSecundario)
             }
             .disabled(preferencias.soloLectura != nil)
 
@@ -249,16 +249,16 @@ struct AjustesAutomatizacion: View {
                         EmptyView()
                     }
                 } label: {
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: Espacio.xxs) {
                         Text("Comando nuvex")
-                        Text(descripcion(estadoComando)).font(.caption).foregroundStyle(.secondary)
+                        Text(descripcion(estadoComando)).font(Tipo.nota).foregroundStyle(Paleta.textoSecundario)
                     }
                 }
             } header: {
                 Text("Terminal")
             } footer: {
                 Text("Crea ~/.local/bin/nuvex. Si tu Terminal no lo encuentra, añade ~/.local/bin a tu PATH.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Paleta.textoSecundario)
             }
 
             Section {
@@ -271,20 +271,20 @@ struct AjustesAutomatizacion: View {
                         case .sinHerramienta, .ajena: EmptyView()
                         }
                     } label: {
-                        VStack(alignment: .leading, spacing: 2) {
+                        VStack(alignment: .leading, spacing: Espacio.xxs) {
                             Text(destino.nombre)
-                            Text(descripcion(estados[destino.id] ?? .ausente, destino)).font(.caption).foregroundStyle(.secondary)
+                            Text(descripcion(estados[destino.id] ?? .ausente, destino)).font(Tipo.nota).foregroundStyle(Paleta.textoSecundario)
                         }
                     }
                 }
                 if let error {
-                    Text(error).foregroundStyle(.red).textSelection(.enabled)
+                    Text(error).foregroundStyle(Paleta.errorTexto).textSelection(.enabled)
                 }
             } header: {
                 Text("Habilidad para asistentes")
             } footer: {
                 Text("Enseña a Claude Code y a Codex cuándo y cómo usar nuvex, por ejemplo al pedirles «conéctame a la VPN de la oficina». Si la VPN pide un código, te lo preguntarán en el chat o Nuvex lo leerá del correo.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Paleta.textoSecundario)
             }
 
             Section {
@@ -296,13 +296,13 @@ struct AjustesAutomatizacion: View {
                 if let comprobaciones {
                     ForEach(Array(comprobaciones.enumerated()), id: \.offset) { _, comprobacion in
                         Label {
-                            VStack(alignment: .leading, spacing: 2) {
+                            VStack(alignment: .leading, spacing: Espacio.xxs) {
                                 Text(comprobacion.nombre)
-                                Text(comprobacion.detalle).font(.caption).foregroundStyle(.secondary)
+                                Text(comprobacion.detalle).font(Tipo.nota).foregroundStyle(Paleta.textoSecundario)
                             }
                         } icon: {
                             Image(systemName: comprobacion.ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                                .foregroundStyle(comprobacion.ok ? .green : .orange)
+                                .foregroundStyle(comprobacion.ok ? Paleta.exito : Paleta.aviso)
                         }
                     }
                 }
@@ -310,26 +310,20 @@ struct AjustesAutomatizacion: View {
                 Text("Diagnóstico")
             } footer: {
                 Text("Comprueba localmente permisos, ayudante, Llavero, conexiones, comando y habilidades. No intenta conectar ninguna VPN.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Paleta.textoSecundario)
             }
 
             Section("Ejemplos") {
                 ForEach(["nuvex estado", "nuvex conectar oficina", "nuvex desconectar --todas", "nuvex diagnostico"], id: \.self) { ejemplo in
                     HStack {
-                        Text(ejemplo).font(.body.monospaced()).textSelection(.enabled)
+                        Text(ejemplo).font(Tipo.mono).textSelection(.enabled)
                         Spacer()
-                        Button {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(ejemplo, forType: .string)
-                        } label: { Image(systemName: "doc.on.doc") }
-                        .buttonStyle(.borderless)
-                        .help("Copiar")
-                        .accessibilityLabel("Copiar \(ejemplo)")
+                        BotonCopiar(texto: ejemplo, etiqueta: "Copiar \(ejemplo)")
                     }
                 }
             }
         }
-        .formStyle(.grouped)
+        .formularioNuvex()
         .navigationTitle("Automatización")
         .onAppear(perform: refrescar)
     }

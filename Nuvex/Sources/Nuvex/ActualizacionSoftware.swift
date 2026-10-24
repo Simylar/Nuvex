@@ -24,17 +24,17 @@ struct ActualizacionSoftwareView: View {
 
     var body: some View {
         Form {
-            Section { tarjeta.padding(.vertical, 6) }
+            Section { tarjeta.padding(.vertical, Espacio.s) }
             if let verificacion = actualizaciones.verificacionInicial,
                actualizaciones.estado != .error(verificacion.mensaje) {
                 Section("Última instalación") {
                     switch verificacion {
                     case .verificada:
                         etiquetaVerificacion(verificacion.mensaje,
-                                             simbolo: "checkmark.seal.fill", color: .green)
+                                             simbolo: "checkmark.seal.fill", color: Paleta.exito)
                     case .incompleta:
                         etiquetaVerificacion(verificacion.mensaje,
-                                             simbolo: "exclamationmark.triangle.fill", color: .orange)
+                                             simbolo: "exclamationmark.triangle.fill", color: Paleta.aviso)
                     }
                 }
             }
@@ -42,7 +42,7 @@ struct ActualizacionSoftwareView: View {
             if let version = actualizaciones.estado.version, !version.notas.isEmpty {
                 Section("Novedades de Nuvex \(version.version)") {
                     NotasVersion(texto: version.notas)
-                        .padding(.vertical, 4)
+                        .padding(.vertical, Espacio.xs)
                 }
             }
             if actualizaciones.configuradas {
@@ -61,12 +61,12 @@ struct ActualizacionSoftwareView: View {
                     Text("Actualizaciones automáticas")
                 } footer: {
                     Text("Cada versión va firmada y se verifica antes de instalarse. Tus conexiones, contraseñas y ajustes se conservan, y las VPN activas siguen conectadas mientras Nuvex se actualiza.")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Paleta.textoSecundario)
                 }
             }
         }
-        .formStyle(.grouped)
-        .animation(.snappy(duration: 0.25), value: actualizaciones.estado)
+        .formularioNuvex()
+        .animacion(Movimiento.estandar, value: actualizaciones.estado)
         .onAppear { actualizaciones.pantallaAparecio() }
         .onDisappear { actualizaciones.pantallaDesaparecio() }
     }
@@ -84,7 +84,7 @@ struct ActualizacionSoftwareView: View {
             if let notas = notasInstaladas, !notas.isEmpty {
                 DisclosureGroup("Detalles de esta versión") {
                     NotasVersion(texto: notas)
-                        .padding(.top, 8)
+                        .padding(.top, Espacio.m)
                 }
             }
         }
@@ -98,7 +98,7 @@ struct ActualizacionSoftwareView: View {
             centrado(titulo: "Nuvex \(instalada.descripcion)",
                      detalle: "Esta compilación se hizo antes de activar las actualizaciones automáticas. Instala la versión publicada una vez y, desde ahí, Nuvex se actualizará sola.") {
                 Link("Ver versiones publicadas", destination: URL(string: "https://github.com/Simylar/Nuvex/releases/latest")!)
-                    .padding(.top, 6)
+                    .padding(.top, Espacio.s)
             }
         } else {
             switch actualizaciones.estado {
@@ -108,36 +108,39 @@ struct ActualizacionSoftwareView: View {
                             ? "Nuvex está actualizado"
                             : ultimaBusqueda ?? "Aún no se ha buscado") {
                     if actualizaciones.estado == .alDia, let ultimaBusqueda {
-                        Text(ultimaBusqueda).font(.caption).foregroundStyle(.secondary)
+                        Text(ultimaBusqueda).font(Tipo.nota).foregroundStyle(Paleta.textoSecundario)
                     }
                     Button("Buscar actualizaciones") { actualizaciones.buscar() }
+                        .estiloBoton(.secundario)
                         .disabled(!actualizaciones.puedeBuscar)
-                        .padding(.top, 6)
+                        .padding(.top, Espacio.s)
                 }
             case .buscando:
-                VStack(spacing: 10) {
+                VStack(spacing: Espacio.m) {
                     ProgressView().controlSize(.regular)
-                    Text("Buscando actualizaciones…").foregroundStyle(.secondary)
+                    Text("Buscando actualizaciones…").foregroundStyle(Paleta.textoSecundario)
                     Button("Cancelar") { actualizaciones.cancelar() }
-                        .padding(.top, 4)
+                        .estiloBoton(.secundario)
+                        .padding(.top, Espacio.xs)
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 24)
+                .padding(.vertical, Espacio.xxxl)
             case .error(let mensaje):
                 centrado(titulo: "No se pudo actualizar", detalle: mensaje, simbolo: "exclamationmark.triangle.fill") {
                     HStack {
                         if actualizaciones.puedeBuscar {
                             Button("Buscar de nuevo") { actualizaciones.buscar() }
+                                .estiloBoton(.secundario)
                         }
                         Link("Ver versiones publicadas", destination: URL(string: "https://github.com/Simylar/Nuvex/releases/latest")!)
                     }
-                    .padding(.top, 6)
+                    .padding(.top, Espacio.s)
                 }
             case .disponible(let version):
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: Espacio.l) {
                     cabecera(version)
                     Text("Tus VPN seguirán conectadas mientras se instala. Nuvex se cerrará y se abrirá de nuevo en unos segundos.")
-                        .font(.callout).foregroundStyle(.secondary)
+                        .font(Tipo.apoyo).foregroundStyle(Paleta.textoSecundario)
                         .fixedSize(horizontal: false, vertical: true)
                     HStack {
                         Menu("Más tarde") {
@@ -150,68 +153,70 @@ struct ActualizacionSoftwareView: View {
                         .fixedSize()
                         Spacer()
                         Button("Actualizar ahora") { actualizaciones.actualizarAhora() }
-                            .buttonStyle(.borderedProminent)
+                            .estiloBoton(.principal)
                             .controlSize(.large)
                             .keyboardShortcut(.defaultAction)
                     }
                 }
             case .descargando(let version, let recibido, let total):
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: Espacio.l) {
                     cabecera(version)
                     progreso(valor: total.map { Double(recibido) / Double(max($0, 1)) },
                              texto: total.map { "Descargando… \(bytes(recibido)) de \(bytes($0))" } ?? "Descargando… \(bytes(recibido))")
                     HStack {
                         Spacer()
                         Button("Cancelar") { actualizaciones.cancelar() }
+                            .estiloBoton(.secundario)
                     }
                 }
             case .preparando(let version, let avance):
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: Espacio.l) {
                     cabecera(version)
                     progreso(valor: avance, texto: "Verificando la firma y preparando la actualización…")
                 }
             case .lista(let version):
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: Espacio.l) {
                     cabecera(version)
                     Label("Lista para instalar", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
+                        .foregroundStyle(Paleta.exitoTexto)
                     Text("Nuvex se cerrará y se abrirá de nuevo en unos segundos. Tus VPN seguirán conectadas.")
-                        .font(.callout).foregroundStyle(.secondary)
+                        .font(Tipo.apoyo).foregroundStyle(Paleta.textoSecundario)
                         .fixedSize(horizontal: false, vertical: true)
                     HStack {
                         Button("Al cerrar Nuvex") { actualizaciones.instalarAlCerrar() }
+                            .estiloBoton(.secundario)
                         Spacer()
                         Button("Reiniciar ahora") { actualizaciones.actualizarAhora() }
-                            .buttonStyle(.borderedProminent)
+                            .estiloBoton(.principal)
                             .controlSize(.large)
                             .keyboardShortcut(.defaultAction)
                     }
                 }
             case .programada(let version):
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: Espacio.l) {
                     cabecera(version)
                     Label("Se instalará al cerrar Nuvex", systemImage: "clock.fill")
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(Paleta.infoTexto)
                     Text("La descarga ya está verificada. Puedes seguir usando Nuvex o instalarla ahora.")
-                        .font(.callout).foregroundStyle(.secondary)
+                        .font(Tipo.apoyo).foregroundStyle(Paleta.textoSecundario)
                         .fixedSize(horizontal: false, vertical: true)
                     HStack {
                         Spacer()
                         Button("Instalar ahora") { actualizaciones.actualizarAhora() }
-                            .buttonStyle(.borderedProminent)
+                            .estiloBoton(.principal)
                             .controlSize(.large)
                     }
                 }
             case .esperando(let version, let detalle):
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: Espacio.l) {
                     cabecera(version)
                     progreso(valor: nil, texto: detalle)
                     Text("Nuvex continuará automáticamente en cuanto sea seguro reiniciar la aplicación. Las VPN ya conectadas no se interrumpirán.")
-                        .font(.callout).foregroundStyle(.secondary)
+                        .font(Tipo.apoyo).foregroundStyle(Paleta.textoSecundario)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             case .instalando(let version):
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: Espacio.l) {
                     cabecera(version)
                     progreso(valor: nil, texto: "Instalando… Nuvex se abrirá de nuevo en unos segundos.")
                 }
@@ -225,17 +230,17 @@ struct ActualizacionSoftwareView: View {
     }
 
     private func cabecera(_ version: VersionDisponible) -> some View {
-        HStack(spacing: 14) {
-            IconoNuvex(lado: 56)
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text("Nuvex \(version.version)").font(.title3).fontWeight(.semibold)
-                    if version.esBeta { Etiqueta(texto: "Beta", color: .orange) }
-                    if version.esCritica { Etiqueta(texto: "Importante", color: .red) }
+        HStack(spacing: Espacio.l) {
+            IconoNuvex(lado: Tamano.logoTarjeta)
+            VStack(alignment: .leading, spacing: Espacio.xxs) {
+                HStack(spacing: Espacio.s) {
+                    Text("Nuvex \(version.version)").font(Tipo.titulo)
+                    if version.esBeta { Pastilla(texto: "Beta", color: Paleta.aviso) }
+                    if version.esCritica { Pastilla(texto: "Importante", color: Paleta.error) }
                 }
                 Text(metadatos(version))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .font(Tipo.apoyo)
+                    .foregroundStyle(Paleta.textoSecundario)
             }
             Spacer(minLength: 0)
         }
@@ -265,7 +270,7 @@ struct ActualizacionSoftwareView: View {
     }
 
     private func progreso(valor: Double?, texto: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Espacio.s) {
             if let valor {
                 ProgressView(value: min(max(valor, 0), 1))
                     .accessibilityLabel(Text(texto))
@@ -273,46 +278,34 @@ struct ActualizacionSoftwareView: View {
                 ProgressView().progressViewStyle(.linear)
                     .accessibilityLabel(Text(texto))
             }
-            Text(texto).font(.callout).foregroundStyle(.secondary).monospacedDigit()
+            Text(texto).font(Tipo.apoyo).foregroundStyle(Paleta.textoSecundario).monospacedDigit()
                 .accessibilityHidden(true)
         }
     }
 
     private func centrado<Contenido: View>(titulo: String, detalle: String, simbolo: String? = nil,
                                            @ViewBuilder contenido: () -> Contenido) -> some View {
-        VStack(spacing: 8) {
+        VStack(spacing: Espacio.m) {
             if let simbolo {
-                Image(systemName: simbolo).font(.system(size: 40)).foregroundStyle(.orange)
+                Image(systemName: simbolo).font(.system(size: Tamano.simboloDestacado)).foregroundStyle(Paleta.aviso)
+                    .symbolRenderingMode(.hierarchical)
                     .accessibilityHidden(true)
             } else {
-                IconoNuvex(lado: 72)
+                IconoNuvex(lado: Tamano.logoPantalla)
             }
-            Text(titulo).font(.title3).fontWeight(.semibold)
+            Text(titulo).font(Tipo.titulo)
             Text(detalle)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Paleta.textoSecundario)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
             contenido()
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 10)
+        .padding(.vertical, Espacio.m)
     }
 
     private func bytes(_ valor: UInt64) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(valor), countStyle: .file)
-    }
-}
-
-private struct Etiqueta: View {
-    let texto: String
-    let color: Color
-    var body: some View {
-        Text(texto)
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(color)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(color.opacity(0.14), in: Capsule())
     }
 }
 
@@ -321,7 +314,7 @@ struct NotasVersion: View {
     let texto: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Espacio.s) {
             ForEach(Array(texto.components(separatedBy: "\n").enumerated()), id: \.offset) { indice, linea in
                 fila(linea, primera: indice == 0)
             }
@@ -334,10 +327,10 @@ struct NotasVersion: View {
     private func fila(_ linea: String, primera: Bool) -> some View {
         let limpia = linea.trimmingCharacters(in: .whitespaces)
         if limpia.hasPrefix("### ") {
-            Text(limpia.dropFirst(4)).font(.headline).padding(.top, primera ? 0 : 8)
+            Text(limpia.dropFirst(4)).font(Tipo.encabezado).padding(.top, primera ? 0 : Espacio.m)
         } else if limpia.hasPrefix("- ") || limpia.hasPrefix("* ") {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("•").foregroundStyle(.secondary)
+            HStack(alignment: .firstTextBaseline, spacing: Espacio.m) {
+                Text("•").foregroundStyle(Paleta.textoSecundario)
                 Text(Self.markdown(String(limpia.dropFirst(2))))
                     .fixedSize(horizontal: false, vertical: true)
             }

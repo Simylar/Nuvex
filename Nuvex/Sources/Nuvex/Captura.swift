@@ -10,6 +10,7 @@ enum Captura {
     static func ejecutar(en carpeta: String) {
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.accessory)
+        Diseno.vidrioDelSistema = false
         let modelo = VPNModel(muestra: ())
         let borradores = BorradoresAjustes()
         borradores.sincronizar(con: modelo.profiles)
@@ -21,6 +22,13 @@ enum Captura {
             borradores.seleccion = .conexion("oficina")
             guardar(ConfigurationView(modelo: modelo, borradores: borradores).frame(width: 820, height: 640),
                     nombre: "ajustes-conexion-\(sufijo)", en: carpeta, oscuro: oscuro)
+            // Tamaño mínimo y ventana amplia: la composición debe sostenerse en ambos.
+            guardar(ConfigurationView(modelo: modelo, borradores: borradores).frame(width: 780, height: 580),
+                    nombre: "ajustes-conexion-minimo-\(sufijo)", en: carpeta, oscuro: oscuro)
+            guardar(ConfigurationView(modelo: modelo, borradores: borradores).frame(width: 1180, height: 820),
+                    nombre: "ajustes-conexion-amplio-\(sufijo)", en: carpeta, oscuro: oscuro)
+            guardar(BienvenidaView(modelo: modelo, cerrar: {}).background(.background),
+                    nombre: "bienvenida-\(sufijo)", en: carpeta, oscuro: oscuro)
         }
         let modeloAtencion = VPNModel(muestra: ())
         modeloAtencion.usarActualizacionesDeMuestra(Actualizaciones(
@@ -50,8 +58,6 @@ enum Captura {
         borradores.seleccion = .ayudante
         guardar(ConfigurationView(modelo: modelo, borradores: borradores).frame(width: 820, height: 640),
                 nombre: "ajustes-ayudante-claro", en: carpeta, oscuro: false)
-        guardar(BienvenidaView(modelo: modelo, cerrar: {}).background(.background),
-                nombre: "bienvenida-claro", en: carpeta, oscuro: false)
         let notas = """
         ### Mejoras
         - Instalación más clara y confiable.
@@ -140,11 +146,16 @@ enum Captura {
                 nombre: "exportar-claro", en: carpeta, oscuro: false)
         for oscuro in [false, true] {
             guardar(HojaIconos(), nombre: "iconos-barra-\(oscuro ? "oscuro" : "claro")", en: carpeta, oscuro: oscuro)
+            guardar(GuiaEstiloView(desplazable: false), nombre: "guia-estilo-\(oscuro ? "oscuro" : "claro")",
+                    en: carpeta, oscuro: oscuro)
         }
     }
 
     private static func guardar<V: View>(_ vista: V, nombre: String, en carpeta: String, oscuro: Bool) {
-        let host = NSHostingView(rootView: vista.id(nombre))
+        // Como una ventana activa: los controles con tinte, las barras de
+        // progreso y la selección se dibujan como en uso, no atenuados. No se
+        // activa la app de verdad para no quitar el foco a quien la ejecuta.
+        let host = NSHostingView(rootView: vista.environment(\.controlActiveState, .key).id(nombre))
         host.appearance = NSAppearance(named: oscuro ? .darkAqua : .aqua)
         host.frame = NSRect(origin: .zero, size: host.fittingSize)
         let ventana = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)

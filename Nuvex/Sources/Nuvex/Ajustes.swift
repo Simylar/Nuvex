@@ -82,33 +82,6 @@ final class BorradoresAjustes: ObservableObject {
     }
 }
 
-// MARK: - Piezas comunes
-
-struct IconoCuadrado: View {
-    let simbolo: String
-    let color: Color
-    var lado: CGFloat = 22
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: lado * 0.24, style: .continuous)
-            .fill(color.gradient)
-            .frame(width: lado, height: lado)
-            .overlay {
-                Image(systemName: simbolo)
-                    .font(.system(size: lado * 0.5, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-            .accessibilityHidden(true)
-    }
-}
-
-enum ColorConexion {
-    private static let paleta: [Color] = [.blue, .teal, .indigo, .purple, .pink, .orange, .green, .cyan, .mint, .brown]
-    static func para(_ id: String) -> Color {
-        paleta[id.unicodeScalars.reduce(0) { $0 + Int($1.value) } % paleta.count]
-    }
-}
-
 // MARK: - Ventana de Ajustes
 
 struct ConfigurationView: View {
@@ -205,15 +178,20 @@ struct ConfigurationView: View {
 
     private var barraLateral: some View {
         List(selection: $borradores.seleccion) {
-            Label { Text("General") } icon: { IconoCuadrado(simbolo: "gearshape.fill", color: .gray) }
+            Label { Text("General") } icon: { IconoCuadrado(simbolo: "gearshape.fill", color: Paleta.neutro) }
+                .foregroundStyle(colorTextoLateral(.general))
                 .tag(PaginaAjustes.general)
-            FilaActualizacionLateral(actualizaciones: modelo.actualizaciones)
+            FilaActualizacionLateral(actualizaciones: modelo.actualizaciones,
+                                     seleccionada: borradores.seleccion == .actualizacion)
                 .tag(PaginaAjustes.actualizacion)
-            Label { Text("Ayudante de red") } icon: { IconoCuadrado(simbolo: "shield.lefthalf.filled", color: .indigo) }
+            Label { Text("Ayudante de red") } icon: { IconoCuadrado(simbolo: "shield.lefthalf.filled", color: Paleta.iconoAyudante) }
+                .foregroundStyle(colorTextoLateral(.ayudante))
                 .tag(PaginaAjustes.ayudante)
-            Label { Text("Automatización") } icon: { IconoCuadrado(simbolo: "terminal.fill", color: Color(white: 0.25)) }
+            Label { Text("Automatización") } icon: { IconoCuadrado(simbolo: "terminal.fill", color: Paleta.grafito) }
+                .foregroundStyle(colorTextoLateral(.automatizacion))
                 .tag(PaginaAjustes.automatizacion)
-            Label { Text("Cuenta de Google") } icon: { IconoCuadrado(simbolo: "envelope.fill", color: .red) }
+            Label { Text("Cuenta de Google") } icon: { IconoCuadrado(simbolo: "envelope.fill", color: Paleta.iconoCorreo) }
+                .foregroundStyle(colorTextoLateral(.cuentaGoogle))
                 .tag(PaginaAjustes.cuentaGoogle)
             Section("Conexiones") {
                 ForEach(borradores.drafts) { perfil in
@@ -225,47 +203,54 @@ struct ConfigurationView: View {
         }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(spacing: 0) {
-                Divider()
-                HStack(spacing: 2) {
-                    Button { borradores.nuevaConexion() } label: {
-                        Image(systemName: "plus").frame(width: 22, height: 20)
-                    }
-                    .help("Añadir conexión")
-                    .accessibilityLabel("Añadir conexión")
-                    .disabled(borradores.drafts.count >= 64 || busy)
-                    Button {
-                        if case .conexion(let id) = borradores.seleccion { pendingDeletion = id }
-                    } label: {
-                        Image(systemName: "minus").frame(width: 22, height: 20)
-                    }
-                    .help(modelo.hayAlgunaConectada ? "Desconecta las VPN activas para eliminar conexiones" : "Eliminar conexión")
-                    .accessibilityLabel("Eliminar conexión")
-                    .disabled({
-                        guard case .conexion(let id) = borradores.seleccion else { return true }
-                        return !puedeEliminar(id)
-                    }())
-                    Spacer()
-                    Menu {
-                        Button("Exportar conexiones…") { VentanaExportar.mostrar(modelo: modelo) }
-                            .disabled(modelo.profiles.isEmpty)
-                        Button("Importar conexiones…") { VentanaImportar.mostrar(modelo: modelo) }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                    }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                    .help("Exportar o importar conexiones")
+            HStack(spacing: Espacio.xxs) {
+                Button { borradores.nuevaConexion() } label: {
+                    Image(systemName: "plus").frame(width: 24, height: 22).contentShape(Rectangle())
                 }
-                .buttonStyle(.borderless)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
+                .help("Añadir conexión")
+                .accessibilityLabel("Añadir conexión")
+                .disabled(borradores.drafts.count >= 64 || busy)
+                Button {
+                    if case .conexion(let id) = borradores.seleccion { pendingDeletion = id }
+                } label: {
+                    Image(systemName: "minus").frame(width: 24, height: 22).contentShape(Rectangle())
+                }
+                .help(modelo.hayAlgunaConectada ? "Desconecta las VPN activas para eliminar conexiones" : "Eliminar conexión")
+                .accessibilityLabel("Eliminar conexión")
+                .disabled({
+                    guard case .conexion(let id) = borradores.seleccion else { return true }
+                    return !puedeEliminar(id)
+                }())
+                Spacer()
+                Menu {
+                    Button("Exportar conexiones…") { VentanaExportar.mostrar(modelo: modelo) }
+                        .disabled(modelo.profiles.isEmpty)
+                    Button("Importar conexiones…") { VentanaImportar.mostrar(modelo: modelo) }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Exportar o importar conexiones")
+                .accessibilityLabel("Exportar o importar conexiones")
             }
+            .buttonStyle(.borderless)
+            .padding(.horizontal, Espacio.m)
+            .padding(.vertical, Espacio.s)
         }
     }
 
+    /// Las etiquetas dibujadas a medida no heredan siempre el color de texto
+    /// de la selección de una barra lateral (en especial al capturarla fuera
+    /// de pantalla). Se usa el color semántico de AppKit para mantener el
+    /// contraste con cualquier color de acento y estado de la ventana.
+    private func colorTextoLateral(_ pagina: PaginaAjustes) -> Color {
+        Color(nsColor: borradores.seleccion == pagina ? .alternateSelectedControlTextColor : .labelColor)
+    }
+
     private func filaLateral(_ perfil: VPNProfile) -> some View {
+        let pagina = PaginaAjustes.conexion(perfil.id)
         let cambios = borradores.tieneCambios(perfil, guardados: modelo.profiles)
         let guardado = modelo.profiles.contains { $0.id == perfil.id }
         let subtitulo: String = {
@@ -274,25 +259,30 @@ struct ConfigurationView: View {
             if !perfil.enabled { return "Oculta · " + (perfil.server.isEmpty ? "sin servidor" : perfil.server) }
             return perfil.server.isEmpty ? "Sin servidor" : perfil.server
         }()
-        return HStack(spacing: 8) {
+        return HStack(spacing: Espacio.m) {
             IconoCuadrado(simbolo: "lock.fill", color: ColorConexion.para(perfil.id))
             VStack(alignment: .leading, spacing: 0) {
                 Text(perfil.name.isEmpty ? "Nueva conexión" : perfil.name).lineLimit(1)
-                Text(subtitulo).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(subtitulo)
+                    .font(Tipo.nota)
+                    .foregroundStyle(Color(nsColor: borradores.seleccion == pagina
+                                           ? .alternateSelectedControlTextColor : .secondaryLabelColor))
+                    .lineLimit(1)
             }
-            Spacer(minLength: 4)
+            Spacer(minLength: Espacio.xs)
             if let color = colorEstado(perfil.id) {
-                Circle().fill(color).frame(width: 7, height: 7)
-                    .accessibilityLabel(color == .green ? "Conectada" : "Requiere atención")
+                Indicador(color: color)
+                    .accessibilityLabel(color == Paleta.exito ? "Conectada" : "Requiere atención")
             }
         }
+        .foregroundStyle(colorTextoLateral(pagina))
     }
 
     private func colorEstado(_ id: String) -> Color? {
         guard let vpn = modelo.vpns.first(where: { $0.id == id }) else { return nil }
-        if vpn.connected { return .green }
-        if modelo.desconexiones[id] != nil || modelo.passwordStatuses[id] == .missing || !vpn.configured { return .orange }
-        if case .error = modelo.estado(vpn) { return .red }
+        if vpn.connected { return Paleta.exito }
+        if modelo.desconexiones[id] != nil || modelo.passwordStatuses[id] == .missing || !vpn.configured { return Paleta.aviso }
+        if case .error = modelo.estado(vpn) { return Paleta.error }
         return nil
     }
 
@@ -334,7 +324,7 @@ struct ConfigurationView: View {
                 ActualizacionSoftwareView(actualizaciones: actualizaciones)
                     .navigationTitle("Actualización de software")
             } else {
-                Text("Nuvex \(InfoVersion.actual.descripcion)").foregroundStyle(.secondary)
+                Text("Nuvex \(InfoVersion.actual.descripcion)").foregroundStyle(Paleta.textoSecundario)
                     .navigationTitle("Actualización de software")
             }
         case .ayudante:
@@ -374,18 +364,18 @@ private struct AjustesGenerales: View {
         Form {
             if borradores.drafts.isEmpty {
                 Section {
-                    HStack(spacing: 12) {
+                    HStack(spacing: Espacio.l) {
                         LogoNuvex(lado: 40)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Aún no hay conexiones").font(.headline)
+                        VStack(alignment: .leading, spacing: Espacio.xxs) {
+                            Text("Aún no hay conexiones").font(Tipo.encabezado)
                             Text("Añade tu servidor Fortinet SSL VPN, tu usuario y tu contraseña.")
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Paleta.textoSecundario)
                         }
                         Spacer()
                         Button("Añadir conexión") { borradores.nuevaConexion() }
-                            .buttonStyle(.borderedProminent)
+                            .estiloBoton(.principal)
                     }
-                    .padding(.vertical, 4)
+                    .padding(.vertical, Espacio.xs)
                 }
             }
             Section("Inicio") {
@@ -403,11 +393,11 @@ private struct AjustesGenerales: View {
                     LabeledContent {
                         Button("Abrir Ajustes del Sistema…") { InicioDeSesion.abrirAjustesDelSistema() }
                     } label: {
-                        Text("macOS necesita que lo apruebes en Ítems de inicio.").foregroundStyle(.orange)
+                        Text("macOS necesita que lo apruebes en Ítems de inicio.").foregroundStyle(Paleta.avisoTexto)
                     }
                 }
                 if let errorInicio {
-                    Text(errorInicio).foregroundStyle(.red).textSelection(.enabled)
+                    Text(errorInicio).foregroundStyle(Paleta.errorTexto).textSelection(.enabled)
                 }
             }
             Section {
@@ -424,7 +414,7 @@ private struct AjustesGenerales: View {
                 Text("Avisos")
             } footer: {
                 Text("Con el estilo «Alertas», el aviso de desconexión se queda en pantalla hasta que lo cierres o pulses Reconectar.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Paleta.textoSecundario)
             }
             Section {
                 Toggle("Confirmar con Touch ID la primera vez", isOn: $confirmarConTouchID)
@@ -432,11 +422,11 @@ private struct AjustesGenerales: View {
                 Text("Seguridad")
             } footer: {
                 Text("Se pide una sola vez para todo Nuvex antes de usar una contraseña guardada. Si Touch ID no está disponible, macOS pide la contraseña del equipo.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Paleta.textoSecundario)
             }
             SeccionCopias(modelo: modelo)
         }
-        .formStyle(.grouped)
+        .formularioNuvex()
         .navigationTitle("General")
         .onAppear(perform: leerInicio)
     }
@@ -448,7 +438,7 @@ private struct EstiloAvisos: View {
 
     var body: some View {
         LabeledContent {
-            HStack(spacing: 8) {
+            HStack(spacing: Espacio.m) {
                 Button("Probar") { VPNNotifications.shared.prueba() }
                     .disabled(estilo == .desactivados)
                 if estilo != .alertas {
@@ -458,23 +448,23 @@ private struct EstiloAvisos: View {
                 }
             }
         } label: {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Espacio.xxs) {
                 Text("Estilo de los avisos")
                 switch estilo {
                 case .alertas?:
                     Label("Alertas: se quedan hasta que los cierras", systemImage: "checkmark.circle.fill")
-                        .font(.caption).foregroundStyle(.green)
+                        .font(Tipo.nota).foregroundStyle(Paleta.exitoTexto)
                 case .banners?:
                     Label("Banners: desaparecen a los pocos segundos", systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption).foregroundStyle(.orange)
+                        .font(Tipo.nota).foregroundStyle(Paleta.avisoTexto)
                 case .sinPresentacion?:
                     Label("Solo en el Centro de notificaciones", systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption).foregroundStyle(.orange)
+                        .font(Tipo.nota).foregroundStyle(Paleta.avisoTexto)
                 case .desactivados?:
                     Label("Desactivados en Ajustes del Sistema", systemImage: "xmark.octagon.fill")
-                        .font(.caption).foregroundStyle(.red)
+                        .font(Tipo.nota).foregroundStyle(Paleta.errorTexto)
                 case nil:
-                    Text("Comprobando…").font(.caption).foregroundStyle(.secondary)
+                    Text("Comprobando…").font(Tipo.nota).foregroundStyle(Paleta.textoSecundario)
                 }
             }
         }
@@ -495,10 +485,15 @@ private struct EstiloAvisos: View {
 /// Fila de la barra lateral con un globo cuando hay una versión pendiente.
 private struct FilaActualizacionLateral: View {
     let actualizaciones: Actualizaciones?
+    let seleccionada: Bool
+
+    private var colorTexto: Color {
+        Color(nsColor: seleccionada ? .alternateSelectedControlTextColor : .labelColor)
+    }
 
     var body: some View {
         if let actualizaciones {
-            Contenido(actualizaciones: actualizaciones)
+            Contenido(actualizaciones: actualizaciones, seleccionada: seleccionada)
         } else {
             etiqueta
         }
@@ -506,16 +501,24 @@ private struct FilaActualizacionLateral: View {
 
     private var etiqueta: some View {
         Label { Text("Actualización de software") } icon: {
-            IconoCuadrado(simbolo: "arrow.triangle.2.circlepath", color: .gray)
+            IconoCuadrado(simbolo: "arrow.triangle.2.circlepath", color: Paleta.neutro)
         }
+        .foregroundStyle(colorTexto)
     }
 
     private struct Contenido: View {
         @ObservedObject var actualizaciones: Actualizaciones
+        let seleccionada: Bool
+
+        private var colorTexto: Color {
+            Color(nsColor: seleccionada ? .alternateSelectedControlTextColor : .labelColor)
+        }
+
         var body: some View {
             Label { Text("Actualización de software") } icon: {
-                IconoCuadrado(simbolo: "arrow.triangle.2.circlepath", color: .gray)
+                IconoCuadrado(simbolo: "arrow.triangle.2.circlepath", color: Paleta.neutro)
             }
+            .foregroundStyle(colorTexto)
             .badge(actualizaciones.disponible == nil && !actualizaciones.requiereAtencion ? 0 : 1)
         }
     }
@@ -541,16 +544,16 @@ private struct SeccionCopias: View {
         Section {
             if copias.isEmpty {
                 Text("Aún no hay copias. Nuvex guarda una antes de cada actualización.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Paleta.textoSecundario)
             }
             ForEach(copias.prefix(5)) { copia in
                 LabeledContent {
                     Button("Restaurar…") { aRestaurar = copia }
                         .disabled(modelo.hayAlgunaConectada || modelo.guardandoConfiguracion || modelo.instalandoAyudante)
                 } label: {
-                    VStack(alignment: .leading, spacing: 1) {
+                    VStack(alignment: .leading, spacing: Espacio.xxs / 2) {
                         Text(copia.fecha.formatted(date: .abbreviated, time: .shortened))
-                        Text(descripcion(copia)).font(.caption).foregroundStyle(.secondary)
+                        Text(descripcion(copia)).font(Tipo.nota).foregroundStyle(Paleta.textoSecundario)
                     }
                 }
             }
@@ -577,13 +580,13 @@ private struct SeccionCopias: View {
                 .disabled(esMuestra || !FileManager.default.fileExists(atPath: Preferencias.directorio.path))
             }
             if let error {
-                Text(error).foregroundStyle(.red).textSelection(.enabled)
+                Text(error).foregroundStyle(Paleta.errorTexto).textSelection(.enabled)
             }
         } header: {
             Text("Copias de seguridad")
         } footer: {
             Text("Guardan conexiones y ajustes, sin contraseñas. Para una copia completa, exporta tus conexiones cifradas.")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Paleta.textoSecundario)
         }
         .onAppear(perform: cargar)
         .confirmationDialog("¿Restaurar esta copia?", isPresented: Binding(
@@ -638,38 +641,38 @@ private struct AjustesAyudante: View {
     var body: some View {
         Form {
             Section {
-                HStack(spacing: 12) {
-                    IconoCuadrado(simbolo: "shield.lefthalf.filled", color: .indigo, lado: 40)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(titulo).font(.title3).fontWeight(.semibold)
-                        HStack(spacing: 5) {
-                            Circle().fill(modelo.ayudanteListo == true ? Color.green : Color.orange)
-                                .frame(width: 6, height: 6)
-                            Text(subtitulo).foregroundStyle(.secondary)
+                HStack(spacing: Espacio.l) {
+                    IconoCuadrado(simbolo: "shield.lefthalf.filled", color: Paleta.iconoAyudante, lado: Tamano.iconoCabecera)
+                    VStack(alignment: .leading, spacing: Espacio.xxs) {
+                        Text(titulo).font(Tipo.titulo)
+                        HStack(spacing: Espacio.s) {
+                            Indicador(color: modelo.ayudanteListo == true ? Paleta.exito : Paleta.aviso)
+                            Text(subtitulo).foregroundStyle(Paleta.textoSecundario)
                         }
                     }
                     Spacer()
                     Button(modelo.ayudanteListo == true ? "Reinstalar…" : "Instalar…") { modelo.instalarAyudante() }
+                        .estiloBoton(modelo.ayudanteListo == true ? .secundario : .principal)
                         .disabled(modelo.instalandoAyudante || modelo.guardandoConfiguracion || modelo.profiles.isEmpty)
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, Espacio.xs)
                 if modelo.instalandoAyudante {
-                    HStack(spacing: 8) {
+                    HStack(spacing: Espacio.m) {
                         ProgressView().controlSize(.small)
-                        Text("Esperando la autorización de macOS…").foregroundStyle(.secondary)
+                        Text("Esperando la autorización de macOS…").foregroundStyle(Paleta.textoSecundario)
                     }
                 }
                 if let mensaje = modelo.mensajeAyudante {
-                    Label(mensaje, systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                    Label(mensaje, systemImage: "checkmark.circle.fill").foregroundStyle(Paleta.exitoTexto)
                 }
                 if let error = modelo.ultimoError {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red).textSelection(.enabled)
+                        .foregroundStyle(Paleta.errorTexto).textSelection(.enabled)
                 }
             }
             Section("Qué hace") {
                 Text("Crea el túnel y aplica rutas y DNS con permisos de administrador. Solo acepta las conexiones guardadas en Nuvex y las acciones previstas. macOS pide autorización al instalarlo o actualizarlo y decide si ofrece Touch ID.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Paleta.textoSecundario)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Section("Diagnóstico") {
@@ -684,7 +687,7 @@ private struct AjustesAyudante: View {
                 }
             }
         }
-        .formStyle(.grouped)
+        .formularioNuvex()
         .navigationTitle("Ayudante de red")
     }
 }
@@ -745,14 +748,9 @@ private struct DetalleConexion: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            cabecera
-                .padding(.horizontal, 22)
-                .padding(.top, 16)
-                .padding(.bottom, 4)
-            formulario
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) { barraGuardado }
+        formulario
+            // Barra del sistema: el formulario se desvanece bajo ella al desplazarse.
+            .barraAcciones { barraGuardado }
         .navigationTitle(perfil.name.isEmpty ? "Nueva conexión" : perfil.name)
         .onChange(of: perfil.name) { _, _ in borradores.tocados.insert(id + ".name") }
         .onChange(of: perfil.server) { _, _ in borradores.tocados.insert(id + ".server") }
@@ -763,38 +761,41 @@ private struct DetalleConexion: View {
     // MARK: Cabecera con estado y conexión
 
     private var cabecera: some View {
-        HStack(spacing: 12) {
-            IconoCuadrado(simbolo: "lock.fill", color: ColorConexion.para(id), lado: 40)
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: Espacio.l) {
+            IconoCuadrado(simbolo: "lock.fill", color: ColorConexion.para(id), lado: Tamano.iconoCabecera)
+            VStack(alignment: .leading, spacing: Espacio.xxs) {
                 Text(perfil.name.isEmpty ? "Nueva conexión" : perfil.name)
-                    .font(.title3).fontWeight(.semibold).lineLimit(1)
+                    .font(Tipo.titulo).lineLimit(1)
                 TimelineView(.periodic(from: .now, by: 30)) { _ in
                     let (color, texto) = estadoActual
-                    HStack(spacing: 5) {
-                        Circle().fill(color).frame(width: 6, height: 6)
-                        Text(texto).foregroundStyle(color == .red ? Color.red : Color.secondary).lineLimit(1)
+                    HStack(spacing: Espacio.s) {
+                        Indicador(color: color)
+                        Text(texto)
+                            .foregroundStyle(color == Paleta.error || color == Paleta.aviso
+                                             ? Paleta.texto(color) : Paleta.textoSecundario)
+                            .lineLimit(1)
                     }
                 }
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: Espacio.m)
             botonConexion
         }
     }
 
     private var estadoActual: (Color, String) {
-        if esNueva { return (.orange, "Sin guardar") }
+        if esNueva { return (Paleta.aviso, "Sin guardar") }
         if !perfil.enabled { return (.secondary, "Oculta en la barra de menús") }
         guard let vpn else { return (.secondary, "Desconectada") }
         switch modelo.estado(vpn) {
         case .conectada:
-            return (.green, vpn.inicio.map { "Conectada · \(Formato.duracion(desde: $0))" } ?? "Conectada")
-        case .conectando: return (.accentColor, "Conectando…")
-        case .error(let fallo): return (.red, fallo.titulo)
+            return (Paleta.exito, vpn.inicio.map { "Conectada · \(Formato.duracion(desde: $0))" } ?? "Conectada")
+        case .conectando: return (Paleta.acento, "Conectando…")
+        case .error(let fallo): return (Paleta.error, fallo.titulo)
         case .desconectada:
             if let fecha = modelo.desconexiones[id] {
-                return (.orange, "Se desconectó a las \(fecha.formatted(date: .omitted, time: .shortened))")
+                return (Paleta.aviso, "Se desconectó a las \(fecha.formatted(date: .omitted, time: .shortened))")
             }
-            if modelo.passwordStatuses[id] == .missing { return (.orange, "Falta la contraseña") }
+            if modelo.passwordStatuses[id] == .missing { return (Paleta.aviso, "Falta la contraseña") }
             return (.secondary, "Desconectada")
         }
     }
@@ -805,11 +806,12 @@ private struct DetalleConexion: View {
             switch modelo.estado(vpn) {
             case .conectada:
                 Button("Desconectar") { modelo.desconectar(vpn) }
+                    .estiloBoton(.secundario)
             case .conectando:
                 ProgressView().controlSize(.small)
             default:
                 Button("Conectar") { modelo.conectar(vpn) }
-                    .buttonStyle(.borderedProminent)
+                    .estiloBoton(.principal)
                     .disabled(hayCambios || busy || !vpn.configured || modelo.passwordStatuses[id] == .missing)
                     .help(hayCambios ? "Guarda los cambios antes de conectar." : "")
             }
@@ -820,78 +822,84 @@ private struct DetalleConexion: View {
 
     private var formulario: some View {
         Form {
-            Section("Servidor") {
-                TextField("Nombre", text: $perfil.name, prompt: Text("Oficina"))
-                if aviso("name") && Validacion.vacio(perfil.name) {
-                    AvisoCampo("Ponle un nombre para reconocerla en la barra de menús.")
-                }
-                TextField("Servidor", text: $perfil.server, prompt: Text("vpn.empresa.com:443"))
-                    .textContentType(.URL)
-                if aviso("server") {
-                    if perfil.enabled && Validacion.vacio(perfil.server) {
-                        AvisoCampo("Indica el servidor Fortinet y, si corresponde, el puerto.")
-                    } else if !Validacion.vacio(perfil.server)
-                                && !Validacion.servidorValido(perfil.server.trimmingCharacters(in: .whitespaces)) {
-                        AvisoCampo("Usa la forma host:puerto, por ejemplo vpn.empresa.com:443.")
+            // La cabecera es la primera sección, como en Ayudante y Cuenta de
+            // Google: se desplaza con el contenido y comparte sus márgenes.
+            Section { cabecera.padding(.vertical, Espacio.xs) }
+            Group {
+                Section("Servidor") {
+                    TextField("Nombre", text: $perfil.name, prompt: Text("Oficina"))
+                    if aviso("name") && Validacion.vacio(perfil.name) {
+                        AvisoCampo("Ponle un nombre para reconocerla en la barra de menús.")
+                    }
+                    TextField("Servidor", text: $perfil.server, prompt: Text("vpn.empresa.com:443"))
+                        .textContentType(.URL)
+                    if aviso("server") {
+                        if perfil.enabled && Validacion.vacio(perfil.server) {
+                            AvisoCampo("Indica el servidor Fortinet y, si corresponde, el puerto.")
+                        } else if !Validacion.vacio(perfil.server)
+                                    && !Validacion.servidorValido(perfil.server.trimmingCharacters(in: .whitespaces)) {
+                            AvisoCampo("Usa la forma host:puerto, por ejemplo vpn.empresa.com:443.")
+                        }
                     }
                 }
-            }
-            Section {
-                TextField("Usuario", text: $perfil.username, prompt: Text("usuario"))
-                    .textContentType(.username)
-                if aviso("username") && perfil.enabled && Validacion.vacio(perfil.username) {
-                    AvisoCampo("Indica el usuario de esta VPN.")
-                }
-                filaContrasena
-            } header: {
-                Text("Cuenta")
-            } footer: {
-                Text("La contraseña se guarda en el Llavero de macOS.")
-                    .foregroundStyle(.secondary)
-            }
-            SeccionCodigoCorreo(perfilID: id)
-            Section {
-                Picker("Confianza TLS", selection: seleccionConfianza) {
-                    Text("Certificados del sistema").tag("system")
-                    Text("Certificado incluido (Prepa)").tag("bundle")
-                    Text("Huella SHA-256").tag("sha256")
-                }
-                if perfil.trust.hasPrefix("sha256:") {
-                    TextField("Huella", text: huella, prompt: Text("64 caracteres hexadecimales"))
-                        .font(.body.monospaced())
-                    if aviso("trust") && !Validacion.huellaValida(perfil.trust) {
-                        AvisoCampo("Faltan \(max(0, 64 - huella.wrappedValue.count)) caracteres de la huella.")
+                Section {
+                    TextField("Usuario", text: $perfil.username, prompt: Text("usuario"))
+                        .textContentType(.username)
+                    if aviso("username") && perfil.enabled && Validacion.vacio(perfil.username) {
+                        AvisoCampo("Indica el usuario de esta VPN.")
                     }
+                    filaContrasena
+                } header: {
+                    Text("Cuenta")
+                } footer: {
+                    Text("La contraseña se guarda en el Llavero de macOS.")
+                        .foregroundStyle(Paleta.textoSecundario)
                 }
-            } header: {
-                Text("Seguridad")
-            } footer: {
-                Text(textoConfianza).foregroundStyle(.secondary)
+                SeccionCodigoCorreo(perfilID: id)
+                Section {
+                    Picker("Confianza TLS", selection: seleccionConfianza) {
+                        Text("Certificados del sistema").tag("system")
+                        Text("Certificado incluido (Prepa)").tag("bundle")
+                        Text("Huella SHA-256").tag("sha256")
+                    }
+                    if perfil.trust.hasPrefix("sha256:") {
+                        TextField("Huella", text: huella, prompt: Text("64 caracteres hexadecimales"))
+                            .font(Tipo.mono)
+                        if aviso("trust") && !Validacion.huellaValida(perfil.trust) {
+                            AvisoCampo("Faltan \(max(0, 64 - huella.wrappedValue.count)) caracteres de la huella.")
+                        }
+                    }
+                } header: {
+                    Text("Seguridad")
+                } footer: {
+                    Text(textoConfianza).foregroundStyle(Paleta.textoSecundario)
+                }
+                Section {
+                    Toggle("Instalar las rutas de esta VPN", isOn: $perfil.manageRoutes)
+                    Toggle("Usar el DNS de esta VPN", isOn: $perfil.manageDNS)
+                    TextField("Realm", text: $perfil.realm, prompt: Text("Opcional"))
+                } header: {
+                    Text("Red")
+                } footer: {
+                    Text("Las rutas pueden incluir la salida general a Internet. Si varias VPN instalan rutas o DNS que se superponen, pueden entrar en conflicto.")
+                        .foregroundStyle(Paleta.textoSecundario)
+                }
+                Section {
+                    Toggle("Mostrar en la barra de menús", isOn: $perfil.enabled)
+                } footer: {
+                    Text("Si la ocultas, la conexión se conserva pero no podrás conectarla.")
+                        .foregroundStyle(Paleta.textoSecundario)
+                }
+                Section {
+                    Button(esNueva ? "Descartar conexión" : "Eliminar conexión…", role: .destructive, action: alEliminar)
+                        .estiloBoton(.destructivo)
+                        .disabled(!puedeEliminar)
+                        .help(puedeEliminar ? "" : "Desconecta las VPN activas para eliminar conexiones.")
+                }
             }
-            Section {
-                Toggle("Instalar las rutas de esta VPN", isOn: $perfil.manageRoutes)
-                Toggle("Usar el DNS de esta VPN", isOn: $perfil.manageDNS)
-                TextField("Realm", text: $perfil.realm, prompt: Text("Opcional"))
-            } header: {
-                Text("Red")
-            } footer: {
-                Text("Las rutas pueden incluir la salida general a Internet. Si varias VPN instalan rutas o DNS que se superponen, pueden entrar en conflicto.")
-                    .foregroundStyle(.secondary)
-            }
-            Section {
-                Toggle("Mostrar en la barra de menús", isOn: $perfil.enabled)
-            } footer: {
-                Text("Si la ocultas, la conexión se conserva pero no podrás conectarla.")
-                    .foregroundStyle(.secondary)
-            }
-            Section {
-                Button(esNueva ? "Descartar conexión" : "Eliminar conexión…", role: .destructive, action: alEliminar)
-                    .disabled(!puedeEliminar)
-                    .help(puedeEliminar ? "" : "Desconecta las VPN activas para eliminar conexiones.")
-            }
+            .disabled(busy)
         }
-        .formStyle(.grouped)
-        .disabled(busy)
+        .formularioNuvex()
     }
 
     private var textoConfianza: String {
@@ -934,7 +942,7 @@ private struct DetalleConexion: View {
             }
         } else {
             LabeledContent("Contraseña") {
-                HStack(spacing: 8) {
+                HStack(spacing: Espacio.m) {
                     estadoCredencial
                     Button("Cambiar…") { borradores.editandoContrasena.insert(id) }
                 }
@@ -946,26 +954,26 @@ private struct DetalleConexion: View {
     private var estadoCredencial: some View {
         if !password.wrappedValue.isEmpty {
             Label("Se guardará en el Llavero al pulsar Guardar", systemImage: "lock.fill")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Paleta.textoSecundario)
         } else if soloEspacios {
             Label("Se quitarán los espacios del usuario y se migrará la contraseña al guardar",
-                  systemImage: "arrow.right.circle").foregroundStyle(.orange)
+                  systemImage: "arrow.right.circle").foregroundStyle(Paleta.avisoTexto)
         } else if necesitaContrasena {
-            Label("Escribe la contraseña del nuevo usuario", systemImage: "key.fill").foregroundStyle(.orange)
+            Label("Escribe la contraseña del nuevo usuario", systemImage: "key.fill").foregroundStyle(Paleta.avisoTexto)
         } else if !esNueva {
             switch modelo.passwordStatuses[id] {
             case .saved:
                 Label("Guardada en el Llavero", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Paleta.textoSecundario)
                     .symbolRenderingMode(.multicolor)
             case .missing:
                 Label("No hay contraseña guardada para este usuario", systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Paleta.avisoTexto)
             case .error(let code):
                 Label("No se pudo consultar el Llavero (código \(code))", systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.red)
+                    .foregroundStyle(Paleta.errorTexto)
             case nil:
-                HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Comprobando…").foregroundStyle(.secondary) }
+                HStack(spacing: Espacio.s) { ProgressView().controlSize(.small); Text("Comprobando…").foregroundStyle(Paleta.textoSecundario) }
             }
         }
     }
@@ -973,57 +981,54 @@ private struct DetalleConexion: View {
     // MARK: Barra de guardado
 
     private var barraGuardado: some View {
-        VStack(spacing: 0) {
-            Divider()
-            HStack(spacing: 8) {
-                mensajeBarra
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Button(esNueva ? "Descartar" : "Revertir", action: revertir)
-                    .disabled(!hayCambios || busy)
-                Button("Guardar", action: guardar)
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut("s", modifiers: .command)
-                    .disabled(!hayCambios || busy || bloqueoPorConexion != nil)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+        HStack(spacing: Espacio.m) {
+            mensajeBarra
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentTransition(.opacity)
+            Button(esNueva ? "Descartar" : "Revertir", action: revertir)
+                .estiloBoton(.secundario)
+                .disabled(!hayCambios || busy)
+            Button("Guardar", action: guardar)
+                .estiloBoton(.principal)
+                .keyboardShortcut("s", modifiers: .command)
+                .disabled(!hayCambios || busy || bloqueoPorConexion != nil)
         }
-        .background(.bar)
+        .animacion(Movimiento.estandar, value: hayCambios)
     }
 
     @ViewBuilder
     private var mensajeBarra: some View {
         Group {
             if modelo.guardandoConfiguracion {
-                HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Guardando…") }
-                    .foregroundStyle(.secondary)
+                HStack(spacing: Espacio.s) { ProgressView().controlSize(.small); Text("Guardando…") }
+                    .foregroundStyle(Paleta.textoSecundario)
             } else if modelo.instalandoAyudante {
-                HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Esperando la autorización de macOS…") }
-                    .foregroundStyle(.secondary)
+                HStack(spacing: Espacio.s) { ProgressView().controlSize(.small); Text("Esperando la autorización de macOS…") }
+                    .foregroundStyle(Paleta.textoSecundario)
             } else if borradores.intentos.contains(id), let motivo {
-                Label(motivo, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                Label(motivo, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Paleta.avisoTexto)
             } else if !hayCambios, let resumen = modelo.resumenGuardado, resumen.hayProblemas {
                 BarraResumenGuardado(modelo: modelo, resumen: resumen)
             } else if let error = modelo.ultimoError {
-                Label(error, systemImage: "xmark.octagon.fill").foregroundStyle(.red).textSelection(.enabled)
+                Label(error, systemImage: "xmark.octagon.fill").foregroundStyle(Paleta.errorTexto).textSelection(.enabled)
             } else if hayCambios, let bloqueo = bloqueoPorConexion {
-                Label(bloqueo, systemImage: "lock.fill").foregroundStyle(.orange)
+                Label(bloqueo, systemImage: "lock.fill").foregroundStyle(Paleta.avisoTexto)
             } else if hayCambios {
-                HStack(spacing: 6) {
-                    Circle().fill(Color.orange).frame(width: 7, height: 7)
+                HStack(spacing: Espacio.s) {
+                    Indicador(color: Paleta.aviso)
                     Text(cambiosDePerfil ? "Cambios sin guardar · macOS puede pedir autorización para aplicarlos"
                                          : "Contraseña nueva sin guardar")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Paleta.textoSecundario)
                 }
             } else if let mensaje = modelo.mensajeConfiguracion {
                 Label(mensaje, systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Paleta.textoSecundario)
                     .symbolRenderingMode(.multicolor)
             } else {
-                Text("Sin cambios").foregroundStyle(.tertiary)
+                Text("Sin cambios").foregroundStyle(Paleta.textoTerciario)
             }
         }
-        .font(.callout)
+        .font(Tipo.apoyo)
         .lineLimit(2)
     }
 }
@@ -1036,15 +1041,15 @@ private struct BarraResumenGuardado: View {
     @State private var detalles = false
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Espacio.s) {
             Label(resumen.resumen, systemImage: grave ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
-                .foregroundStyle(grave ? .red : .orange)
+                .foregroundStyle(grave ? Paleta.errorTexto : Paleta.avisoTexto)
                 .lineLimit(1)
             Button("Detalles") { detalles = true }
                 .buttonStyle(.link)
                 .popover(isPresented: $detalles, arrowEdge: .top) {
                     ListaResumenGuardado(modelo: modelo, resumen: resumen)
-                        .padding(16)
+                        .padding(Espacio.xl)
                         .frame(width: 380)
                 }
         }
@@ -1060,14 +1065,14 @@ struct ListaResumenGuardado: View {
     let resumen: ResumenGuardado
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: Espacio.m) {
             ForEach(resumen.pasos, id: \.titulo) { titulo, paso in
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: Espacio.m) {
                     icono(paso).frame(width: 16)
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: Espacio.xxs) {
                         Text(titulo).fontWeight(.medium)
                         if let detalle = detalle(paso) {
-                            Text(detalle).font(.caption).foregroundStyle(.secondary)
+                            Text(detalle).font(Tipo.nota).foregroundStyle(Paleta.textoSecundario)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .textSelection(.enabled)
                         }
@@ -1091,10 +1096,10 @@ struct ListaResumenGuardado: View {
     @ViewBuilder
     private func icono(_ paso: ResumenGuardado.Paso) -> some View {
         switch paso {
-        case .hecho: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+        case .hecho: Image(systemName: "checkmark.circle.fill").foregroundStyle(Paleta.exito)
         case .enCurso: ProgressView().controlSize(.mini)
-        case .pendiente: Image(systemName: "clock.fill").foregroundStyle(.orange)
-        case .fallo: Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+        case .pendiente: Image(systemName: "clock.fill").foregroundStyle(Paleta.aviso)
+        case .fallo: Image(systemName: "xmark.circle.fill").foregroundStyle(Paleta.error)
         case .noAplica: EmptyView()
         }
     }
@@ -1114,7 +1119,7 @@ private struct AvisoCampo: View {
     init(_ texto: String) { self.texto = texto }
     var body: some View {
         Label(texto, systemImage: "exclamationmark.triangle.fill")
-            .font(.callout)
-            .foregroundStyle(.orange)
+            .font(Tipo.apoyo)
+            .foregroundStyle(Paleta.avisoTexto)
     }
 }

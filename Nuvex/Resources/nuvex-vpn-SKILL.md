@@ -12,9 +12,9 @@ No hace falta que el menú o una ventana estén visibles. Nuvex sigue atendiendo
 
 Durante una suspensión real macOS pausa CPU y red: ningún proceso local, LaunchAgent ni servicio XPC puede conectar la VPN o consultar Gmail. Al despertar, Nuvex reconcilia el túnel, restaura el socket y reanuda una lectura de correo todavía vigente. Ejecuta de nuevo `nuvex estado` antes de decidir si hace falta reintentar.
 
-Usa siempre `~/.local/bin/nuvex`; si no existe, pide al usuario pulsar **Preparar** en Ajustes de Nuvex › Automatización.
+Usa siempre `~/.local/bin/nuvex`; si no existe, pide al usuario pulsar **Configurar** en Ajustes de Nuvex › Automatización. Esa única acción prepara el CLI y las skills, crea las reglas acotadas para los agentes detectados y comprueba el resultado.
 
-El CLI necesita llegar a un socket Unix privado fuera del sandbox de Bash. El usuario puede conceder una autorización persistente y revocable desde **Acceso persistente de agentes** en esa misma pantalla. Esa regla abarca únicamente `~/.local/bin/nuvex`: no desactiva globalmente el sandbox y Nuvex sigue limitando cada VPN según su propia política. Si falta la regla, solicita una sola aprobación específica para ese ejecutable; no uses modos globales como `danger-full-access`, `bypassPermissions` o `--dangerously-skip-permissions`. Nunca abras el ejecutable gráfico (`Nuvex.app/Contents/MacOS/Nuvex`) directamente.
+El CLI necesita llegar a un socket Unix privado fuera del sandbox de Bash. **Configurar** concede una autorización persistente y revocable que abarca únicamente `~/.local/bin/nuvex`: no desactiva globalmente el sandbox y Nuvex sigue limitando cada VPN según su propia política. Si falta la regla, pide usar esa acción; solo si no está disponible solicita una aprobación específica para ese ejecutable. No uses modos globales como `danger-full-access`, `bypassPermissions` o `--dangerously-skip-permissions`. Nunca abras el ejecutable gráfico (`Nuvex.app/Contents/MacOS/Nuvex`) directamente.
 
 ## Comandos
 
@@ -41,7 +41,7 @@ printf '%s' "<código>" | ~/.local/bin/nuvex codigo "<vpn>" --json
 | 4 | Hace falta la persona en la Mac | Explica `detalle` (autorizar el ayudante, Touch ID, contraseña o Llavero). No reintentes. |
 | 5 | Tiempo agotado | Consulta `~/.local/bin/nuvex estado`; puede seguir conectando o esperando un código. |
 | 6 | Nuvex no responde | Pide al usuario que abra Nuvex. |
-| 7 | El sandbox bloquea Nuvex (`motivo` `aislamiento`) | Pide configurar **Acceso persistente de agentes** o aprobar solo `~/.local/bin/nuvex`. No desactives el sandbox completo. |
+| 7 | El sandbox bloquea Nuvex (`motivo` `aislamiento`) | Pide pulsar **Configurar** en Automatización o aprobar solo `~/.local/bin/nuvex`. No desactives el sandbox completo. |
 
 `nuvex desconectar "<vpn>" --json` también cancela un intento que siga conectando o esperando el código.
 

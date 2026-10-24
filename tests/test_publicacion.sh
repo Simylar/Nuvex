@@ -33,6 +33,34 @@ if find "$temporal/tmp" -mindepth 1 -print -quit | grep -q .; then
   exit 1
 fi
 
+# En ejecuciones disparadas por una etiqueta, actions/checkout puede sustituir
+# localmente el objeto anotado por una referencia ligera al mismo commit. Git
+# rechaza restaurarla sin --force, aunque ambas apunten al mismo commit.
+remoto_tags="$temporal/remoto-tags.git"
+origen_tags="$temporal/origen-tags"
+checkout_tags="$temporal/checkout-tags"
+git init --bare --quiet "$remoto_tags"
+git init --quiet "$origen_tags"
+git -C "$origen_tags" config user.name 'Prueba Nuvex'
+git -C "$origen_tags" config user.email 'prueba@nuvex.invalid'
+printf 'nuvex\n' > "$origen_tags/README.md"
+git -C "$origen_tags" add README.md
+git -C "$origen_tags" commit --quiet -m inicial
+git -C "$origen_tags" tag -a v9.9.9 -m 'Nuvex 9.9.9'
+git -C "$origen_tags" remote add origin "$remoto_tags"
+git -C "$origen_tags" push --quiet origin HEAD:main refs/tags/v9.9.9
+git -C "$remoto_tags" symbolic-ref HEAD refs/heads/main
+git clone --quiet "$remoto_tags" "$checkout_tags"
+commit_tag="$(git -C "$checkout_tags" rev-parse 'refs/tags/v9.9.9^{commit}')"
+git -C "$checkout_tags" tag -f v9.9.9 "$commit_tag" >/dev/null
+[ "$(git -C "$checkout_tags" cat-file -t refs/tags/v9.9.9)" = commit ]
+if git -C "$checkout_tags" fetch --tags --quiet origin 2>/dev/null; then
+  echo 'El escenario debía reproducir el rechazo del tag anotado sin --force' >&2
+  exit 1
+fi
+git -C "$checkout_tags" fetch --force --tags --quiet origin
+[ "$(git -C "$checkout_tags" cat-file -t refs/tags/v9.9.9)" = tag ]
+
 publicador="$ROOT/Nuvex/scripts/publicar.sh"
 linea_limpieza="$(grep -nF 'rm -rf "$SALIDA"' "$publicador" | head -1 | cut -d: -f1)"
 linea_motor="$(grep -nF 'if [ -n "$ANTERIOR" ] && git diff' "$publicador" | cut -d: -f1)"
@@ -62,6 +90,7 @@ linea_publicacion="$(grep -nF 'gh release create "$ETIQUETA"' "$publicador" | cu
 grep -qF '[ "$COMPILACION" = "$COMPILACION_ESPERADA" ]' "$publicador"
 grep -qF '[ "$COMMIT_PAQUETE" = "$COMMIT_CORTO" ]' "$publicador"
 grep -qF '[ "$ARQUITECTURAS" = arm64 ]' "$publicador"
+grep -qF 'git fetch --force --tags --quiet origin' "$publicador"
 grep -qF '"$MANIFIESTO" "$SUMAS"' "$publicador"
 
 echo 'Publicación: candidato congelado, artefactos y checksums conservan el orden seguro'

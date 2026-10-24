@@ -61,8 +61,16 @@ verificar_candidato_congelado() {
 # MARK: Comprobaciones comunes
 
 paso "Comprobaciones"
-git fetch --tags --quiet origin \
-  || falla "no se pudieron actualizar las etiquetas remotas"
+if [ "$MODO" = ci ]; then
+  # actions/checkout puede convertir la etiqueta anotada que disparó el flujo
+  # en una referencia ligera al commit. En CI el remoto es la autoridad: se
+  # restaura el objeto anotado antes de validar la etiqueta y calcular builds.
+  git fetch --force --tags --quiet origin \
+    || falla "no se pudieron restaurar las etiquetas remotas en CI"
+else
+  git fetch --tags --quiet origin \
+    || falla "no se pudieron actualizar las etiquetas remotas"
+fi
 [ -z "$(git status --porcelain)" ] || falla "hay cambios sin commit"
 grep -qE "^## \[$VERSION\] - [0-9]{4}-[0-9]{2}-[0-9]{2}" CHANGELOG.md \
   || falla "CHANGELOG.md necesita la sección «## [$VERSION] - AAAA-MM-DD» con las novedades"

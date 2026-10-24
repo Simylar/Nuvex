@@ -22,6 +22,7 @@ Este archivo sigue el formato de [Keep a Changelog](https://keepachangelog.com/e
 
 ### Correcciones de errores
 - La preparación de actualizaciones conserva el motor ya autorizado cuando el release anterior incluye una versión igual o más reciente de OpenSSL, evitando degradaciones y solicitudes administrativas innecesarias.
+- El control local obtiene la identidad del CLI mediante las credenciales del socket y el audit token de macOS cuando el PID directo no está disponible, evitando rechazos incorrectos del comando oficial.
 - El socket de control se recrea si su escucha se interrumpe o desaparece su ruta, evitando que el CLI quede bloqueado hasta reiniciar la app.
 - Gmail respeta `Retry-After`, limita el cuerpo acumulado y no descarta un código válido presente solo en la parte HTML.
 - Cerrar la sesión de Google o reemplazar el cliente ya no permite que una renovación OAuth tardía restaure el acceso anterior.

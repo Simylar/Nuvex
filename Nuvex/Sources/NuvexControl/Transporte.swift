@@ -342,11 +342,23 @@ enum Socket {
     }
 
     static func pidRemoto(_ fd: Int32) -> pid_t {
+        // LOCAL_PEERTOKEN contiene la identidad autenticada por el kernel y
+        // evita aceptar un PID aportado por el cliente. En conexiones reales
+        // LOCAL_PEERPID puede informar éxito pero entregar cero.
+        var token = audit_token_t()
+        var tamano = socklen_t(MemoryLayout<audit_token_t>.size)
+        // SOL_LOCAL = 0, LOCAL_PEERTOKEN = 6 (sys/un.h).
+        if getsockopt(fd, 0, 6, &token, &tamano) == 0 {
+            let pidAuditado = audit_token_to_pid(token)
+            if pidAuditado > 0 { return pidAuditado }
+        }
+
         var pid: pid_t = 0
-        var tamano = socklen_t(MemoryLayout<pid_t>.size)
+        tamano = socklen_t(MemoryLayout<pid_t>.size)
+        // Compatibilidad defensiva si una versión futura no ofrece el token.
         // SOL_LOCAL = 0, LOCAL_PEERPID = 2 (sys/un.h).
         guard getsockopt(fd, 0, 2, &pid, &tamano) == 0 else { return 0 }
-        return pid
+        return pid > 0 ? pid : 0
     }
 }
 

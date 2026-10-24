@@ -10,7 +10,11 @@ let package = Package(
     ],
     targets: [
         // Protocolo y socket de control, compartidos por la app y el comando nuvex.
-        .target(name: "NuvexControl", path: "Sources/NuvexControl"),
+        .target(
+            name: "NuvexControl",
+            path: "Sources/NuvexControl",
+            linkerSettings: [.linkedLibrary("bsm")]
+        ),
         .executableTarget(
             name: "Nuvex",
             dependencies: ["NuvexControl", .product(name: "Sparkle", package: "Sparkle")],

@@ -16,5 +16,6 @@ trap 'rm -rf "$tmp"' EXIT
 swiftc -sdk "$SDKROOT" -module-cache-path "$CLANG_MODULE_CACHE_PATH" \
   "$ROOT/Nuvex/Sources/NuvexControl/Protocolo.swift" "$ROOT/Nuvex/Sources/NuvexControl/Transporte.swift" \
   "$ROOT/Nuvex/Tests/ControlChecks.swift" \
+  -lbsm \
   -o "$tmp/control-checks"
 "$tmp/control-checks"

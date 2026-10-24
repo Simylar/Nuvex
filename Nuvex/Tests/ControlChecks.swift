@@ -10,6 +10,14 @@ struct ControlChecks {
             print(ClienteControl.disponibilidad(ruta: CommandLine.arguments[2]))
             return
         }
+        if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--cliente" {
+            let respuesta = try ClienteControl.enviar(
+                Peticion(comando: .diagnostico, profundo: true),
+                ruta: CommandLine.arguments[2]
+            )
+            print(respuesta.detalle ?? "")
+            return
+        }
 
         let conexiones = [
             ConexionInfo(id: "vpn-1", nombre: "Oficina central", estado: .desconectada, permitida: true, codigoPorCorreo: false),
@@ -84,6 +92,9 @@ struct ControlChecks {
                 return .resultado(.ok, vpn: peticion.vpn, estado: .conectada, motivo: .conectada,
                                   detalle: cliente.origen)
             case .diagnostico:
+                if peticion.profundo == true {
+                    return .resultado(.ok, detalle: String(cliente.pid))
+                }
                 try? await Task.sleep(for: .milliseconds(300))
                 return .resultado(.ok)
             default:
@@ -96,6 +107,23 @@ struct ControlChecks {
         precondition(atributos.st_mode & 0o777 == 0o600, "el socket debe ser privado")
         precondition(ClienteControl.hayServidor(ruta: ruta))
         precondition(ClienteControl.disponibilidad(ruta: ruta) == .abierta)
+
+        // La autorización real ocurre entre procesos. LOCAL_PEERPID puede
+        // entregar cero aun cuando getsockopt informa éxito; el audit token
+        // debe conservar un PID verificable para resolver el binario cliente.
+        let procesoCliente = Process()
+        let salidaCliente = Pipe()
+        procesoCliente.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
+        procesoCliente.arguments = ["--cliente", ruta]
+        procesoCliente.standardOutput = salidaCliente
+        procesoCliente.standardError = salidaCliente
+        try procesoCliente.run()
+        procesoCliente.waitUntilExit()
+        let textoPID = String(decoding: salidaCliente.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        precondition(procesoCliente.terminationStatus == 0, "el cliente separado debe recibir respuesta")
+        precondition(Int32(textoPID) == procesoCliente.processIdentifier,
+                     "el servidor debe identificar el PID real del cliente: \(textoPID)")
 
         // Un sandbox sin red, como el de Codex, no se confunde con una Nuvex cerrada.
         if FileManager.default.isExecutableFile(atPath: "/usr/bin/sandbox-exec") {

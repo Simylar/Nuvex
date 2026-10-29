@@ -19,6 +19,15 @@ enum Captura {
             let sufijo = oscuro ? "oscuro" : "claro"
             guardar(PanelVPN(modelo: modelo).background(.background), nombre: "panel-\(sufijo)", en: carpeta, oscuro: oscuro)
 
+            borradores.seleccion = .general
+            guardar(ConfigurationView(modelo: modelo, borradores: borradores).frame(width: 780, height: 580),
+                    nombre: "ajustes-permisos-minimo-\(sufijo)", en: carpeta, oscuro: oscuro)
+            guardar(ConfigurationView(modelo: modelo, borradores: borradores).frame(width: 1180, height: 820),
+                    nombre: "ajustes-permisos-amplio-\(sufijo)", en: carpeta, oscuro: oscuro)
+            guardar(Form { SeccionPermisosNuvex(modelo: modelo, detalleExpandido: true, abrir: { _ in }) }
+                .formularioNuvex().frame(width: 540, height: 1250),
+                    nombre: "ajustes-permisos-detalle-\(sufijo)", en: carpeta, oscuro: oscuro)
+
             borradores.seleccion = .conexion("oficina")
             guardar(ConfigurationView(modelo: modelo, borradores: borradores).frame(width: 820, height: 640),
                     nombre: "ajustes-conexion-\(sufijo)", en: carpeta, oscuro: oscuro)

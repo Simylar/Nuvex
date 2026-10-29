@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Datos
 
 /// Cómo obtener por correo el código de verificación de una conexión.
-struct ConfigCorreo: Codable, Equatable {
+struct ConfigCorreo: Codable, Equatable, Sendable {
     var remitente: String
     var asunto: String = ""
     /// Segundos que se espera el correo antes de pedir el código a mano.
@@ -49,7 +49,13 @@ enum DecisionPermisoAsistente: Equatable {
 /// Ajustes propios de la app. Viven fuera de profiles.json porque el
 /// ayudante firma ese archivo: cambiarlo obligaría a reinstalarlo.
 struct AjustesApp: Equatable {
-    static let versionActual = 2
+    static let versionActual = 3
+
+    /// Recibo de una decisión, nunca sustituto del estado efectivo de cada
+    /// componente. Las capacidades nuevas exigen otra decisión explícita.
+    static let capacidadesActuales: Set<String> = ["usoInicial", "automatizacion", "agentesDetectados"]
+    var capacidadesAutorizadas: Set<String> = []
+    var autorizacionRevocada = false
 
     var correo: [String: ConfigCorreo] = [:]
     /// Una instalación nueva exige confirmación explícita. Quien ya eligió
@@ -58,6 +64,23 @@ struct AjustesApp: Equatable {
     /// Conexiones que los asistentes no pueden conectar aunque la política lo permita.
     var bloqueadasParaAsistentes: Set<String> = []
     var avisarAccionesAsistentes = true
+
+    var autorizacionGlobalCompleta: Bool {
+        !autorizacionRevocada && capacidadesAutorizadas.isSuperset(of: Self.capacidadesActuales)
+            && politicaAsistentes == .permitir
+    }
+
+    mutating func autorizarCapacidades() {
+        capacidadesAutorizadas = Self.capacidadesActuales
+        autorizacionRevocada = false
+        politicaAsistentes = .permitir
+    }
+
+    mutating func revocarCapacidades() {
+        capacidadesAutorizadas = []
+        autorizacionRevocada = true
+        politicaAsistentes = .noPermitir
+    }
 
     func decisionParaAsistente(conexion id: String) -> DecisionPermisoAsistente {
         guard politicaAsistentes != .noPermitir else { return .rechazarGlobal }
@@ -69,6 +92,7 @@ struct AjustesApp: Equatable {
 extension AjustesApp: Codable {
     private enum Claves: String, CodingKey {
         case version, correo, politicaAsistentes, bloqueadasParaAsistentes, avisarAccionesAsistentes
+        case capacidadesAutorizadas, autorizacionRevocada
     }
 
     init(from decoder: Decoder) throws {
@@ -77,6 +101,8 @@ extension AjustesApp: Codable {
         politicaAsistentes = (try? c.decodeIfPresent(PoliticaAsistentes.self, forKey: .politicaAsistentes)) ?? .preguntar
         bloqueadasParaAsistentes = try c.decodeIfPresent(Set<String>.self, forKey: .bloqueadasParaAsistentes) ?? []
         avisarAccionesAsistentes = try c.decodeIfPresent(Bool.self, forKey: .avisarAccionesAsistentes) ?? true
+        capacidadesAutorizadas = try c.decodeIfPresent(Set<String>.self, forKey: .capacidadesAutorizadas) ?? []
+        autorizacionRevocada = try c.decodeIfPresent(Bool.self, forKey: .autorizacionRevocada) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
@@ -86,6 +112,8 @@ extension AjustesApp: Codable {
         try c.encode(politicaAsistentes, forKey: .politicaAsistentes)
         try c.encode(bloqueadasParaAsistentes.sorted(), forKey: .bloqueadasParaAsistentes)
         try c.encode(avisarAccionesAsistentes, forKey: .avisarAccionesAsistentes)
+        try c.encode(capacidadesAutorizadas.sorted(), forKey: .capacidadesAutorizadas)
+        try c.encode(autorizacionRevocada, forKey: .autorizacionRevocada)
     }
 }
 
@@ -108,16 +136,24 @@ enum ArchivoAjustes {
         // La versión 2 cambia el valor seguro para instalaciones nuevas. Los
         // archivos existentes conservan su política explícita sin alterarla.
         2: { $0 },
+        3: { $0 },
     ]
 
     static func leer(_ datos: Data?) throws -> Lectura {
-        guard let datos, !datos.isEmpty else {
+        guard let datos else {
             return Lectura(ajustes: AjustesApp(), crudo: [:], versionArchivo: AjustesApp.versionActual)
         }
-        guard var crudo = try JSONSerialization.jsonObject(with: datos) as? [String: Any] else {
+        guard !datos.isEmpty, var crudo = try JSONSerialization.jsonObject(with: datos) as? [String: Any] else {
             throw CocoaError(.fileReadCorruptFile)
         }
-        let version = crudo["version"] as? Int ?? 1
+        let version: Int
+        if let valor = crudo["version"] {
+            guard let entero = valor as? Int, entero >= 1,
+                  CFGetTypeID(valor as CFTypeRef) != CFBooleanGetTypeID() else {
+                throw CocoaError(.fileReadCorruptFile)
+            }
+            version = entero
+        } else { version = 1 }
         if version < AjustesApp.versionActual {
             for paso in (version + 1)...AjustesApp.versionActual {
                 if let migrar = migraciones[paso] { crudo = migrar(crudo) }
@@ -151,7 +187,7 @@ enum ArchivoAjustes {
         }
         do {
             if archivos.fileExists(atPath: url.path) {
-                _ = try archivos.replaceItemAt(url, withItemAt: temporal)
+                _ = try archivos.replaceItemAt(url, withItemAt: temporal, options: [.usingNewMetadataOnly])
             } else {
                 try archivos.moveItem(at: temporal, to: url)
             }
@@ -159,7 +195,6 @@ enum ArchivoAjustes {
             try? archivos.removeItem(at: temporal)
             throw error
         }
-        try archivos.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 }
 
@@ -186,7 +221,10 @@ final class Preferencias: ObservableObject {
 
     func cargar() {
         do {
-            let lectura = try ArchivoAjustes.leer(try? Data(contentsOf: url))
+            let datos: Data?
+            do { datos = try Data(contentsOf: url) }
+            catch let error as CocoaError where error.code == .fileReadNoSuchFile { datos = nil }
+            let lectura = try ArchivoAjustes.leer(datos)
             ajustes = lectura.ajustes
             crudo = lectura.crudo
             soloLectura = lectura.esMasNuevo
@@ -194,7 +232,7 @@ final class Preferencias: ObservableObject {
                 : nil
         } catch {
             Log.escribir("ajustes.json no se pudo leer: \(error.localizedDescription)")
-            soloLectura = "No se pudieron leer los ajustes de Nuvex. Se usan los valores de serie hasta que se repare el archivo."
+            soloLectura = "No se pudieron leer los ajustes de Nuvex. Los cambios están bloqueados hasta que se repare el acceso al archivo."
         }
     }
 

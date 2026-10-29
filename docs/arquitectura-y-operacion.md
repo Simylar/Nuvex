@@ -1,6 +1,6 @@
 # Arquitectura, permisos y operación de Nuvex
 
-Este documento describe la implementación real de Nuvex 3.3.0. No sustituye
+Este documento describe la implementación del árbol de trabajo de Nuvex. No sustituye
 la guía de publicación ni promete ejecución durante la suspensión física de
 macOS.
 
@@ -34,8 +34,17 @@ arbitrarios del mismo usuario.
 7. El intento se confirma consultando de nuevo el estado del túnel. No se
    considera conectado solo porque el proceso haya terminado con código cero.
 
+Las tres fuentes usan `ExtractorCodigo.normalizar`: retira separadores de una
+agrupación numérica y conserva los guiones de códigos alfanuméricos, incluidos
+los extraídos por un patrón personalizado. Los controles internos se rechazan
+en vez de transformarse silenciosamente en otro código.
+
 ### Lector de Gmail
 
+- La preparación diferencia lector no configurado de cuenta ausente, Llavero
+  inaccesible, sesión caducada, inicio OAuth pendiente y remitente vacío. La
+  ventana muestra el problema desde la primera solicitud, ofrece la acción
+  correspondiente y permite seguir escribiendo el código manualmente.
 - La consulta combina remitente, asunto opcional y el inicio del intento con
   30 segundos de margen por el redondeo de Gmail.
 - Se examinan hasta diez candidatos y se elige el más reciente por
@@ -98,7 +107,7 @@ añadió.
 | Autorización | Quién la controla | Persistencia | Cuándo reaparece |
 | --- | --- | --- | --- |
 | Contraseña VPN | Llavero de macOS | Entrada por perfil y usuario | ACL revocada, firma distinta o entrada nueva |
-| Confirmación inicial | LocalAuthentication | Marca local de Nuvex | Si se reactiva la opción o cambia el estado migrado |
+| Confirmación inicial | Nuvex + LocalAuthentication | Marca local de Nuvex | Tras revocarla; reactivar el interruptor conserva una confirmación ya completada |
 | Ayudante de red | macOS/admin + sudoers acotado | Mientras binario/configuración coincidan | Motor, perfil firmado o ayudante cambian |
 | Avisos | TCC/Notificaciones de macOS | Decisión del sistema | Solo si se revoca; Nuvex la pide desde Ajustes |
 | Gmail | Google OAuth | Refresh token en Llavero | Revocación, cliente borrado o app OAuth en prueba |
@@ -112,7 +121,103 @@ sustituye TCC, el diálogo de administrador, Touch ID, Google OAuth ni las
 aprobaciones del agente. La app registra categorías de avisos al iniciar, pero
 solicita autorización únicamente al pulsar **Autorizar…** en Ajustes.
 
+### Autorización conjunta en General
+
+`SeccionPermisosNuvex` reúne el alcance y las acciones. La autorización conjunta
+reutiliza la confirmación inicial y `IntegracionAsistentes.configurar()`, guarda
+la política `permitir` y un recibo explícito de capacidades en `ajustes.json`
+(esquema 3). Las exclusiones por conexión permanecen. No activa inicio de sesión,
+solicita avisos, instala el ayudante ni inicia OAuth automáticamente: se muestran
+sus estados y las acciones existentes. La marca global no otorga permisos del
+sistema. Las capacidades futuras requieren un identificador nuevo y una nueva
+decisión; el arranque no instala ni autoriza integraciones nuevas.
+
+`EstadoCapacidades` calcula las acciones pendientes de perfiles habilitados,
+contraseñas, confirmación inicial, ayudante y funciones opcionales configuradas.
+General muestra tres acciones y permite desplegar el resto con los detalles y
+la autorización conjunta. El acceso interactivo desde una acción se limita a
+esa contraseña; el control detallado conserva la comprobación de todas. Un
+estado desconocido o una sesión guardada no acredita autorización externa.
+
+Revocar guarda primero `noPermitir`, elimina el recibo, invalida una confirmación
+inicial en curso y retira las reglas gestionadas de todos los agentes. Informa
+de limpiezas parciales. Conserva contraseñas, túneles y permisos externos. Un
+cambio individual posterior se respeta y puede volver parcial el estado global.
+Una revocación de una regla en el agente no implica que su política general
+rechace el comando: el bloqueo efectivo de Nuvex reside en su política interna.
+
+`AutorizacionCapacidades` conserva la operación en la aplicación aunque se
+cierre o cambie la vista de General. Evita solicitudes duplicadas y comprueba
+una generación después de la espera: una confirmación tardía no prepara reglas
+ni restaura una autorización revocada. Las vistas observan ese mismo estado y
+actualizan sus comprobaciones al terminar. Los resultados de consultas antiguas
+del Llavero se descartan cuando cambian los perfiles o comienza otra consulta.
+Un fallo al leer `ajustes.json` bloquea su modificación; solo un archivo ausente
+inicia valores de serie. No interpretar errores de acceso como ajustes vacíos.
+Un archivo de cero bytes también es un error. La versión del esquema debe ser
+un entero positivo antes de recorrer migraciones; un valor negativo o no
+numérico se rechaza sin reemplazar el archivo.
+
+`ConfirmacionInicial` comparte una sola tarea de autenticación entre operaciones
+concurrentes; su generación impide que una respuesta tardía restaure una marca
+revocada. El acceso al Llavero sigue siendo independiente y por entrada.
+`AccesoLlavero` comprueba sin interacción: disponible ahora, ausente, requiere
+interacción, cancelado o fallo. Un error de autenticación no permite distinguir
+con certeza una ACL denegada de un Llavero bloqueado. La prueba interactiva
+recorre todas las contraseñas guardadas. Se retiró la lectura alternativa de
+secretos mediante `/usr/bin/security`: cambiar de ejecutable podía producir un
+segundo diálogo y otra decisión de confianza. Entradas antiguas autorizadas solo
+a esa herramienta pueden necesitar permitir expresamente a la app firmada.
+
+`ChequeoActualizacion` compara certificado y requisito designado (incluido el
+identificador). Un cambio solo es un indicio; no prueba que macOS haya revocado
+el acceso. El CLI comprueba la contraseña de la VPN solicitada en lugar de
+bloquearlas todas por la marca de cambio de firma. La identidad desconocida no
+se presenta como estable.
+
+`CuentaGoogle` lee el Llavero sin diálogos al arrancar y diferencia una entrada
+ausente de una bloqueada/corrupta. La recuperación explícita conserva el cliente
+existente; no exige otro consentimiento OAuth por un error local. El estado
+«sesión guardada» no demuestra que el scope o el servicio sigan disponibles.
+Un HTTP 403 sin motivo explícito ya no se clasifica como falta de scope.
+Cerrar u olvidar la cuenta solo cambia el estado después de persistirlo en el
+Llavero. Si falla la escritura o el borrado, conserva el estado anterior y
+explica el fallo, evitando que una sesión aparentemente cerrada reaparezca al
+reiniciar. Si se cierra localmente pero Google no confirma la revocación remota,
+lo indica y remite al panel de la cuenta; no oculta el fallo de red.
+Los intentos de inicio OAuth tienen identidad propia y se cancelan al cambiar
+de cliente. Sus respuestas y errores tardíos no pueden reemplazar ni cancelar
+un inicio posterior. Lo mismo se aplica a errores de renovación: un
+`invalid_grant` de una operación invalidada no caduca la cuenta actual. Las
+pruebas simulan esas respuestas sin usar Google ni abrir el navegador.
+Una revocación remota pendiente tampoco puede borrar el cliente o publicar
+avisos de la sesión anterior si ya comenzó un nuevo inicio OAuth. La revocación
+admite un sustituto en pruebas para reproducir esa reentrada sin tocar Google.
+
+## Guardado, importación y restauración
+
+`VPNModel.guardarPerfiles` devuelve un `ResultadoGuardado` propio de cada
+operación, con los ID confirmados y pasos separados de perfiles, contraseñas,
+lector y ayudante. Importar espera ese resultado final; no infiere éxito del
+estado global ni de ID que ya existían. Un rechazo conserva la vista previa y
+muestra el error; un guardado parcial enumera lo pendiente.
+
+`PreparacionRestauracion` valida todos los archivos antes de crear la copia
+previa o escribir perfiles. `AjustesDelGuardado.restaurarCorreo` recupera solo
+el lector y conserva las decisiones de seguridad actuales. No revive políticas,
+recibos ni exclusiones de una copia antigua. `PersistenciaRestauracion`
+compensa el cambio de perfiles si fallan los ajustes; la limpieza del Llavero
+espera a que ambos se hayan persistido. Si falla también la compensación, se
+recarga el estado efectivo y se solicita revisar la copia previa. No hay un
+diario duradero que garantice atomicidad ante un corte de energía entre archivos.
+
 ## Ciclo de vida de macOS
+
+El servidor Unix usa `DispatchSourceRead` y escucha no bloqueante. Cancelar la
+fuente cierra el descriptor cuando termina su manejador; evita cerrar desde el
+hilo principal un descriptor que otro hilo tiene bloqueado en `accept`. Los
+clientes aceptados conservan lectura bloqueante. Las pruebas cubren clientes
+que demoran su escritura y veinte cierres con reinicio inmediato del servicio.
 
 | Estado | Comportamiento real |
 | --- | --- |

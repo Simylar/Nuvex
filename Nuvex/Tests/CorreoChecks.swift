@@ -28,6 +28,13 @@ struct CorreoChecks {
         precondition(ExtractorCodigo.extraer(de: texto) == "778899")
         precondition(ExtractorCodigo.extraer(de: "PIN 9988, ref 112233", patron: #"PIN (\d+)"#) == "9988")
         precondition(ExtractorCodigo.codigoValido("A9-42"))
+        for (entrada, esperado) in [("A9-42", "A9-42"), ("  A9-42  ", "A9-42"),
+                                    ("000123", "000123"), ("482 913", "482913"),
+                                    ("482-913", "482913"), ("12\n34", "12\n34")] {
+            precondition(ExtractorCodigo.normalizar(entrada) == esperado)
+        }
+        precondition(ExtractorCodigo.extraer(de: "Token: A9-42", patron: #"Token: ([A-Z0-9-]+)"#) == "A9-42")
+        precondition(ExtractorCodigo.extraer(de: "Código: 482-913", patron: #"Código: ([0-9-]+)"#) == "482913")
         precondition(!ExtractorCodigo.codigoValido(""))
         precondition(!ExtractorCodigo.codigoValido(String(repeating: "1", count: 65)))
         precondition(!ExtractorCodigo.codigoValido("123\n456"))
@@ -163,6 +170,10 @@ struct CorreoChecks {
         precondition(ProblemaGmail.clasificar(estado: 403, cuerpo: cuerpo(#"{"error":{"code":403,"message":"Request had insufficient authentication scopes.","status":"PERMISSION_DENIED","details":[{"reason":"ACCESS_TOKEN_SCOPE_INSUFFICIENT"}]}}"#)) == .sinPermiso)
         precondition(ProblemaGmail.clasificar(estado: 429, cuerpo: cuerpo("{}")) == .limite)
         precondition(ProblemaGmail.clasificar(estado: 403, cuerpo: cuerpo(#"{"error":{"errors":[{"reason":"userRateLimitExceeded"}]}}"#)) == .limite)
+        precondition(ProblemaGmail.clasificar(estado: 403, cuerpo: cuerpo(#"{"error":{"code":403}}"#)) == .servidor(403),
+                     "un 403 sin causa no demuestra que falte el permiso de lectura")
+        precondition(ProblemaGmail.llaveroNoDisponible.definitivo)
+        precondition(ProblemaGmail.llaveroNoDisponible.accion == .cuentaGoogle)
         precondition(ProblemaGmail.clasificar(estado: 500, cuerpo: cuerpo("no es json")) == .servidor(500))
         precondition(ProblemaGmail.clasificarToken("invalid_grant") == .sesionCaducada)
         precondition(ProblemaGmail.clasificarToken("invalid_client") == .clienteNoValido)

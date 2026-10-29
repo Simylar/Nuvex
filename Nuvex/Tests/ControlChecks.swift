@@ -112,6 +112,36 @@ struct ControlChecks {
         precondition(ClienteControl.hayServidor(ruta: ruta))
         precondition(ClienteControl.disponibilidad(ruta: ruta) == .abierta)
 
+        // Conectarse antes de escribir es válido: la escucha no bloqueante
+        // no debe convertir la lectura del cliente en una lectura prematura.
+        let demorado = socket(AF_UNIX, SOCK_STREAM, 0)
+        precondition(demorado >= 0)
+        var direccion = sockaddr_un()
+        direccion.sun_family = sa_family_t(AF_UNIX)
+        withUnsafeMutableBytes(of: &direccion.sun_path) { destino in
+            destino.copyBytes(from: ruta.utf8)
+        }
+        let enlazado = withUnsafePointer(to: &direccion) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(demorado, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        precondition(enlazado == 0)
+        var limiteLectura = timeval(tv_sec: 2, tv_usec: 0)
+        precondition(setsockopt(demorado, SOL_SOCKET, SO_RCVTIMEO, &limiteLectura,
+                               socklen_t(MemoryLayout<timeval>.size)) == 0)
+        let canal = FileHandle(fileDescriptor: demorado, closeOnDealloc: true)
+        try await Task.sleep(for: .milliseconds(50))
+        try canal.write(contentsOf: Linea.codificar(Peticion(comando: .estado)))
+        var respuestaDemorada = Data()
+        while respuestaDemorada.last != 0x0A, respuestaDemorada.count < 16_384 {
+            guard let byte = try canal.read(upToCount: 1), !byte.isEmpty else { break }
+            respuestaDemorada.append(byte)
+        }
+        let mensajeDemorado = try Linea.decodificar(Mensaje.self, de: respuestaDemorada.dropLast())
+        precondition(mensajeDemorado.ok)
+        try canal.close()
+
         // La autorización real ocurre entre procesos. LOCAL_PEERPID puede
         // entregar cero aun cuando getsockopt informa éxito; el audit token
         // debe conservar un PID verificable para resolver el binario cliente.
@@ -198,6 +228,19 @@ struct ControlChecks {
         unlink(ruta)
         precondition(!recuperable.estaDisponible, "un socket sin ruta ya no está disponible para clientes")
         recuperable.detener()
+
+        // Detener no espera a accept ni deja un cierre tardío sobre un nuevo
+        // descriptor cuando se recupera el servicio de inmediato.
+        let reiniciable = ServidorSocket(ruta: ruta) { _, _, _ in .resultado(.ok) }
+        for _ in 0..<20 {
+            try reiniciable.iniciar()
+            let respuesta = try ClienteControl.enviar(Peticion(comando: .estado), ruta: ruta)
+            precondition(respuesta.ok)
+            let inicioCierre = ContinuousClock.now
+            reiniciable.detener()
+            precondition(inicioCierre.duration(to: .now) < .seconds(1), "el cierre no debe bloquear")
+            precondition(!FileManager.default.fileExists(atPath: ruta))
+        }
 
         print("Control: comprobaciones superadas")
     }

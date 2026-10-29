@@ -81,6 +81,7 @@ public final class ServidorSocket: @unchecked Sendable {
     private let cerrojo = NSLock()
     private var fd: Int32 = -1
     private var activo = false
+    private var escucha: DispatchSourceRead?
 
     public init(ruta: String, registro: @escaping @Sendable (String) -> Void = { _ in },
                 autorizarCliente: @escaping AutorizarCliente = { _ in true },
@@ -126,37 +127,53 @@ public final class ServidorSocket: @unchecked Sendable {
         guard enlazado == 0 else { let e = errno; close(fd); throw ErrorControl.sistema("bind", e) }
         chmod(ruta, 0o600)
         guard listen(fd, 8) == 0 else { let e = errno; close(fd); unlink(ruta); throw ErrorControl.sistema("listen", e) }
+        let flags = fcntl(fd, F_GETFL, 0)
+        guard flags >= 0, fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0 else {
+            let e = errno; close(fd); unlink(ruta); throw ErrorControl.sistema("fcntl", e)
+        }
 
-        cerrojo.lock(); self.fd = fd; activo = true; cerrojo.unlock()
-        let hilo = Thread { [weak self] in self?.aceptar(fd) }
-        hilo.name = "nuvex.control"
-        hilo.start()
+        let escucha = DispatchSource.makeReadSource(fileDescriptor: fd, queue: .global(qos: .userInitiated))
+        escucha.setEventHandler { [weak self] in self?.aceptar(fd) }
+        // El descriptor se cierra cuando ya no hay un manejador usándolo.
+        // Cerrar desde otro hilo mientras accept espera puede bloquear macOS.
+        escucha.setCancelHandler { close(fd) }
+        cerrojo.lock(); self.fd = fd; activo = true; self.escucha = escucha; cerrojo.unlock()
+        escucha.resume()
     }
 
     public func detener() {
         cerrojo.lock()
-        let fd = self.fd
+        let escucha = self.escucha
         activo = false
         self.fd = -1
+        self.escucha = nil
         cerrojo.unlock()
-        guard fd >= 0 else { return }
-        shutdown(fd, SHUT_RDWR)
-        close(fd)
+        guard let escucha else { return }
+        escucha.cancel()
         unlink(ruta)
     }
 
-    private var sigueActivo: Bool { cerrojo.lock(); defer { cerrojo.unlock() }; return activo }
+    private func sigueActivo(_ servidor: Int32) -> Bool {
+        cerrojo.lock(); defer { cerrojo.unlock() }
+        return activo && fd == servidor
+    }
 
     private func aceptar(_ servidor: Int32) {
-        while sigueActivo {
+        while sigueActivo(servidor) {
             let cliente = accept(servidor, nil, nil)
             guard cliente >= 0 else {
                 if errno == EINTR { continue }
-                if errno == ECONNABORTED || errno == EAGAIN || errno == EWOULDBLOCK {
-                    continue
-                }
+                if errno == ECONNABORTED { continue }
+                if errno == EAGAIN || errno == EWOULDBLOCK { return }
                 interrumpir(servidor, error: errno)
                 return
+            }
+            // Los clientes siguen usando lectura bloqueante con sus límites;
+            // no deben heredar O_NONBLOCK del descriptor de escucha.
+            let flags = fcntl(cliente, F_GETFL, 0)
+            guard flags >= 0, fcntl(cliente, F_SETFL, flags & ~O_NONBLOCK) == 0 else {
+                close(cliente)
+                continue
             }
             DispatchQueue.global(qos: .userInitiated).async { [self] in atender(cliente) }
         }
@@ -165,10 +182,12 @@ public final class ServidorSocket: @unchecked Sendable {
     private func interrumpir(_ servidor: Int32, error: Int32) {
         cerrojo.lock()
         guard activo, fd == servidor else { cerrojo.unlock(); return }
+        let escucha = self.escucha
         activo = false
         fd = -1
+        self.escucha = nil
         cerrojo.unlock()
-        close(servidor)
+        escucha?.cancel()
         unlink(ruta)
         registro("servidor de control interrumpido en accept: \(String(cString: strerror(error)))")
         alInterrumpirse()

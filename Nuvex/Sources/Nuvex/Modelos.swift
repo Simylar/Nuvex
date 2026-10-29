@@ -183,9 +183,9 @@ enum EstadoUI: Equatable {
 }
 
 /// Qué se guardó y qué quedó pendiente al guardar conexiones. Guardar tiene
-/// tres pasos independientes y cualquiera puede fallar por separado.
-struct ResumenGuardado: Equatable {
-    enum Paso: Equatable {
+/// pasos independientes que pueden fallar por separado.
+struct ResumenGuardado: Equatable, Sendable {
+    enum Paso: Equatable, Sendable {
         case hecho
         case enCurso
         /// Se hará más adelante; el texto dice cuándo.
@@ -197,9 +197,10 @@ struct ResumenGuardado: Equatable {
     var conexiones: Paso
     var contrasenas: Paso = .noAplica
     var ayudante: Paso = .noAplica
+    var ajustes: Paso = .noAplica
 
     var pasos: [(titulo: String, paso: Paso)] {
-        [("Conexiones", conexiones), ("Contraseñas en el Llavero", contrasenas), ("Ayudante de red", ayudante)]
+        [("Conexiones", conexiones), ("Lectura de códigos", ajustes), ("Contraseñas en el Llavero", contrasenas), ("Ayudante de red", ayudante)]
             .filter { $0.paso != .noAplica }
     }
 
@@ -212,8 +213,10 @@ struct ResumenGuardado: Equatable {
     /// Una línea para la barra de guardado.
     var resumen: String {
         if case .fallo = conexiones { return "No se guardaron los cambios" }
+        if case .pendiente = conexiones { return "Revisa el estado de las conexiones antes de continuar" }
+        if case .fallo = ajustes { return "Conexiones guardadas; falta guardar la lectura de códigos" }
         if case .fallo = contrasenas { return "Conexión guardada, pero falta una contraseña en el Llavero" }
-        if case .fallo = ayudante { return "Conexión guardada; falta autorizar el ayudante de red" }
+        if case .fallo = ayudante { return "Conexión guardada; falta preparar el ayudante de red" }
         if case .pendiente = ayudante { return "Conexión guardada; el ayudante se preparará al volver a conectar" }
         if enCurso { return "Cambios guardados. Aplicando…" }
         return ayudante == .hecho ? "Cambios guardados y aplicados." : "Cambios guardados."
@@ -223,6 +226,17 @@ struct ResumenGuardado: Equatable {
 // MARK: - Validación compartida por Ajustes y la bienvenida
 
 enum Validacion {
+    static func validarColeccion(_ perfiles: [VPNProfile]) throws {
+        guard perfiles.count <= 64, Set(perfiles.map(\.id)).count == perfiles.count else {
+            throw ErrorVPN(mensaje: "La configuración debe tener hasta 64 conexiones con identificadores únicos.")
+        }
+        for perfil in perfiles {
+            guard perfil.id.range(of: "^[a-z][a-z0-9-]{0,47}$", options: .regularExpression) != nil else {
+                throw ErrorVPN(mensaje: "La configuración contiene un identificador de conexión inválido.")
+            }
+            if let motivo = motivo(perfil) { throw ErrorVPN(mensaje: motivo) }
+        }
+    }
     // Misma regla que nuvexconfig.py para que el aviso aparezca antes de guardar.
     static func servidorValido(_ servidor: String) -> Bool {
         let patron = #"^(?:https://)?(?:[A-Za-z0-9][A-Za-z0-9.-]*|\[[0-9a-fA-F:]+\])(?::([0-9]{1,5}))?/?$"#

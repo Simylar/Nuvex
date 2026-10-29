@@ -57,6 +57,11 @@ struct AjustesCuentaGoogle: View {
                     Text("Créalo una vez en Google Cloud como «App de escritorio» y publica el proyecto para uso personal; si queda en modo de prueba, Google pide volver a iniciar sesión cada 7 días. El aviso «Google no verificó esta app» es normal en un cliente propio.")
                         .foregroundStyle(Paleta.textoSecundario)
                 }
+            } else if case .llaveroNoDisponible = cuenta.estado {
+                Section {
+                    Text("Desbloquea el Llavero y permite el acceso de esta copia de Nuvex. Si macOS ofrece «Permitir siempre», esa decisión pertenece al Llavero. No necesitas crear otro cliente OAuth.")
+                        .foregroundStyle(Paleta.textoSecundario)
+                }
             } else {
                 Section("Cliente OAuth") {
                     LabeledContent("ID de cliente") {
@@ -84,6 +89,7 @@ struct AjustesCuentaGoogle: View {
     private var titulo: String {
         switch cuenta.estado {
         case .sinCliente: return "Sin configurar"
+        case .llaveroNoDisponible: return "Cuenta guardada sin comprobar"
         case .desconectada: return "Sin iniciar sesión"
         case .esperandoNavegador: return "Esperando a Google…"
         case .conectada(let correo): return correo
@@ -94,9 +100,10 @@ struct AjustesCuentaGoogle: View {
     private var subtitulo: String {
         switch cuenta.estado {
         case .sinCliente: return "Añade tu cliente OAuth para leer los códigos que llegan por correo."
+        case .llaveroNoDisponible(let codigo): return "No se pudo leer el Llavero (código \(codigo)). No se ha comprobado la sesión de Google."
         case .desconectada: return "Inicia sesión con la cuenta de Gmail donde llegan los códigos."
         case .esperandoNavegador: return "Completa el inicio de sesión en el navegador."
-        case .conectada: return "Conectada · solo lectura de Gmail"
+        case .conectada: return "Sesión guardada · el acceso a Gmail se comprueba al leer"
         case .caducada: return "La sesión caducó. Vuelve a iniciar sesión."
         }
     }
@@ -106,6 +113,9 @@ struct AjustesCuentaGoogle: View {
         switch cuenta.estado {
         case .sinCliente:
             EmptyView()
+        case .llaveroNoDisponible:
+            Button("Recuperar acceso…") { cuenta.recuperarDelLlavero() }
+                .estiloBoton(.principal)
         case .desconectada, .caducada:
             Button("Iniciar sesión con Google") { cuenta.iniciarSesion() }
                 .estiloBoton(.principal)

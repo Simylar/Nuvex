@@ -82,6 +82,8 @@ extension VPNModel {
             throw ErrorVPN(mensaje: "No hay contraseña guardada para \(name). Agrégala en Ajustes.",
                            fallo: Fallo(titulo: "Falta la contraseña", detalle: "No hay contraseña guardada en el Llavero para esta conexión.", accion: .ajustes("Añadir…")))
         }
+        try await confirmarUsoInicial(razon: reason ?? "Usar la contraseña guardada para conectar a \(name)",
+                                      intentoConexion: intentoConexion)
         let context = LAContext()
         if let intentoConexion {
             IntentosConexion.registrarContexto(intentoConexion, contexto: context)
@@ -89,24 +91,6 @@ extension VPNModel {
         defer {
             if let intentoConexion {
                 IntentosConexion.retirarContexto(intentoConexion, contexto: context)
-            }
-        }
-        if SecurityPreferences.needsInitialConfirmation() {
-            var policyError: NSError?
-            let policy: LAPolicy = context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics,
-                                                             error: &policyError)
-                ? .deviceOwnerAuthenticationWithBiometrics : .deviceOwnerAuthentication
-            guard context.canEvaluatePolicy(policy, error: &policyError) else {
-                throw ErrorVPN(mensaje: "macOS no puede confirmar tu identidad para \(name). Revisa Touch ID o la contraseña del equipo en Ajustes del Sistema.",
-                               fallo: Fallo(titulo: "macOS no puede confirmar tu identidad", detalle: "Revisa Touch ID o la contraseña del equipo en Ajustes del Sistema.", accion: .reintentar("Reintentar")))
-            }
-            do {
-                try await context.evaluatePolicy(policy,
-                    localizedReason: reason ?? "Usar la contraseña guardada para conectar a \(name)")
-                SecurityPreferences.markInitialUseAuthorized()
-            } catch {
-                throw ErrorVPN(mensaje: "Se canceló o falló la confirmación de macOS para \(name).",
-                               fallo: Fallo(titulo: "Confirmación cancelada", detalle: "Se canceló o falló la confirmación de macOS con Touch ID o la contraseña del equipo.", accion: .reintentar("Reintentar")))
             }
         }
         let service = "nuvex.\(id)"
@@ -122,19 +106,45 @@ extension VPNModel {
            let password = String(data: data, encoding: .utf8), !password.isEmpty {
             return password
         }
-        if status == errSecUserCanceled || status == errSecAuthFailed {
-            throw ErrorVPN(mensaje: "No se autorizó el acceso al Llavero para \(name). Vuelve a conectar y permite el acceso de Nuvex.",
-                           fallo: Fallo(titulo: "Acceso al Llavero denegado", detalle: "Vuelve a conectar y permite que Nuvex use la contraseña guardada.", accion: .reintentar("Reintentar")))
+        if status == errSecUserCanceled {
+            throw ErrorVPN(mensaje: "Se canceló el acceso al Llavero para \(name).",
+                           fallo: Fallo(titulo: "Acceso al Llavero cancelado", detalle: "Vuelve a conectar cuando puedas permitir el acceso a la contraseña.", accion: .reintentar("Reintentar")))
         }
-        if let password = leerConHerramientaDeMacOS(id: id, username: username) {
-            return password
-        }
-        if case .missing = passwordStatus(id: id, username: username) {
+        if status == errSecItemNotFound {
             throw ErrorVPN(mensaje: "No hay contraseña guardada para \(name). Agrégala en Ajustes.",
                            fallo: Fallo(titulo: "Falta la contraseña", detalle: "No hay contraseña guardada en el Llavero para esta conexión.", accion: .ajustes("Añadir…")))
         }
-        throw ErrorVPN(mensaje: "La contraseña de \(name) está en el Llavero, pero no se pudo usar (código \(status)). Revisa sus permisos en Acceso a Llaveros o vuelve a guardarla en Ajustes.",
-                       fallo: Fallo(titulo: "No se pudo usar la contraseña", detalle: "La contraseña está en el Llavero, pero macOS no permitió usarla (código \(status)). Vuelve a guardarla en Ajustes.", accion: .ajustes("Cambiar…")))
+        if status == errSecSuccess {
+            throw ErrorVPN(mensaje: "La entrada del Llavero de \(name) no contiene una contraseña válida.",
+                           fallo: Fallo(titulo: "Contraseña guardada no válida", detalle: "Vuelve a guardar la contraseña en Ajustes.", accion: .ajustes("Cambiar…")))
+        }
+        throw ErrorVPN(mensaje: "No se pudo usar la contraseña de \(name) (código \(status)). Desbloquea el Llavero o revisa su acceso en Acceso a Llaveros.",
+                       fallo: Fallo(titulo: "No se pudo usar la contraseña", detalle: "El Llavero devolvió el código \(status). Desbloquéalo o revisa el acceso de Nuvex en Acceso a Llaveros.", accion: .ajustes("Revisar…")))
+    }
+
+    nonisolated static func confirmarUsoInicial(razon: String, intentoConexion: String? = nil) async throws {
+        try await ConfirmacionInicial.shared.confirmar {
+            let context = LAContext()
+            if let intentoConexion { IntentosConexion.registrarContexto(intentoConexion, contexto: context) }
+            defer {
+                if let intentoConexion { IntentosConexion.retirarContexto(intentoConexion, contexto: context) }
+            }
+            var policyError: NSError?
+            let policy: LAPolicy = context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics,
+                                                             error: &policyError)
+                ? .deviceOwnerAuthenticationWithBiometrics : .deviceOwnerAuthentication
+            guard context.canEvaluatePolicy(policy, error: &policyError) else {
+                throw ErrorVPN(mensaje: "macOS no puede confirmar tu identidad. Revisa Touch ID o la contraseña del equipo en Ajustes del Sistema.",
+                               fallo: Fallo(titulo: "macOS no puede confirmar tu identidad", detalle: "Revisa Touch ID o la contraseña del equipo en Ajustes del Sistema.", accion: .reintentar("Reintentar")))
+            }
+            do {
+                try await context.evaluatePolicy(policy,
+                    localizedReason: razon)
+            } catch {
+                throw ErrorVPN(mensaje: "Se canceló o falló la confirmación de macOS.",
+                               fallo: Fallo(titulo: "Confirmación cancelada", detalle: "Se canceló o falló la confirmación de macOS con Touch ID o la contraseña del equipo.", accion: .reintentar("Reintentar")))
+            }
+        }
     }
 
     /// Contraseñas de varias conexiones para exportarlas. Pide una sola
@@ -156,30 +166,14 @@ extension VPNModel {
                                            kSecUseAuthenticationContext as String: contexto,
                                            kSecMatchLimit as String: kSecMatchLimitOne]
             var dato: CFTypeRef?
-            if SecItemCopyMatching(consulta as CFDictionary, &dato) == errSecSuccess,
+            let estado = SecItemCopyMatching(consulta as CFDictionary, &dato)
+            if estado == errSecSuccess,
                let datos = dato as? Data, let password = String(data: datos, encoding: .utf8), !password.isEmpty {
                 resultado[perfil.id] = password
-            } else if let password = leerConHerramientaDeMacOS(id: perfil.id, username: perfil.username) {
-                resultado[perfil.id] = password
+            } else if estado != errSecItemNotFound {
+                throw ErrorVPN(mensaje: "No se pudo leer la contraseña de \(perfil.name) (código \(estado)). No se exportaron contraseñas.")
             }
         }
         return resultado
-    }
-
-    nonisolated static func leerConHerramientaDeMacOS(id: String, username: String) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        process.arguments = ["find-generic-password", "-s", "nuvex.\(id)", "-a", username, "-w"]
-        process.environment = Paths.environment
-        let output = Pipe()
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-        do { try process.run() } catch { return nil }
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0,
-              var password = String(data: data, encoding: .utf8) else { return nil }
-        if password.hasSuffix("\n") { password.removeLast() }
-        return password.isEmpty ? nil : password
     }
 }

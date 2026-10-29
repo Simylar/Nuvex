@@ -2,6 +2,7 @@ import AppKit
 import Darwin
 import Foundation
 import Security
+import LocalAuthentication
 
 enum ErrorGoogle: LocalizedError, Equatable {
     case sinCliente
@@ -32,6 +33,7 @@ final class CuentaGoogle: ObservableObject {
 
     enum Estado: Equatable {
         case sinCliente
+        case llaveroNoDisponible(Int32)
         case desconectada
         case esperandoNavegador
         case conectada(String)
@@ -41,7 +43,7 @@ final class CuentaGoogle: ObservableObject {
     @Published private(set) var estado: Estado = .sinCliente
     @Published private(set) var error: String?
 
-    private struct Guardado: Codable {
+    private struct Guardado: Codable, Equatable {
         var clienteID: String
         var secreto: String
         var tokenRenovacion: String?
@@ -59,10 +61,49 @@ final class CuentaGoogle: ObservableObject {
     }
     private var renovacionEnCurso: RenovacionEnCurso?
     private var inicio: Task<Void, Never>?
+    private var idInicio: UUID?
     private var servidor: ServidorRedireccion?
+    private let lectorLlavero: @MainActor (Bool) -> (datos: Data?, estado: OSStatus)
+    private let escritorLlavero: @MainActor (Data) -> Bool
+    private let borradorLlavero: @MainActor () -> Bool
+    private let pedirTokens: @MainActor ([String: String]) async throws -> [String: Any]
+    private let abrirNavegador: @MainActor (URL) -> Bool
+    private let revocarToken: @MainActor (String) async -> String?
 
-    private init() {
-        guardado = Self.leerLlavero()
+    init(lectorLlavero: @escaping @MainActor (Bool) -> (datos: Data?, estado: OSStatus) = CuentaGoogle.leerLlavero,
+         escritorLlavero: @escaping @MainActor (Data) -> Bool = CuentaGoogle.escribirDatosLlavero,
+         borradorLlavero: @escaping @MainActor () -> Bool = CuentaGoogle.borrarLlavero,
+         pedirTokens: @escaping @MainActor ([String: String]) async throws -> [String: Any] = CuentaGoogle.pedirToken,
+         abrirNavegador: @escaping @MainActor (URL) -> Bool = { NSWorkspace.shared.open($0) },
+         revocarToken: @escaping @MainActor (String) async -> String? = CuentaGoogle.revocarEnGoogle) {
+        self.lectorLlavero = lectorLlavero
+        self.escritorLlavero = escritorLlavero
+        self.borradorLlavero = borradorLlavero
+        self.pedirTokens = pedirTokens
+        self.abrirNavegador = abrirNavegador
+        self.revocarToken = revocarToken
+        recuperarDelLlavero(interactivo: false)
+    }
+
+    /// El arranque nunca provoca un diálogo ni convierte una lectura denegada
+    /// en «sin configurar». Solo una acción explícita permite interacción.
+    func recuperarDelLlavero(interactivo: Bool = true) {
+        cancelarInicio()
+        invalidarRenovacion()
+        let lectura = lectorLlavero(interactivo)
+        guard lectura.estado == errSecSuccess || lectura.estado == errSecItemNotFound else {
+            estado = .llaveroNoDisponible(lectura.estado)
+            return
+        }
+        if lectura.estado == errSecSuccess {
+            guard let datos = lectura.datos,
+                  let cuenta = try? JSONDecoder().decode(Guardado.self, from: datos) else {
+                estado = .llaveroNoDisponible(errSecDecode)
+                return
+            }
+            guardado = cuenta
+        } else { guardado = nil }
+        error = nil
         recalcular()
     }
 
@@ -70,6 +111,16 @@ final class CuentaGoogle: ObservableObject {
     var correo: String? {
         if case .conectada(let correo) = estado { return correo }
         return nil
+    }
+
+    var problemaParaLeerCorreo: ProblemaGmail? {
+        switch estado {
+        case .sinCliente, .desconectada: return .sinCuenta
+        case .llaveroNoDisponible: return .llaveroNoDisponible
+        case .esperandoNavegador: return .inicioPendiente
+        case .caducada: return .sesionCaducada
+        case .conectada: return nil
+        }
     }
 
     private func recalcular(caducada: Bool = false) {
@@ -81,6 +132,10 @@ final class CuentaGoogle: ObservableObject {
     // MARK: Cliente OAuth
 
     func guardarCliente(id: String, secreto: String) -> Bool {
+        if case .llaveroNoDisponible = estado {
+            error = "Recupera primero el acceso al Llavero para conservar la cuenta guardada."
+            return false
+        }
         let id = id.trimmingCharacters(in: .whitespacesAndNewlines)
         let secreto = secreto.trimmingCharacters(in: .whitespacesAndNewlines)
         guard id.hasSuffix(".apps.googleusercontent.com"), !secreto.isEmpty else {
@@ -88,10 +143,11 @@ final class CuentaGoogle: ObservableObject {
             return false
         }
         let nuevo = Guardado(clienteID: id, secreto: secreto)
-        guard Self.escribirLlavero(nuevo) else {
+        guard escribirLlavero(nuevo) else {
             error = "No se pudo guardar el cliente en el Llavero."
             return false
         }
+        cancelarInicio()
         invalidarRenovacion()
         guardado = nuevo
         error = nil
@@ -100,8 +156,18 @@ final class CuentaGoogle: ObservableObject {
     }
 
     func olvidarCliente() async {
-        await cerrarSesion()
-        Self.borrarLlavero()
+        var esperado = guardado
+        esperado?.tokenRenovacion = nil
+        esperado?.correo = nil
+        guard await cerrarSesion() else { return }
+        guard guardado == esperado, idInicio == nil else {
+            error = "La cuenta cambió mientras se cerraba la sesión. Revisa la cuenta actual antes de olvidarla."
+            return
+        }
+        guard borradorLlavero() else {
+            error = "No se pudo borrar el cliente del Llavero. La sesión se cerró, pero el cliente se conserva."
+            return
+        }
         guardado = nil
         recalcular()
     }
@@ -111,9 +177,14 @@ final class CuentaGoogle: ObservableObject {
     func iniciarSesion() {
         guard let guardado else { error = ErrorGoogle.sinCliente.localizedDescription; return }
         cancelarInicio()
+        let id = UUID()
+        idInicio = id
+        let pedirTokens = self.pedirTokens
+        let abrirNavegador = self.abrirNavegador
         error = nil
         estado = .esperandoNavegador
         inicio = Task { [weak self] in
+            guard self?.idInicio == id, !Task.isCancelled else { return }
             do {
                 let servidor = try ServidorRedireccion()
                 self?.servidor = servidor
@@ -131,29 +202,37 @@ final class CuentaGoogle: ObservableObject {
                     URLQueryItem(name: "access_type", value: "offline"),
                     URLQueryItem(name: "prompt", value: "consent"),
                 ]
-                NSWorkspace.shared.open(url.url!)
+                guard abrirNavegador(url.url!) else {
+                    throw ErrorGoogle.respuesta("No se pudo abrir el navegador para iniciar sesión. Revisa el navegador predeterminado y vuelve a intentarlo.")
+                }
                 let respuesta = try await servidor.esperar()
+                try Task.checkCancellation()
+                guard self?.idInicio == id else { return }
                 guard respuesta["state"] == estadoOAuth else { throw ErrorGoogle.respuesta("La respuesta de Google no corresponde a este inicio de sesión.") }
                 if let fallo = respuesta["error"] {
                     throw fallo == "access_denied" ? ErrorGoogle.cancelado : ErrorGoogle.respuesta("Google respondió: \(fallo)")
                 }
                 guard let codigo = respuesta["code"] else { throw ErrorGoogle.respuesta("Google no devolvió el código de autorización.") }
-                let tokens = try await Self.pedirToken([
+                let tokens = try await pedirTokens([
                     "code": codigo, "client_id": guardado.clienteID, "client_secret": guardado.secreto,
                     "redirect_uri": servidor.direccion, "grant_type": "authorization_code", "code_verifier": verificador,
                 ])
+                try Task.checkCancellation()
+                guard self?.idInicio == id else { return }
                 guard let renovacion = tokens["refresh_token"] as? String else {
                     throw ErrorGoogle.respuesta("Google no entregó un token de renovación. Quita el acceso de Nuvex en tu cuenta de Google y vuelve a intentarlo.")
                 }
                 let correo = (tokens["id_token"] as? String).flatMap(ExtractorCodigo.correoDeIDToken) ?? "tu cuenta"
                 self?.completarInicio(renovacion: renovacion, correo: correo, tokens: tokens)
             } catch {
+                guard self?.idInicio == id else { return }
                 self?.fallarInicio(error)
             }
         }
     }
 
     func cancelarInicio() {
+        idInicio = nil
         inicio?.cancel()
         inicio = nil
         servidor?.cerrar()
@@ -165,16 +244,18 @@ final class CuentaGoogle: ObservableObject {
         guard var guardado else { return }
         guardado.tokenRenovacion = renovacion
         guardado.correo = correo
-        guard Self.escribirLlavero(guardado) else {
+        guard escribirLlavero(guardado) else {
             fallarInicio(ErrorGoogle.respuesta("No se pudo guardar la sesión en el Llavero."))
             return
         }
+        invalidarRenovacion()
         self.guardado = guardado
         if let token = tokens["access_token"] as? String {
             acceso = (token, Date().addingTimeInterval(TimeInterval(tokens["expires_in"] as? Int ?? 3000)))
         }
         servidor = nil
         inicio = nil
+        idInicio = nil
         error = nil
         Log.escribir("cuenta de Google conectada para leer códigos")
         recalcular()
@@ -185,6 +266,7 @@ final class CuentaGoogle: ObservableObject {
         servidor?.cerrar()
         servidor = nil
         inicio = nil
+        idInicio = nil
         if fallo is CancellationError { recalcular(); return }
         error = fallo.localizedDescription
         Log.escribir("inicio de sesión de Google fallido: \(fallo.localizedDescription)")
@@ -192,22 +274,46 @@ final class CuentaGoogle: ObservableObject {
     }
 
     /// Revoca el acceso en Google y lo borra del Llavero. Conserva el cliente.
-    func cerrarSesion() async {
-        let token = guardado?.tokenRenovacion
-        invalidarRenovacion()
-        guardado?.tokenRenovacion = nil
-        guardado?.correo = nil
-        if let guardado, !Self.escribirLlavero(guardado) {
-            error = "No se pudo actualizar la sesión guardada en el Llavero."
+    @discardableResult
+    func cerrarSesion() async -> Bool {
+        cancelarInicio()
+        guard var nuevo = guardado else {
+            if case .llaveroNoDisponible = estado {
+                error = "Recupera el acceso al Llavero antes de cerrar o borrar la cuenta guardada."
+                return false
+            }
+            return true
         }
+        let token = nuevo.tokenRenovacion
+        invalidarRenovacion()
+        nuevo.tokenRenovacion = nil
+        nuevo.correo = nil
+        guard escribirLlavero(nuevo) else {
+            error = "No se pudo cerrar la sesión guardada en el Llavero. Se conserva la cuenta; recupera el acceso y reintenta."
+            return false
+        }
+        guardado = nuevo
+        error = nil
         recalcular()
         if let token {
-            var peticion = URLRequest(url: URL(string: "https://oauth2.googleapis.com/revoke")!)
-            peticion.timeoutInterval = 15
-            peticion.httpMethod = "POST"
-            peticion.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-            peticion.httpBody = Self.formulario(["token": token])
-            _ = try? await URLSession.shared.data(for: peticion)
+            let aviso = await revocarToken(token)
+            if guardado == nuevo, idInicio == nil { error = aviso }
+        }
+        return true
+    }
+
+    private static func revocarEnGoogle(_ token: String) async -> String? {
+        var peticion = URLRequest(url: URL(string: "https://oauth2.googleapis.com/revoke")!)
+        peticion.timeoutInterval = 15
+        peticion.httpMethod = "POST"
+        peticion.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        peticion.httpBody = Self.formulario(["token": token])
+        do {
+            let (_, respuesta) = try await URLSession.shared.data(for: peticion)
+            return (respuesta as? HTTPURLResponse)?.statusCode == 200 ? nil
+                : "Sesión cerrada en este equipo. Google no confirmó la revocación; revisa el acceso desde tu cuenta de Google."
+        } catch {
+            return "Sesión cerrada en este equipo. No se pudo confirmar la revocación en Google; revisa el acceso desde tu cuenta."
         }
     }
 
@@ -215,6 +321,7 @@ final class CuentaGoogle: ObservableObject {
 
     /// Token de acceso vigente; lo renueva si caducó.
     func tokenAcceso() async throws -> String {
+        if case .llaveroNoDisponible = estado { throw ProblemaGmail.llaveroNoDisponible }
         if let acceso, acceso.caduca > Date().addingTimeInterval(60) { return acceso.token }
         if let renovacionEnCurso {
             let renovado: (token: String, caduca: Date)
@@ -229,8 +336,9 @@ final class CuentaGoogle: ObservableObject {
         }
         guard let guardado else { throw ErrorGoogle.sinCliente }
         guard let renovacion = guardado.tokenRenovacion else { throw ErrorGoogle.sinSesion }
+        let pedirTokens = self.pedirTokens
         let tarea: Task<(token: String, caduca: Date), Error> = Task {
-            let tokens = try await Self.pedirToken([
+            let tokens = try await pedirTokens([
                 "client_id": guardado.clienteID, "client_secret": guardado.secreto,
                 "refresh_token": renovacion, "grant_type": "refresh_token",
             ])
@@ -250,10 +358,14 @@ final class CuentaGoogle: ObservableObject {
             acceso = renovado
             if case .caducada = estado { recalcular() }
             return renovado.token
-        } catch ErrorGoogle.respuesta(let detalle) where detalle.contains("invalid_grant") {
-            Log.escribir("la sesión de Google caducó")
-            recalcular(caducada: true)
-            throw ErrorGoogle.caducada
+        } catch {
+            guard renovacionEnCurso?.id == idRenovacion else { throw ErrorGoogle.sinSesion }
+            if case ErrorGoogle.respuesta(let detalle) = error, detalle.contains("invalid_grant") {
+                Log.escribir("la sesión de Google caducó")
+                recalcular(caducada: true)
+                throw ErrorGoogle.caducada
+            }
+            throw error
         }
     }
 
@@ -295,18 +407,24 @@ final class CuentaGoogle: ObservableObject {
     private static let servicio = "nuvex.google"
     private static let cuenta = "cuenta"
 
-    private static func leerLlavero() -> Guardado? {
+    private static func leerLlavero(interactivo: Bool) -> (datos: Data?, estado: OSStatus) {
+        let contexto = LAContext()
+        contexto.interactionNotAllowed = !interactivo
         let consulta: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                        kSecAttrService as String: servicio, kSecAttrAccount as String: cuenta,
+                                       kSecUseAuthenticationContext as String: contexto,
                                        kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne]
         var resultado: CFTypeRef?
-        guard SecItemCopyMatching(consulta as CFDictionary, &resultado) == errSecSuccess,
-              let datos = resultado as? Data else { return nil }
-        return try? JSONDecoder().decode(Guardado.self, from: datos)
+        let estado = SecItemCopyMatching(consulta as CFDictionary, &resultado)
+        return (resultado as? Data, estado)
     }
 
-    private static func escribirLlavero(_ guardado: Guardado) -> Bool {
+    private func escribirLlavero(_ guardado: Guardado) -> Bool {
         guard let datos = try? JSONEncoder().encode(guardado) else { return false }
+        return escritorLlavero(datos)
+    }
+
+    private static func escribirDatosLlavero(_ datos: Data) -> Bool {
         let consulta: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                        kSecAttrService as String: servicio, kSecAttrAccount as String: cuenta]
         let actualizado = SecItemUpdate(consulta as CFDictionary, [kSecValueData as String: datos] as CFDictionary)
@@ -319,10 +437,11 @@ final class CuentaGoogle: ObservableObject {
         return actualizado == errSecSuccess
     }
 
-    private static func borrarLlavero() {
+    private static func borrarLlavero() -> Bool {
         let consulta: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                        kSecAttrService as String: servicio, kSecAttrAccount as String: cuenta]
-        SecItemDelete(consulta as CFDictionary)
+        let resultado = SecItemDelete(consulta as CFDictionary)
+        return resultado == errSecSuccess || resultado == errSecItemNotFound
     }
 }
 

@@ -30,3 +30,45 @@ enum SecurityPreferences {
         defaults.set(true, forKey: authorizedKey)
     }
 }
+
+/// Comparte la confirmación entre conexiones concurrentes. Una revocación
+/// invalida también una respuesta de autenticación que llegue tarde.
+@MainActor
+final class ConfirmacionInicial {
+    static let shared = ConfirmacionInicial()
+    private let defaults: UserDefaults
+    private var tarea: (id: UUID, valor: Task<Void, Error>)?
+    private var generacion = 0
+
+    init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+
+    func confirmar(autenticar: @escaping @Sendable () async throws -> Void) async throws {
+        guard SecurityPreferences.needsInitialConfirmation(defaults: defaults) else { return }
+        let actual = generacion
+        let id: UUID
+        let compartida: Task<Void, Error>
+        if let tarea { compartida = tarea.valor; id = tarea.id }
+        else {
+            id = UUID()
+            compartida = Task { try await autenticar() }
+            tarea = (id, compartida)
+        }
+        do {
+            try await compartida.value
+            guard actual == generacion else { throw CancellationError() }
+            SecurityPreferences.markInitialUseAuthorized(defaults: defaults)
+            if tarea?.id == id { tarea = nil }
+        } catch {
+            if tarea?.id == id { tarea = nil }
+            throw error
+        }
+    }
+
+    func revocar() {
+        generacion += 1
+        tarea?.valor.cancel()
+        tarea = nil
+        defaults.set(true, forKey: SecurityPreferences.confirmationKey)
+        defaults.set(false, forKey: SecurityPreferences.authorizedKey)
+    }
+}

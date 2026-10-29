@@ -7,6 +7,10 @@ enum ProblemaGmail: LocalizedError, Equatable, Sendable {
     case sesionCaducada
     /// No hay cuenta conectada o falta el cliente OAuth.
     case sinCuenta
+    /// No se pudo leer la sesión guardada; no demuestra un fallo de Google.
+    case llaveroNoDisponible
+    case inicioPendiente
+    case remitenteNoConfigurado
     /// El cliente OAuth no es válido (`invalid_client`, `unauthorized_client`).
     case clienteNoValido
     /// La sesión no tiene el permiso de lectura de Gmail.
@@ -23,6 +27,7 @@ enum ProblemaGmail: LocalizedError, Equatable, Sendable {
     enum Accion: Equatable, Sendable {
         /// Volver a iniciar sesión en Ajustes › Cuenta de Google.
         case cuentaGoogle
+        case conexion
         /// Abrir la Gmail API en la consola de Google Cloud.
         case activarAPI
         /// Volver a buscar el correo.
@@ -33,6 +38,9 @@ enum ProblemaGmail: LocalizedError, Equatable, Sendable {
         switch self {
         case .sesionCaducada: return "La sesión de Google caducó"
         case .sinCuenta: return "No hay ninguna cuenta de Google conectada"
+        case .llaveroNoDisponible: return "No se pudo leer la cuenta del Llavero"
+        case .inicioPendiente: return "Falta completar el inicio de sesión"
+        case .remitenteNoConfigurado: return "Falta el remitente del código"
         case .clienteNoValido: return "Google rechazó el cliente OAuth"
         case .sinPermiso: return "Falta el permiso para leer Gmail"
         case .apiDesactivada: return "La Gmail API está desactivada"
@@ -47,6 +55,9 @@ enum ProblemaGmail: LocalizedError, Equatable, Sendable {
         switch self {
         case .sesionCaducada: return "sesion_caducada"
         case .sinCuenta: return "sin_cuenta"
+        case .llaveroNoDisponible: return "llavero_no_disponible"
+        case .inicioPendiente: return "inicio_pendiente"
+        case .remitenteNoConfigurado: return "remitente_no_configurado"
         case .clienteNoValido: return "cliente_no_valido"
         case .sinPermiso: return "sin_permiso"
         case .apiDesactivada: return "api_desactivada"
@@ -62,6 +73,12 @@ enum ProblemaGmail: LocalizedError, Equatable, Sendable {
             return "Vuelve a iniciar sesión en Ajustes › Cuenta de Google. Si pasa cada 7 días, publica la app de tu proyecto de Google Cloud (docs/gmail.md)."
         case .sinCuenta:
             return "Conecta tu cuenta en Ajustes › Cuenta de Google para que Nuvex lea el código."
+        case .llaveroNoDisponible:
+            return "Abre Ajustes › Cuenta de Google y pulsa Recuperar acceso. Desbloquea el Llavero o permite el acceso de Nuvex; no hace falta crear otra cuenta."
+        case .inicioPendiente:
+            return "Completa el inicio de sesión en el navegador y vuelve a buscar el código."
+        case .remitenteNoConfigurado:
+            return "Añade el remitente en los ajustes de esta conexión para buscar el correo del código."
         case .clienteNoValido:
             return "Revisa el ID y el secreto del cliente en Ajustes › Cuenta de Google; quizá se borró o cambió en Google Cloud."
         case .sinPermiso:
@@ -82,7 +99,8 @@ enum ProblemaGmail: LocalizedError, Equatable, Sendable {
 
     var accion: Accion {
         switch self {
-        case .sesionCaducada, .sinCuenta, .clienteNoValido, .sinPermiso: return .cuentaGoogle
+        case .sesionCaducada, .sinCuenta, .llaveroNoDisponible, .inicioPendiente, .clienteNoValido, .sinPermiso: return .cuentaGoogle
+        case .remitenteNoConfigurado: return .conexion
         case .apiDesactivada: return .activarAPI
         case .limite, .sinRed, .servidor: return .reintentar
         }
@@ -120,7 +138,6 @@ enum ProblemaGmail: LocalizedError, Equatable, Sendable {
             return .limite
         }
         if estado == 401 { return .sesionCaducada }
-        if estado == 403 { return .sinPermiso }
         return .servidor(estado)
     }
 

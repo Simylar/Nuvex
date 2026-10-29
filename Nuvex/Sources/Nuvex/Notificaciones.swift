@@ -138,6 +138,7 @@ final class VPNNotifications: NSObject, UNUserNotificationCenterDelegate, @unche
     // MARK: Estilo
 
     enum Estilo: Equatable {
+        case noDisponible
         case sinAutorizar
         case desactivados
         case alertas
@@ -146,7 +147,7 @@ final class VPNNotifications: NSObject, UNUserNotificationCenterDelegate, @unche
     }
 
     func estilo() async -> Estilo {
-        guard disponible else { return .banners }
+        guard disponible else { return .noDisponible }
         let ajustes = await UNUserNotificationCenter.current().notificationSettings()
         switch ajustes.authorizationStatus {
         case .denied: return .desactivados

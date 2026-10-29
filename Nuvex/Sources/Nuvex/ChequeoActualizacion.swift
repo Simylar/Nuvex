@@ -9,9 +9,10 @@ import SwiftUI
 @MainActor
 final class ChequeoActualizacion: ObservableObject {
     static let claveFirma = "huellaFirmaApp"
+    static let claveRequisito = "requisitoFirmaApp"
     static let claveLlaveroPendiente = "llaveroPendienteTrasFirma"
 
-    /// La firma de la app cambió y el Llavero pedirá permiso en el próximo uso.
+    /// Cambió la identidad; el acceso efectivo debe comprobarse por entrada.
     @Published private(set) var llaveroPendiente: Bool
     @Published private(set) var probandoLlavero = false
     @Published private(set) var errorLlavero: String?
@@ -27,13 +28,18 @@ final class ChequeoActualizacion: ObservableObject {
         self.defaults = defaults
         versionNueva = migracion.versionNueva
         let huella = Self.huellaFirma()
-        firmaEstable = !huella.hasPrefix("adhoc")
+        firmaEstable = huella != "desconocida" && !huella.hasPrefix("adhoc")
         let anterior = defaults.string(forKey: Self.claveFirma)
-        if let anterior, anterior != huella {
+        let requisito = Self.requisitoFirma()
+        let requisitoAnterior = defaults.string(forKey: Self.claveRequisito)
+        let cambio = requisitoAnterior != nil && requisito != nil
+            ? requisitoAnterior != requisito : anterior != nil && anterior != huella && huella != "desconocida"
+        if cambio {
             defaults.set(true, forKey: Self.claveLlaveroPendiente)
-            Log.escribir("la firma de la app cambió; el Llavero pedirá permiso de nuevo")
+            Log.escribir("cambió la identidad de la app; comprobar acceso al Llavero")
         }
-        defaults.set(huella, forKey: Self.claveFirma)
+        if huella != "desconocida" { defaults.set(huella, forKey: Self.claveFirma) }
+        if let requisito { defaults.set(requisito, forKey: Self.claveRequisito) }
         llaveroPendiente = defaults.bool(forKey: Self.claveLlaveroPendiente)
         if migracion.versionNueva, Self.notas(de: InfoVersion.actual.corta) != nil {
             let version = InfoVersion.actual.corta
@@ -52,7 +58,9 @@ final class ChequeoActualizacion: ObservableObject {
 
     /// Se llama cuando el modelo ya cargó perfiles y estado.
     func revisar(_ modelo: VPNModel) {
-        if llaveroPendiente && !modelo.passwordStatuses.values.contains(.saved) && modelo.configuracionCargada {
+        if llaveroPendiente && modelo.configuracionCargada && modelo.profiles.allSatisfy({
+            modelo.passwordStatuses[$0.id] == .missing
+        }) {
             // Sin contraseñas guardadas no hay nada que el Llavero deba volver a autorizar.
             descartarLlavero()
         }
@@ -64,17 +72,23 @@ final class ChequeoActualizacion: ObservableObject {
 
     /// Provoca ahora la petición de acceso del Llavero, con la persona delante.
     func probarLlavero(_ modelo: VPNModel) {
-        guard let perfil = modelo.profiles.first(where: { modelo.passwordStatuses[$0.id] == .saved }) else {
-            descartarLlavero()
+        guard !probandoLlavero else { return }
+        let perfiles = modelo.profiles.filter {
+            !$0.username.isEmpty && modelo.passwordStatuses[$0.id] != .missing
+        }
+        guard !perfiles.isEmpty else {
+            errorLlavero = "No hay contraseñas guardadas comprobables. Revisa las conexiones."
             return
         }
         probandoLlavero = true
         errorLlavero = nil
         Task {
             do {
-                _ = try await VPNModel.leerDelLlavero(
-                    id: perfil.id, name: perfil.name,
-                    reason: "Comprobar que Nuvex puede usar las contraseñas guardadas tras actualizarse")
+                for perfil in perfiles {
+                    _ = try await VPNModel.leerDelLlavero(
+                        id: perfil.id, name: perfil.name,
+                        reason: "Comprobar que Nuvex puede usar las contraseñas guardadas tras actualizarse")
+                }
                 descartarLlavero()
             } catch {
                 errorLlavero = error.localizedDescription
@@ -91,6 +105,22 @@ final class ChequeoActualizacion: ObservableObject {
     func novedadesVistas() { novedades = nil }
 
     // MARK: Firma
+
+    /// El requisito designado incluye identificador y firmante. Comparar solo
+    /// el certificado omitía cambios de identidad con el mismo certificado.
+    nonisolated static func requisitoFirma() -> String? {
+        var codigo: SecCode?
+        guard SecCodeCopySelf([], &codigo) == errSecSuccess, let codigo else { return nil }
+        var estatico: SecStaticCode?
+        guard SecCodeCopyStaticCode(codigo, [], &estatico) == errSecSuccess, let estatico else { return nil }
+        var requisito: SecRequirement?
+        guard SecCodeCopyDesignatedRequirement(estatico, [], &requisito) == errSecSuccess,
+              let requisito else { return nil }
+        var texto: CFString?
+        guard SecRequirementCopyString(requisito, [], &texto) == errSecSuccess,
+              let texto else { return nil }
+        return SHA256.hash(data: Data((texto as String).utf8)).map { String(format: "%02x", $0) }.joined()
+    }
 
     /// Huella del certificado que firma la app, o "adhoc:<cdhash>" sin certificado.
     nonisolated static func huellaFirma() -> String {

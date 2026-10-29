@@ -213,18 +213,33 @@ final class ControlRemoto {
         }
         if !vpn.helperReady {
             return .resultado(.requierePersona, vpn: vpn.id, motivo: .ayudanteNoDisponible,
-                              titulo: "El ayudante de red necesita autorización",
-                              detalle: "En la Mac, abre el menú de Nuvex y pulsa Autorizar. macOS pedirá la contraseña de administrador.")
+                              titulo: "El ayudante de red no está vigente",
+                              detalle: "En la Mac, revisa Ajustes › Ayudante. Puede faltar instalarlo o haber cambiado la configuración; macOS autoriza su instalación.")
         }
         if SecurityPreferences.needsInitialConfirmation() {
             return .resultado(.requierePersona, vpn: vpn.id, motivo: .confirmacionRequerida,
                               titulo: "Falta la confirmación inicial con Touch ID",
-                              detalle: "Conecta una vez desde el menú de Nuvex en la Mac; después los asistentes podrán conectar sin ti.")
+                              detalle: "En la Mac, abre Ajustes › General › Permisos y capacidades o conecta una vez desde el menú de Nuvex.")
         }
-        if modelo.chequeo?.llaveroPendiente == true {
+        guard let perfil = modelo.profiles.first(where: { $0.id == vpn.id }) else {
+            return .resultado(.error, vpn: vpn.id, motivo: .configuracionIncompleta,
+                              titulo: "No se pudo comprobar el perfil")
+        }
+        // La marca de cambio de firma es orientativa. Solo la lectura de la
+        // entrada concreta comprueba si esta conexión puede funcionar ahora.
+        switch AccesoLlavero.comprobar(servicio: "nuvex.\(perfil.id)", cuenta: perfil.username) {
+        case .disponible: break
+        case .ausente:
             return .resultado(.requierePersona, vpn: vpn.id, motivo: .llaveroNoDisponible,
-                              titulo: "macOS debe permitir de nuevo el acceso al Llavero",
-                              detalle: "En la Mac, abre el menú de Nuvex y pulsa Probar; elige «Permitir siempre».")
+                              titulo: "Falta la contraseña guardada", detalle: "Guárdala en Ajustes de Nuvex.")
+        case .requiereInteraccion, .cancelado:
+            return .resultado(.requierePersona, vpn: vpn.id, motivo: .llaveroNoDisponible,
+                              titulo: "El Llavero requiere tu intervención",
+                              detalle: "Desbloquea el Llavero y comprueba las contraseñas en Ajustes › General. macOS puede pedir permitir el acceso de Nuvex.")
+        case .fallo(let codigo):
+            return .resultado(.error, vpn: vpn.id, motivo: .llaveroNoDisponible,
+                              titulo: "No se pudo comprobar el Llavero",
+                              detalle: "Código \(codigo). Revisa el Llavero en la Mac; este error no demuestra que falte autorización.")
         }
         return nil
     }
@@ -448,18 +463,18 @@ final class ControlRemoto {
             Comprobacion(nombre: "Control remoto", ok: disponible,
                          detalle: disponible ? "Disponible" : "No pudo iniciar; cierra otras copias de Nuvex y vuelve a abrir la app"),
             Comprobacion(nombre: "Ayudante de red", ok: modelo.ayudanteListo == true,
-                         detalle: modelo.ayudanteListo == true ? "Al día" : "Necesita autorización en la Mac"),
+                         detalle: modelo.ayudanteListo == true ? "Al día" : "No está vigente o no pudo comprobarse; revisa el ayudante en la Mac"),
             Comprobacion(nombre: "Permiso para asistentes", ok: preferencias.politicaAsistentes == .permitir,
                          detalle: ["noPermitir": "No permitido", "preguntar": "Pide confirmación en la Mac",
                                    "permitir": "Conectan sin preguntar"][preferencias.politicaAsistentes.rawValue] ?? ""),
             Comprobacion(nombre: "Confirmación inicial con Touch ID", ok: !SecurityPreferences.needsInitialConfirmation(),
-                         detalle: SecurityPreferences.needsInitialConfirmation() ? "Pendiente: conecta una vez desde la Mac" : "Hecha"),
+                         detalle: SecurityPreferences.needsInitialConfirmation() ? "Pendiente: autoriza desde General en la Mac" : "Sin confirmación pendiente"),
             Comprobacion(nombre: "Firma de la app", ok: modelo.chequeo?.firmaEstable ?? false,
-                         detalle: modelo.chequeo?.firmaEstable == true ? "Estable" : "Ad hoc: el Llavero puede preguntar tras cada actualización"),
-            Comprobacion(nombre: "Estado del Llavero", ok: modelo.chequeo?.llaveroPendiente != true,
+                         detalle: modelo.chequeo?.firmaEstable == true ? "Estable" : "Identidad estable no comprobada; el Llavero puede preguntar tras actualizar"),
+            Comprobacion(nombre: "Cambio de identidad de la app", ok: modelo.chequeo != nil && modelo.chequeo?.llaveroPendiente == false,
                          detalle: modelo.chequeo?.llaveroPendiente == true
-                            ? "Pendiente de permitir en la Mac"
-                            : "Sin autorización pendiente detectada; la lectura no se probó"),
+                            ? "Identidad cambiada; comprueba el acceso a cada contraseña en General"
+                            : "Sin cambio comprobado; esto no acredita acceso al Llavero"),
         ]
         for vpn in modelo.vpns where vpn.enabled {
             var problemas: [String] = []

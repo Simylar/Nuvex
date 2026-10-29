@@ -228,6 +228,7 @@ struct VistaImportar: View {
     @State private var importando = false
     @State private var error: String?
     @State private var terminado: String?
+    @State private var importacionCompleta = false
     @State private var idsFinales: [String: String] = [:]
 
     private var busy: Bool { modelo.guardandoConfiguracion || modelo.instalandoAyudante }
@@ -236,7 +237,9 @@ struct VistaImportar: View {
         Form {
             if let terminado {
                 Section {
-                    Label("Importación completa", systemImage: "checkmark.circle.fill").foregroundStyle(Paleta.exitoTexto)
+                    Label(importacionCompleta ? "Importación completa" : "Importación con pendientes",
+                          systemImage: importacionCompleta ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                        .foregroundStyle(importacionCompleta ? Paleta.exitoTexto : Paleta.avisoTexto)
                     Text(terminado).foregroundStyle(Paleta.textoSecundario).fixedSize(horizontal: false, vertical: true)
                     HStack { Spacer(); Button("Listo", action: cerrar).estiloBoton(.principal).keyboardShortcut(.defaultAction) }
                 }
@@ -272,10 +275,6 @@ struct VistaImportar: View {
         }
         .formularioNuvex()
         .frame(width: 540, height: 560)
-        .onChange(of: busy) { antes, ahora in
-            guard importando, antes, !ahora else { return }
-            terminarImportacion()
-        }
     }
 
     @ViewBuilder
@@ -333,7 +332,7 @@ struct VistaImportar: View {
                 let cuenta = lista.filter { $0.accion != .omitir && $0.motivoInvalido == nil }.count
                 Button(cuenta == 1 ? "Importar 1 conexión" : "Importar \(cuenta) conexiones", action: importar)
                     .estiloBoton(.principal).keyboardShortcut(.defaultAction)
-                    .disabled(cuenta == 0 || busy || modelo.hayAlgunaConectada)
+                    .disabled(cuenta == 0 || busy || importando || modelo.hayAlgunaConectada)
             }
         }
     }
@@ -376,6 +375,7 @@ struct VistaImportar: View {
         guard let elementos else { return }
         var perfiles = modelo.profiles
         var contrasenas: [String: String] = [:]
+        var correo: [String: ConfigCorreo] = [:]
         idsFinales = [:]
         for elemento in elementos where elemento.motivoInvalido == nil {
             var perfil = elemento.perfil.normalizado
@@ -393,33 +393,29 @@ struct VistaImportar: View {
             }
             idsFinales[elemento.perfil.id] = perfil.id
             if let contrasena = elemento.contrasena { contrasenas[perfil.id] = contrasena }
+            if let config = elemento.correo { correo[perfil.id] = config }
         }
         guard perfiles.count <= 64 else { error = "Nuvex admite hasta 64 conexiones."; return }
         error = nil
         importando = true
-        modelo.guardarPerfiles(perfiles, passwords: contrasenas)
-        // guardarPerfiles puede rechazarlo sin empezar a guardar.
-        if !busy { terminarImportacion() }
+        let ids = Set(idsFinales.values)
+        let sinContrasena = elementos.filter { idsFinales[$0.perfil.id] != nil && $0.contrasena == nil }.count
+        modelo.guardarPerfiles(perfiles, passwords: contrasenas, ajustes: .importarCorreo(correo)) { resultado in
+            terminarImportacion(resultado, ids: ids, sinContrasena: sinContrasena)
+        }
     }
 
-    private func terminarImportacion() {
+    private func terminarImportacion(_ resultado: ResultadoGuardado, ids: Set<String>, sinContrasena: Int) {
         importando = false
-        let importados = idsFinales.values.filter { id in modelo.profiles.contains { $0.id == id } }
-        guard !importados.isEmpty, modelo.ultimoError == nil || importados.count == idsFinales.count else {
-            error = modelo.ultimoError ?? "No se pudieron importar las conexiones."
+        guard resultado.confirmaImportacion(ids) else {
+            error = resultado.avisos.first ?? "No se pudieron importar las conexiones."
             return
         }
-        // El código por correo vive en ajustes.json, fuera de las conexiones.
-        Preferencias.shared.modificar { ajustes in
-            for elemento in elementos ?? [] {
-                if let destino = idsFinales[elemento.perfil.id], let correo = elemento.correo { ajustes.correo[destino] = correo }
-            }
-        }
-        Log.escribir("importadas \(importados.count) conexiones")
-        let sinContrasena = elementos?.filter { idsFinales[$0.perfil.id] != nil && $0.contrasena == nil }.count ?? 0
-        terminado = "Se importaron \(importados.count) conexión(es)."
+        importacionCompleta = resultado.completo
+        Log.escribir("importadas \(ids.count) conexiones")
+        terminado = "Se importaron \(ids.count) conexión(es)."
             + (sinContrasena > 0 ? " \(sinContrasena) no traían contraseña: añádela en Ajustes antes de conectar." : "")
-            + (modelo.ultimoError.map { " Aviso: \($0)" } ?? "")
+            + (resultado.avisos.isEmpty ? "" : " Pendientes: " + resultado.avisos.joined(separator: " "))
         elementos = nil
     }
 }

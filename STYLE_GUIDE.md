@@ -535,6 +535,7 @@ Cuando está desconectada, toda la fila es un botón con `EstiloFila`. En los de
 
 - **Panel:** 320 pt de ancho; con más de 8 conexiones, la lista se desplaza dentro de 8 filas de alto.
 - **Ajustes:** barra lateral de 210–300 pt y detalle flexible; mínimo 780 × 580. Revisado a 780 × 580, 820 × 640 y 1180 × 820. Las secciones crecen hasta 704 pt y después se centran; la barra de acciones sigue la misma columna.
+- **Permisos en General:** resumen de acciones para funciones utilizadas; hasta tres filas con función, motivo y acción concreta. El despliegue nativo muestra las restantes y la autorización conjunta. Una función opcional sin configurar no se marca como permiso faltante; un estado desconocido conserva esa incertidumbre.
 - **Diálogos:** ancho fijo y alto según el contenido. La ventana del código inicia compacta a 360 × 340 pt y permanece en el nivel flotante estándar mientras la operación esté activa; los textos largos envuelven (`.fixedSize(horizontal: false, vertical: true)`).
 - **Truncado:** nombres y servidores en una línea; valores técnicos largos con truncado central.
 - **Versiones:** macOS 14 o posterior. Las API de macOS 26 (vidrio, `safeAreaBar`, botones de vidrio) se comprueban solo en `Diseno.swift`, con respaldo en 14 y 15.

@@ -96,10 +96,13 @@ final class VPNModel: ObservableObject {
         cargarConfiguracion()
         // El panel del código busca en Gmail si la conexión lo tiene configurado.
         SolicitudCodigo.lector = { perfilID, desde, alCambiar in
-            guard let config = Preferencias.shared.ajustes.correo[perfilID],
-                  !config.remitente.trimmingCharacters(in: .whitespaces).isEmpty,
-                  let cuenta = CuentaGoogle.shared.correo else { return nil }
-            return (cuenta, Task { await LectorGmail.esperar(config, desde: desde, alCambiar: alCambiar) })
+            guard let config = Preferencias.shared.ajustes.correo[perfilID] else { return .noConfigurado }
+            guard !config.remitente.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return .problema(.remitenteNoConfigurado)
+            }
+            if let problema = CuentaGoogle.shared.problemaParaLeerCorreo { return .problema(problema) }
+            return .disponible(cuenta: CuentaGoogle.shared.correo ?? "Gmail",
+                              tarea: Task { await LectorGmail.esperar(config, desde: desde, alCambiar: alCambiar) })
         }
         let control = ControlRemoto(modelo: self)
         control.iniciar()
@@ -289,6 +292,10 @@ final class VPNModel: ObservableObject {
     }
 
     func conectar(_ vpn: VPNStatus) {
+        guard !guardandoConfiguracion else {
+            ultimoError = "Espera a que termine de guardarse la configuración antes de conectar."
+            return
+        }
         guard vpn.enabled, vpn.configured else {
             estados[vpn.id] = .error(Fallo(titulo: "Falta configurar la conexión",
                                            detalle: "Completa el servidor y el usuario en Ajustes.",
@@ -447,9 +454,15 @@ final class VPNModel: ObservableObject {
     }
 
     func instalarAyudante(desdeGuardado: Bool = false, conectarDespues vpn: VPNStatus? = nil,
-                         errorPrevio: String? = nil) {
+                         errorPrevio: String? = nil,
+                         alTerminar: (@MainActor @Sendable (ResumenGuardado.Paso) -> Void)? = nil) {
+        guard !guardandoConfiguracion else {
+            alTerminar?(.pendiente("Espera a que termine de guardarse la configuración antes de preparar el ayudante."))
+            return
+        }
         guard !instalandoAyudante else {
             if desdeGuardado { resumenGuardado?.ayudante = .pendiente("Nuvex lo preparará la próxima vez que conectes.") }
+            alTerminar?(.pendiente("La preparación del ayudante sigue en curso."))
             return
         }
         instalandoAyudante = true
@@ -484,6 +497,7 @@ final class VPNModel: ObservableObject {
                     if result.codigo == 0, let vpn {
                         self.iniciarConexion(vpn)
                     }
+                    alTerminar?(result.codigo == 0 ? .hecho : .fallo(installError))
                 }
             } catch {
                 await MainActor.run {
@@ -494,6 +508,7 @@ final class VPNModel: ObservableObject {
                         self.mensajeConfiguracion = "La configuración se guardó; el ayudante se actualizará al conectar."
                         self.resumenGuardado?.ayudante = .fallo(error.localizedDescription)
                     }
+                    alTerminar?(.fallo(error.localizedDescription))
                 }
             }
         }
@@ -576,40 +591,46 @@ final class VPNModel: ObservableObject {
 
     /// Vuelve a la configuración de una copia de seguridad. Antes guarda una
     /// copia del estado actual, para poder deshacerlo.
-    func restaurarCopia(_ copia: CopiaSeguridad) {
-        guard let perfiles = Migraciones.perfiles(en: copia.url) else {
-            ultimoError = "La copia no contiene conexiones válidas."
-            return
+    func restaurarCopia(_ copia: CopiaSeguridad,
+                       alFinalizar: (@MainActor @Sendable (ResultadoGuardado) -> Void)? = nil) {
+        func rechazar(_ detalle: String) {
+            ultimoError = detalle
+            alFinalizar?(ResultadoGuardado(id: UUID(), resumen: .init(conexiones: .fallo(detalle)), idsConfirmados: []))
         }
-        if let activa = vpns.first(where: \.connected) {
-            ultimoError = "Desconecta «\(activa.name)» antes de restaurar una copia."
+        guard !ocupado, !hayAlgunaConectada, !datosMasNuevos, Preferencias.shared.soloLectura == nil else {
+            rechazar("Termina las operaciones y desconecta las VPN antes de restaurar. Los perfiles y ajustes actuales deben poder modificarse.")
             return
         }
         do {
+            let preparacion = try PreparacionRestauracion.leer(en: copia.url)
             _ = try Migraciones.crearCopia(etiqueta: "antes-de-restaurar", base: Preferencias.directorio,
                                            perfiles: URL(fileURLWithPath: Paths.perfiles))
+            guardarPerfiles(preparacion.perfiles, passwords: [:], ajustes: preparacion.ajustes, alFinalizar: alFinalizar)
         } catch {
-            ultimoError = "No se pudo guardar una copia del estado actual: \(error.localizedDescription)"
-            return
+            rechazar("No se inició la restauración: \(error.localizedDescription)")
         }
-        Log.escribir("restaurando la copia \(copia.id)")
-        if let datos = try? Data(contentsOf: copia.url.appendingPathComponent("ajustes.json")) {
-            do {
-                try ArchivoAjustes.guardarAtomico(datos, en: Preferencias.archivo)
-                Preferencias.shared.cargar()
-            } catch {
-                Log.escribir("no se restauraron los ajustes de la copia: \(error.localizedDescription)")
-            }
-        }
-        guardarPerfiles(perfiles, passwords: [:])
     }
 
-    func guardarPerfiles(_ profiles: [VPNProfile], passwords: [String: String]) {
+    func guardarPerfiles(_ profiles: [VPNProfile], passwords: [String: String],
+                         ajustes: AjustesDelGuardado = .conservar,
+                         alFinalizar: (@MainActor @Sendable (ResultadoGuardado) -> Void)? = nil) {
+        let operacion = UUID()
+        func rechazar(_ detalle: String) {
+            ultimoError = detalle
+            alFinalizar?(ResultadoGuardado(id: operacion,
+                resumen: ResumenGuardado(conexiones: .fallo(detalle)), idsConfirmados: []))
+        }
+        guard !guardandoConfiguracion, !instalandoAyudante, !hayConectando else {
+            rechazar("Espera a que termine la operación en curso antes de cambiar las conexiones.")
+            return
+        }
         guard !datosMasNuevos else {
-            ultimoError = "Tus conexiones las guardó una versión más nueva de Nuvex. Actualiza Nuvex para cambiarlas."
+            rechazar("Tus conexiones las guardó una versión más nueva de Nuvex. Actualiza Nuvex para cambiarlas.")
             return
         }
         let profiles = profiles.map(\.normalizado)
+        do { try Validacion.validarColeccion(profiles) }
+        catch { rechazar(error.localizedDescription); return }
         let migrations = profiles.compactMap { profile -> (old: VPNProfile, new: VPNProfile)? in
             guard let previous = self.profiles.first(where: { $0.id == profile.id }),
                   previous.username != profile.username,
@@ -622,16 +643,21 @@ final class VPNModel: ObservableObject {
                previous.username != profile.username,
                passwords[profile.id, default: ""].isEmpty,
                !migrations.contains(where: { $0.new.id == profile.id }) {
-                ultimoError = "Al cambiar el usuario de \(profile.name), escribe la contraseña del nuevo usuario."
+                rechazar("Al cambiar el usuario de \(profile.name), escribe la contraseña del nuevo usuario.")
                 return
             }
         }
         if profiles != self.profiles, let active = vpns.first(where: { $0.connected }) {
-            ultimoError = "Desconecta \(active.name) antes de cambiar las conexiones. Puedes actualizar las contraseñas sin desconectarte."
+            rechazar("Desconecta \(active.name) antes de cambiar las conexiones. Puedes actualizar las contraseñas sin desconectarte.")
             return
         }
         guard let data = try? JSONEncoder().encode(profiles),
-              let json = String(data: data, encoding: .utf8) else { return }
+              let json = String(data: data, encoding: .utf8),
+              let anteriores = try? JSONEncoder().encode(self.profiles),
+              let jsonAnterior = String(data: anteriores, encoding: .utf8) else {
+            rechazar("No se pudieron preparar las conexiones para guardarlas.")
+            return
+        }
         let previousProfiles = self.profiles
         // Sin conexiones no hace falta pedir autorización para el ayudante.
         let shouldInstall = !profiles.isEmpty &&
@@ -644,6 +670,7 @@ final class VPNModel: ObservableObject {
         Task.detached(priority: .userInitiated) {
             var stagedMigrations: [VPNProfile] = []
             var configurationSaved = false
+            var pasoAjustes: ResumenGuardado.Paso = .noAplica
             do {
                 for migration in migrations {
                     guard Self.passwordStatus(id: migration.old.id, username: migration.new.username) == .missing else {
@@ -658,10 +685,16 @@ final class VPNModel: ObservableObject {
                         throw ErrorVPN(mensaje: "No se pudo verificar la contraseña migrada de \(migration.new.name).")
                     }
                 }
-                let result = try Self.ejecutar(args: ["config", "set-all", json])
-                guard result.codigo == 0 else {
-                    let detail = result.error.trimmingCharacters(in: .whitespacesAndNewlines)
-                    throw ErrorVPN(mensaje: detail.isEmpty ? "El configurador terminó con código \(result.codigo)." : detail)
+                if ajustes.esRestauracion {
+                    try await PersistenciaRestauracion.aplicar(
+                        perfiles: { try Self.escribirPerfiles(json) },
+                        ajustes: {
+                            _ = try await ajustes.aplicar(en: Preferencias.shared, ids: Set(profiles.map(\.id)))
+                        },
+                        revertir: { try Self.escribirPerfiles(jsonAnterior) })
+                    pasoAjustes = .hecho
+                } else {
+                    try Self.escribirPerfiles(json)
                 }
                 configurationSaved = true
                 var keychainErrors: [String] = []
@@ -674,6 +707,10 @@ final class VPNModel: ObservableObject {
                         }
                         catch { keychainErrors.append("No se guardó la contraseña de \(profile.name).") }
                     }
+                }
+                if !ajustes.esRestauracion {
+                    do { pasoAjustes = try await ajustes.aplicar(en: Preferencias.shared, ids: Set(profiles.map(\.id))) }
+                    catch { pasoAjustes = .fallo(error.localizedDescription) }
                 }
                 if keychainErrors.isEmpty {
                     for migration in migrations {
@@ -709,10 +746,11 @@ final class VPNModel: ObservableObject {
                 let pasoAyudante: ResumenGuardado.Paso = !shouldInstall ? .noAplica
                     : canInstallNow ? .enCurso
                     : .pendiente("Hay una VPN conectada; Nuvex lo preparará la próxima vez que conectes.")
+                let resumen = ResumenGuardado(conexiones: .hecho, contrasenas: pasoContrasenas,
+                    ayudante: pasoAyudante, ajustes: pasoAjustes)
                 await MainActor.run {
                     self.guardandoConfiguracion = false
-                    self.resumenGuardado = ResumenGuardado(conexiones: .hecho, contrasenas: pasoContrasenas,
-                                                           ayudante: pasoAyudante)
+                    self.resumenGuardado = resumen
                     let keychainError = keychainErrors.isEmpty ? nil :
                         "Se guardaron las conexiones, pero hubo errores en el Llavero: \(keychainErrors.joined(separator: " "))"
                     self.ultimoError = keychainError
@@ -721,7 +759,7 @@ final class VPNModel: ObservableObject {
                             "Cambios guardados. Nuvex preparará el ayudante al volver a conectar.") :
                             "Cambios guardados.") : nil
                     self.mensajeAyudante = nil
-                    for previo in previousProfiles where !profiles.contains(where: { $0.id == previo.id }) {
+                    for previo in previousProfiles where !ajustes.esRestauracion && !profiles.contains(where: { $0.id == previo.id }) {
                         Preferencias.shared.olvidarConexion(previo.id)
                     }
                     self.profiles = profiles
@@ -729,12 +767,19 @@ final class VPNModel: ObservableObject {
                     for id in savedPasswordIDs { self.estados.removeValue(forKey: id) }
                     self.refrescar()
                     if shouldInstall && canInstallNow {
-                        self.instalarAyudante(desdeGuardado: true, errorPrevio: keychainError)
+                        self.instalarAyudante(desdeGuardado: true, errorPrevio: keychainError, alTerminar: { paso in
+                            var final = resumen
+                            final.ayudante = paso
+                            alFinalizar?(ResultadoGuardado(id: operacion, resumen: final, idsConfirmados: Set(profiles.map(\.id))))
+                        })
+                    } else {
+                        alFinalizar?(ResultadoGuardado(id: operacion, resumen: resumen, idsConfirmados: Set(profiles.map(\.id))))
                     }
                 }
             } catch {
                 var rollbackFailed = false
-                if !configurationSaved {
+                let recuperacionFallida = error is PersistenciaRestauracion.RecuperacionFallida
+                if !configurationSaved && !recuperacionFallida {
                     for profile in stagedMigrations.reversed() {
                         do { try Self.eliminarDelLlavero(profile: profile) }
                         catch { rollbackFailed = true }
@@ -745,10 +790,21 @@ final class VPNModel: ObservableObject {
                 await MainActor.run {
                     self.guardandoConfiguracion = false
                     self.mensajeConfiguracion = nil
-                    self.resumenGuardado = ResumenGuardado(conexiones: .fallo(failure))
-                    self.ultimoError = "No se guardaron los cambios: \(failure)"
+                    let resumen = ResumenGuardado(conexiones: recuperacionFallida ? .pendiente(failure) : .fallo(failure))
+                    self.resumenGuardado = resumen
+                    self.ultimoError = recuperacionFallida ? failure : "No se guardaron los cambios: \(failure)"
+                    if recuperacionFallida { self.cargarConfiguracion() }
+                    alFinalizar?(ResultadoGuardado(id: operacion, resumen: resumen, idsConfirmados: []))
                 }
             }
+        }
+    }
+
+    nonisolated private static func escribirPerfiles(_ json: String) throws {
+        let resultado = try ejecutar(args: ["config", "set-all", json])
+        guard resultado.codigo == 0 else {
+            let detalle = resultado.error.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw ErrorVPN(mensaje: detalle.isEmpty ? "No se guardaron las conexiones (código \(resultado.codigo))." : detalle)
         }
     }
 }

@@ -346,7 +346,6 @@ private struct AjustesGenerales: View {
     @ObservedObject var borradores: BorradoresAjustes
     @AppStorage("avisarDesconexion") private var avisarDesconexion = true
     @AppStorage("intervaloRevision") private var intervaloRevision = 5
-    @AppStorage(SecurityPreferences.confirmationKey) private var confirmarConTouchID = true
     @State private var inicioActivo = false
     @State private var inicioPendiente = false
     @State private var errorInicio: String?
@@ -378,6 +377,7 @@ private struct AjustesGenerales: View {
                     .padding(.vertical, Espacio.xs)
                 }
             }
+            SeccionPermisosNuvex(modelo: modelo) { borradores.seleccion = $0 }
             Section("Inicio") {
                 Toggle("Abrir Nuvex al iniciar sesión", isOn: Binding(
                     get: { inicioActivo },
@@ -416,14 +416,6 @@ private struct AjustesGenerales: View {
                 Text("Con el estilo «Alertas», el aviso de desconexión se queda en pantalla hasta que lo cierres o pulses Reconectar.")
                     .foregroundStyle(Paleta.textoSecundario)
             }
-            Section {
-                Toggle("Confirmar con Touch ID la primera vez", isOn: $confirmarConTouchID)
-            } header: {
-                Text("Seguridad")
-            } footer: {
-                Text("Se pide una sola vez para todo Nuvex antes de usar una contraseña guardada. Si Touch ID no está disponible, macOS pide la contraseña del equipo.")
-                    .foregroundStyle(Paleta.textoSecundario)
-            }
             SeccionCopias(modelo: modelo)
         }
         .formularioNuvex()
@@ -440,7 +432,7 @@ private struct EstiloAvisos: View {
         LabeledContent {
             HStack(spacing: Espacio.m) {
                 Button("Probar") { VPNNotifications.shared.prueba() }
-                    .disabled(estilo == .desactivados || estilo == .sinAutorizar)
+                    .disabled(estilo == nil || estilo == .noDisponible || estilo == .desactivados || estilo == .sinAutorizar)
                 if estilo == .sinAutorizar {
                     Button("Autorizar…") {
                         Task {
@@ -448,7 +440,7 @@ private struct EstiloAvisos: View {
                             await leer()
                         }
                     }
-                } else if estilo != .alertas {
+                } else if let estilo, estilo != .alertas && estilo != .noDisponible {
                     Button(estilo == .desactivados ? "Activar…" : "Cambiar a Alertas…") {
                         NSWorkspace.shared.open(VPNNotifications.ajustesDelSistema)
                     }
@@ -461,6 +453,9 @@ private struct EstiloAvisos: View {
                 case .sinAutorizar?:
                     Label("Pendiente: autoriza los avisos una sola vez", systemImage: "bell.badge.fill")
                         .font(Tipo.nota).foregroundStyle(Paleta.avisoTexto)
+                case .noDisponible?:
+                    Text("Sin comprobar: ejecuta una copia empaquetada de Nuvex.")
+                        .font(Tipo.nota).foregroundStyle(Paleta.textoSecundario)
                 case .alertas?:
                     Label("Alertas: se quedan hasta que los cierras", systemImage: "checkmark.circle.fill")
                         .font(Tipo.nota).foregroundStyle(Paleta.exitoTexto)
@@ -539,6 +534,8 @@ private struct SeccionCopias: View {
     @State private var copias: [CopiaSeguridad] = []
     @State private var aRestaurar: CopiaSeguridad?
     @State private var error: String?
+    @State private var restaurando = false
+    @State private var resultadoRestauracion: ResultadoGuardado?
 
     private var esMuestra: Bool {
         #if DEBUG
@@ -559,7 +556,7 @@ private struct SeccionCopias: View {
             ForEach(copias.prefix(5)) { copia in
                 LabeledContent {
                     Button("Restaurar…") { aRestaurar = copia }
-                        .disabled(modelo.hayAlgunaConectada || modelo.guardandoConfiguracion || modelo.instalandoAyudante)
+                        .disabled(modelo.hayAlgunaConectada || modelo.ocupado || restaurando)
                 } label: {
                     VStack(alignment: .leading, spacing: Espacio.xxs / 2) {
                         Text(copia.fecha.formatted(date: .abbreviated, time: .shortened))
@@ -581,7 +578,7 @@ private struct SeccionCopias: View {
                     }
                     cargar()
                 }
-                .disabled(esMuestra)
+                .disabled(esMuestra || modelo.ocupado || restaurando)
                 Spacer()
                 Button("Mostrar en Finder") {
                     let carpeta = Migraciones.carpetaCopias(Preferencias.directorio)
@@ -591,6 +588,16 @@ private struct SeccionCopias: View {
             }
             if let error {
                 Text(error).foregroundStyle(Paleta.errorTexto).textSelection(.enabled)
+            }
+            if restaurando {
+                HStack(spacing: Espacio.s) { ProgressView().controlSize(.small); Text("Restaurando conexiones…") }
+            }
+            if let resultado = resultadoRestauracion {
+                Label(resultado.completo ? "Restauración completa" : "Restauración con pendientes",
+                      systemImage: resultado.completo ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(resultado.completo ? Paleta.exitoTexto : Paleta.avisoTexto)
+                Text("Se conservaron tus autorizaciones actuales.").foregroundStyle(Paleta.textoSecundario)
+                ForEach(resultado.avisos, id: \.self) { Text($0).foregroundStyle(Paleta.avisoTexto).textSelection(.enabled) }
             }
         } header: {
             Text("Copias de seguridad")
@@ -602,12 +609,22 @@ private struct SeccionCopias: View {
         .confirmationDialog("¿Restaurar esta copia?", isPresented: Binding(
             get: { aRestaurar != nil }, set: { if !$0 { aRestaurar = nil } })) {
             Button("Restaurar", role: .destructive) {
-                if let copia = aRestaurar { modelo.restaurarCopia(copia) }
+                if let copia = aRestaurar {
+                    restaurando = true
+                    error = nil
+                    resultadoRestauracion = nil
+                    modelo.restaurarCopia(copia) { resultado in
+                        restaurando = false
+                        if resultado.resumen.conexiones == .hecho { resultadoRestauracion = resultado }
+                        else { error = resultado.avisos.first ?? "No se pudo completar la restauración." }
+                        cargar()
+                    }
+                }
                 aRestaurar = nil
                 cargar()
             }
         } message: {
-            Text("Las conexiones volverán a como estaban en la copia. Las que no estén en ella se eliminarán junto con su contraseña. Antes se guarda una copia del estado actual.")
+            Text("Se restaurarán las conexiones y su lectura de códigos, conservando tus autorizaciones actuales. Las conexiones que no estén en la copia se eliminarán junto con su contraseña. Antes se guarda una copia del estado actual, sin contraseñas.")
         }
     }
 

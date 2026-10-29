@@ -24,10 +24,15 @@ final class SolicitudCodigo: ObservableObject, Identifiable {
     }
 
     /// Fuente automática de códigos (la añade la lectura de Gmail).
-    /// Devuelve nil si no hay nada configurado para esa conexión.
+    /// Distingue una conexión sin lector de un problema antes de iniciar la búsqueda.
     typealias Lector = @MainActor (_ perfilID: String, _ desde: Date,
                                    _ alCambiar: @escaping @MainActor (ProblemaGmail?) -> Void)
-        -> (cuenta: String, tarea: Task<LectorGmail.Resultado, Never>)?
+        -> InicioLectura
+    enum InicioLectura {
+        case noConfigurado
+        case problema(ProblemaGmail)
+        case disponible(cuenta: String, tarea: Task<LectorGmail.Resultado, Never>)
+    }
     static var lector: Lector?
 
     /// Solicitudes abiertas, por conexión, para que `nuvex code` pueda responder.
@@ -95,7 +100,13 @@ final class SolicitudCodigo: ObservableObject, Identifiable {
             guard let self, case .buscando(let desde, let cuenta, _) = self.estadoCorreo else { return }
             self.estadoCorreo = .buscando(desde: desde, cuenta: cuenta, aviso: aviso)
         }
-        guard let (cuenta, tarea) = Self.lector?(perfilID, inicio, alCambiar) else { return }
+        let cuenta: String
+        let tarea: Task<LectorGmail.Resultado, Never>
+        switch Self.lector?(perfilID, inicio, alCambiar) ?? .noConfigurado {
+        case .noConfigurado: estadoCorreo = .noConfigurado; return
+        case .problema(let problema): estadoCorreo = .problema(problema); return
+        case .disponible(let nombre, let lectura): cuenta = nombre; tarea = lectura
+        }
         estadoCorreo = .buscando(desde: Date(), cuenta: cuenta)
         lectura = tarea
         tareaLectura = Task { [weak self] in
@@ -135,6 +146,8 @@ final class SolicitudCodigo: ObservableObject, Identifiable {
     }
 
     private func usarDelCorreo(_ recibido: CodigoRecibido) {
+        let recibido = CodigoRecibido(codigo: Self.limpiar(recibido.codigo), remitente: recibido.remitente)
+        guard ExtractorCodigo.codigoValido(recibido.codigo) else { return }
         codigo = recibido.codigo
         estadoCorreo = .encontrado(remitente: recibido.remitente)
         envioAutomatico = recibido
@@ -185,9 +198,9 @@ final class SolicitudCodigo: ObservableObject, Identifiable {
         continuacion.resume(returning: resultado)
     }
 
-    /// Quita espacios y guiones: «482 913» y «482-913» son el mismo código.
+    /// Misma regla que el lector y la Terminal, sin alterar tokens alfanuméricos.
     nonisolated static func limpiar(_ texto: String) -> String {
-        texto.filter { !$0.isWhitespace && $0 != "-" }
+        ExtractorCodigo.normalizar(texto)
     }
 }
 
@@ -384,6 +397,8 @@ struct PanelCodigoView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: Espacio.l) {
                     switch problema.accion {
+                    case .conexion:
+                        Button("Revisar conexión") { AppActual.abrirAjustes(pagina: .conexion(solicitud.perfilID)) }
                     case .cuentaGoogle:
                         Button("Abrir Cuenta de Google") { AppActual.abrirAjustes(pagina: .cuentaGoogle) }
                     case .activarAPI:

@@ -31,9 +31,32 @@ struct NucleoChecks {
 
         let raro = try ArchivoAjustes.leer(Data(#"{"politicaAsistentes":"desconocida"}"#.utf8))
         precondition(raro.ajustes.politicaAsistentes == .preguntar, "un valor desconocido falla de forma segura")
-        let v3 = try ArchivoAjustes.leer(Data(#"{"version":3}"#.utf8))
+        let versionFutura = try ArchivoAjustes.leer(Data("{\"version\":\(AjustesApp.versionActual + 1)}".utf8))
         let v2 = try ArchivoAjustes.leer(Data(#"{"version":2}"#.utf8))
-        precondition(v3.esMasNuevo && !v2.esMasNuevo)
+        precondition(versionFutura.esMasNuevo && !v2.esMasNuevo)
+
+        var global = v2.ajustes
+        precondition(global.capacidadesAutorizadas.isEmpty)
+        global.bloqueadasParaAsistentes = ["privada"]
+        global.autorizarCapacidades()
+        precondition(global.autorizacionGlobalCompleta)
+        precondition(global.decisionParaAsistente(conexion: "privada") == .rechazarConexion)
+        precondition(global.decisionParaAsistente(conexion: "oficina") == .permitir)
+        let persistida = try ArchivoAjustes.escribir(global, sobre: [:])
+        let reabierta = try ArchivoAjustes.leer(persistida).ajustes
+        precondition(reabierta == global && reabierta.autorizacionGlobalCompleta)
+        global.capacidadesAutorizadas.remove("automatizacion")
+        precondition(!global.autorizacionGlobalCompleta, "un alcance anterior no autoriza capacidades nuevas")
+        global.autorizarCapacidades()
+        global.politicaAsistentes = .preguntar
+        precondition(!global.autorizacionGlobalCompleta, "el estado efectivo prevalece sobre el recibo")
+        global.revocarCapacidades()
+        precondition(global.autorizacionRevocada && !global.autorizacionGlobalCompleta)
+        precondition(global.decisionParaAsistente(conexion: "oficina") == .rechazarGlobal)
+        let revocada = try ArchivoAjustes.leer(ArchivoAjustes.escribir(global, sobre: [:])).ajustes
+        precondition(revocada == global)
+        global.autorizarCapacidades()
+        precondition(!global.autorizacionRevocada && global.autorizacionGlobalCompleta)
 
         // Permisos: una instalación nueva pide confirmación y las exclusiones
         // por conexión prevalecen sobre la política global.
@@ -97,6 +120,12 @@ struct NucleoChecks {
         precondition(!nueva.modificar { $0.politicaAsistentes = .noPermitir }, "no se escribe sobre datos más nuevos")
         let intacto = try Data(contentsOf: url)
         precondition(String(decoding: intacto, as: UTF8.self).contains("99"))
+
+        let ilegible = base.appendingPathComponent("ajustes-ilegibles.json")
+        try FileManager.default.createDirectory(at: ilegible, withIntermediateDirectories: true)
+        let bloqueada = Preferencias(url: ilegible)
+        precondition(bloqueada.soloLectura != nil, "un error de lectura no equivale a una instalación nueva")
+        precondition(!bloqueada.modificar { $0.autorizarCapacidades() }, "no sobrescribir ajustes que no se pudieron leer")
 
         // El registro conserva una sola generación y no crece sin límite.
         let registro = base.appendingPathComponent("Nuvex.log").path

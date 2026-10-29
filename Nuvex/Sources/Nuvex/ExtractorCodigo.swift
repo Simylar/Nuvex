@@ -5,6 +5,15 @@ import Foundation
 /// Lógica sin red ni interfaz para leer códigos de verificación de correos y
 /// para el inicio de sesión OAuth con PKCE. Se prueba por separado.
 enum ExtractorCodigo {
+    /// Solo los códigos numéricos admiten separadores de presentación. En un
+    /// token alfanumérico, un guion puede formar parte del valor del servidor.
+    static func normalizar(_ texto: String) -> String {
+        let recortado = texto.trimmingCharacters(in: .whitespaces)
+        let numerico = recortado.unicodeScalars.allSatisfy {
+            (48...57).contains($0.value) || $0 == " " || $0 == "-"
+        }
+        return numerico ? recortado.filter { $0 != " " && $0 != "-" } : recortado
+    }
     /// Primero busca un número cerca de palabras como «código» o «token».
     static let patronCercano = #"(?i)(?:c[oó]digo|code|token|authcode|clave|passcode|otp|pin)\D{0,40}?(\d{4,8})\b"#
     /// Si no lo encuentra, acepta un único número de 6 dígitos en todo el texto.
@@ -13,7 +22,7 @@ enum ExtractorCodigo {
     /// Código encontrado en el texto, o nil si no hay uno inequívoco.
     static func extraer(de texto: String, patron personalizado: String = "") -> String? {
         if !personalizado.trimmingCharacters(in: .whitespaces).isEmpty {
-            return primeraCoincidencia(personalizado, en: texto).flatMap { codigoValido($0) ? $0 : nil }
+            return primeraCoincidencia(personalizado, en: texto).map(normalizar).flatMap { codigoValido($0) ? $0 : nil }
         }
         if let codigo = primeraCoincidencia(patronCercano, en: texto) { return codigo }
         let seis = coincidencias(patronSeisDigitos, en: texto)

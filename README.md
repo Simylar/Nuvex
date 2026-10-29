@@ -50,6 +50,33 @@ Para más servidores, abre **Ajustes de Nuvex…** (⌘,) y pulsa **+** al pie d
 
 La confirmación local con Touch ID, cuando está disponible, se configura en **General** para Nuvex completo y se solicita una vez durante la preparación inicial. El diálogo de administrador pertenece a macOS: Nuvex no puede imponer Touch ID allí. Un ayudante vigente se reutiliza al conectar; los cambios de conexión o del motor pueden requerir una nueva autorización.
 
+En **General › Permisos y capacidades**, **Autorizar todas las capacidades de
+Nuvex…** permite las operaciones rutinarias de Terminal y asistentes sin
+preguntar cada vez, completa la confirmación inicial y configura las
+integraciones detectadas. Conserva las conexiones excluidas en Automatización.
+La decisión se guarda fuera de la app; las capacidades nuevas requieren otra
+decisión explícita. **Revocar…** bloquea la automatización, retira sus reglas
+gestionadas y restablece la confirmación inicial. No desconecta VPN activas ni
+borra contraseñas.
+
+El mismo apartado muestra el estado y las acciones para el ayudante, Gmail y
+cada contraseña. Los permisos del Llavero, administrador, avisos, inicio de
+sesión y Google los concede su sistema correspondiente. Una comprobación sin
+diálogos distingue una entrada ausente de un acceso que requiere intervención;
+no garantiza acceso permanente. Si no se pudo leer la cuenta de Google al
+arrancar, **Recuperar acceso…** vuelve a leerla sin crear otro cliente OAuth.
+
+General muestra primero hasta tres acciones pendientes de las funciones que
+utilizas, con un botón para resolver cada una. Al desplegar **Todas las
+capacidades y autorización conjunta**, aparecen las demás acciones, los estados
+detallados y los controles para autorizar o revocar. No configurar Gmail o
+desactivar la automatización no se presenta como un permiso faltante.
+
+Restaurar una copia recupera las conexiones y su lectura de códigos, conservando
+tus autorizaciones y exclusiones actuales. Las importaciones distinguen un
+cambio rechazado de una operación completa o con pendientes de Llavero, lectura
+de códigos o ayudante; no muestran éxito por la mera existencia de una conexión.
+
 ## Alcance y seguridad
 
 La interfaz implementa el flujo de usuario, contraseña y código solicitado por el servidor mediante `openfortivpn`. Los portales que exijan SAML, certificados de cliente u otros métodos pueden requerir soporte adicional. La conexión y la convivencia de rutas o DNS deben validarse con cada servidor y red; las pruebas del repositorio no sustituyen esa verificación.

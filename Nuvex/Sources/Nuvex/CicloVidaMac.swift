@@ -36,8 +36,11 @@ final class CicloVidaMac {
                 self?.modelo?.refrescar()
             }
         })
-        monitorRed = MonitorRed { [weak self] in
-            Task { @MainActor in self?.reanudar(origen: "red_recuperada", reiniciarCorreo: true) }
+        monitorRed = MonitorRed { [weak self] disponible, recuperada in
+            Task { @MainActor in
+                self?.modelo?.actualizarDisponibilidadRed(disponible)
+                if recuperada { self?.reanudar(origen: "red_recuperada", reiniciarCorreo: true) }
+            }
         }
         monitorRed?.iniciar()
     }
@@ -69,10 +72,10 @@ private final class MonitorRed: @unchecked Sendable {
     private let cola = DispatchQueue(label: "local.gertcode.nuvex.red", qos: .utility)
     private let cerrojo = NSLock()
     private var estadoAnterior: NWPath.Status?
-    private let alRecuperar: @Sendable () -> Void
+    private let alCambiar: @Sendable (Bool, Bool) -> Void
 
-    init(alRecuperar: @escaping @Sendable () -> Void) {
-        self.alRecuperar = alRecuperar
+    init(alCambiar: @escaping @Sendable (Bool, Bool) -> Void) {
+        self.alCambiar = alCambiar
     }
 
     func iniciar() {
@@ -82,9 +85,8 @@ private final class MonitorRed: @unchecked Sendable {
             let anterior = estadoAnterior
             estadoAnterior = ruta.status
             cerrojo.unlock()
-            if anterior != nil, anterior != .satisfied, ruta.status == .satisfied {
-                alRecuperar()
-            }
+            alCambiar(ruta.status == .satisfied,
+                      anterior != nil && anterior != .satisfied && ruta.status == .satisfied)
         }
         monitor.start(queue: cola)
     }

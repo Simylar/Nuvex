@@ -15,6 +15,7 @@ temporal="$(mktemp -d)"
 trap 'rm -rf "$temporal"' EXIT
 swiftc -sdk "$SDKROOT" -module-cache-path "$CLANG_MODULE_CACHE_PATH" \
   "$ROOT/Nuvex/Sources/Nuvex/Modelos.swift" \
+  "$ROOT/Nuvex/Sources/Nuvex/BorradorBienvenida.swift" \
   "$ROOT/Nuvex/Sources/Nuvex/Preferencias.swift" \
   "$ROOT/Nuvex/Sources/Nuvex/Soporte.swift" \
   "$ROOT/Nuvex/Sources/Nuvex/GuardadoConfiguracion.swift" \

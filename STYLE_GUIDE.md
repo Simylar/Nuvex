@@ -30,18 +30,20 @@ Esta guía documenta el lenguaje visual de Nuvex tal como está implementado. Es
 13. [Accesibilidad](#13-accesibilidad)
 14. [Reglas para pantallas nuevas](#14-reglas-para-pantallas-nuevas)
 15. [Control de calidad visual](#15-control-de-calidad-visual)
+16. [Flujos y complejidad progresiva](#16-flujos-y-complejidad-progresiva)
 
 ---
 
 ## 0. Referencias y decisiones
 
-**Referencias.** Por orden de prioridad:
+**Referencias oficiales consultadas para la revisión de experiencia (28 de octubre de 2026):**
 
-1. Apple Human Interface Guidelines: *Designing for macOS*, *Materials*, *Liquid Glass*.
-2. Apple Design Resources: kit de macOS 27.
-3. Las skills [`macos-golden-gate-design`](https://github.com/github/awesome-copilot/blob/main/skills/macos-golden-gate-design/SKILL.md) y [`liquid-glass-skill`](https://github.com/farkasseb/liquid-glass-skill), que resumen esas guías y las API de SwiftUI.
+- [Onboarding](https://developer.apple.com/design/human-interface-guidelines/onboarding): primer resultado con valores predeterminados y aprendizaje en contexto.
+- [Settings](https://developer.apple.com/design/human-interface-guidelines/settings): resolver automáticamente lo fiable y reducir decisiones de configuración.
+- [Feedback](https://developer.apple.com/design/human-interface-guidelines/feedback): estado y recuperación en la interfaz; interrupciones proporcionales al problema.
+- [Accessibility](https://developer.apple.com/design/human-interface-guidelines/accessibility) y [Materials](https://developer.apple.com/design/human-interface-guidelines/materials): legibilidad, controles accesibles y adaptación a las preferencias del sistema.
 
-Las páginas de Apple se cargan con JavaScript y no pudieron leerse de forma automática. Las reglas de aquí proceden de las skills, que citan la HIG y las sesiones de la WWDC, y del comportamiento real de los controles en macOS 27.
+Estas referencias orientan las decisiones de producto. Las API y los respaldos del sistema se verifican contra el SDK disponible; no se presupone una API por su aspecto visual.
 
 **Principios adoptados**
 
@@ -238,13 +240,13 @@ Retícula de 2 pt (`Espacio`):
 
 - **Panel:** el margen exterior `s` más el margen de fila `m` suman 14 pt. El título, los círculos, los símbolos de los avisos y los elementos de menú comparten ese borde izquierdo. El texto de los avisos se alinea con los nombres: `m + circuloEstado + l`.
 - **Ajustes:** la cabecera de la conexión es la primera sección del formulario, así que su icono se alinea con el texto de las secciones. Los extremos de la barra de acciones coinciden con los bordes de las secciones. Esto se cumple hasta los 704 pt de `columnaFormulario` (con margen `xxl`) y también cuando el formulario se centra en ventanas anchas.
-- **Bienvenida:** los símbolos de los pasos ocupan una columna de 32 pt y los textos comparten el mismo borde izquierdo.
+- **Primer uso:** cabecera, campos y opciones pertenecen al mismo `Form`. La acción principal permanece en la barra inferior y el contenido se desplaza al abrir opciones avanzadas.
 
 ### Tamaños de componentes (`Tamano`)
 
 | Token | Valor | Uso |
 | --- | --- | --- |
-| `Tamano.panel` | 320 | Ancho del panel |
+| `Tamano.panel` | 360 | Ancho del panel: espacio para estado legible y acciones explícitas |
 | `Tamano.codigoAnchoIdeal` / `codigoAnchoMinimo` | 360 / 300 | Ventana del código: ancho normal y mínimo en pantallas estrechas |
 | `Tamano.codigoAltoIdeal` / `codigoAltoMinimo` / `codigoAltoMaximo` | 340 / 280 / 560 | Inicia a 340 pt, solo se reduce si la pantalla no permite los márgenes y admite redimensionarse hasta 560 pt; el contenido se desplaza si hace falta |
 | `Tamano.columnaFormulario` | 704 | Ancho máximo de las secciones de un `Form` agrupado en macOS 27 (medido). La barra de acciones usa la misma columna |
@@ -259,7 +261,7 @@ Retícula de 2 pt (`Espacio`):
 | `Tamano.botonIcono` | 18 | Área de un botón de solo icono sin borde (copiar) |
 | `Tamano.simboloPequeno` / `simboloCirculo` / `simboloDestacado` | 10 / 12 / 44 | Chevron, símbolo del círculo, símbolo de resultado |
 
-Ventanas: bienvenida, 460 pt de ancho; código, 360 × 420 ideal con rango 300 × 280–560 y límites del `visibleFrame`; novedades, 480 × 540; exportar, 520 × 600; importar, 540 × 560; Ajustes, mínimo 780 × 580. La ventana del código usa nivel normal para no cubrir menús, se centra en la pantalla activa, escalona solicitudes simultáneas y vuelve a ajustarse al cambiar de monitor.
+Ventanas: añadir conexión, 520 × 620 ideal y mínimo 520 × 520, redimensionable; código, 360 × 340 ideal con rango 300 × 280–560 y límites del `visibleFrame`; novedades, 480 × 540; exportar, 520 × 600; importar, 540 × 560; Ajustes, mínimo 780 × 580. La ventana del código usa nivel flotante, por debajo de menús y alertas, se centra en la pantalla activa, escalona solicitudes simultáneas y vuelve a ajustarse al cambiar de monitor.
 
 ## 5. Bordes y geometría
 
@@ -418,7 +420,7 @@ Label {
 
 ### Agrupar un resumen
 
-`GroupBox` del sistema; por ejemplo, el resultado del guardado en la bienvenida. `.superficie(_:)` solo para muestras y casos en que el límite sea información.
+`GroupBox` del sistema; por ejemplo, un resumen con varios resultados independientes. `.superficie(_:)` solo para muestras y casos en que el límite sea información.
 
 ### Onboarding de automatización
 
@@ -431,7 +433,7 @@ acciones consecutivas que la persona deba descubrir por separado.
 
 ### Estados vacíos
 
-`EstadoVacio` ocupa el lugar de una lista vacía o que no se pudo leer: icono, título en `Tipo.encabezado`, explicación en `Tipo.apoyo` y `textoSecundario` y, como mucho, una acción pequeña. Centrado y sin contenedor.
+`EstadoVacio` ocupa el lugar de una lista vacía o que no se pudo leer: icono, título en `Tipo.encabezado`, explicación en `Tipo.apoyo` y `textoSecundario`, una acción de recuperación y, si hace falta, acceso secundario al diagnóstico. Centrado y sin contenedor.
 
 ```swift
 EstadoVacio("No hay conexiones visibles",
@@ -464,10 +466,10 @@ IconoCuadrado(simbolo: "shield.lefthalf.filled", color: Paleta.iconoAyudante,
 
 `FilaVPN` tiene:
 - un círculo opaco de 28 pt: `rellenoIntenso` en neutro, acento al conectar y el color del estado al 16 % cuando requiere atención;
-- el nombre en `cuerpoEnfasis` y el estado en `nota` con cifras tabulares;
-- un accesorio a la derecha: botón secundario pequeño, chevron o el atajo `⌘1…⌘9`.
+- el nombre en `cuerpoEnfasis` y el estado en `apoyo` con cifras tabulares, para dar legibilidad a la información principal;
+- un accesorio a la derecha con la acción explícita y un botón de detalles cuando corresponde. Los atajos `⌘1…⌘9` siguen disponibles.
 
-Cuando está desconectada, toda la fila es un botón con `EstiloFila`. En los demás estados, el círculo es un botón con `EstiloPresion`.
+Cuando está desconectada, toda la fila es un botón con `EstiloFila` y el texto «Conectar». En los demás estados, la acción tiene un botón explícito: Desconectar, Reconectar, Cancelar, Añadir o Completar. El círculo es un indicador decorativo y no duplica controles para VoiceOver. «Código…» trae al frente la ventana de verificación existente. Los detalles se abren con un botón accesible, sin depender de un gesto sobre el texto.
 
 ### Navegación
 
@@ -505,6 +507,7 @@ Cuando está desconectada, toda la fila es un botón con `EstiloFila`. En los de
 | Desconectada | `lock.open.fill` | `rellenoIntenso` | `Desconectada` |
 | Se desconectó o falta un dato | triángulo, `key.fill`, `slider.horizontal.3` en `aviso` | `aviso` al 16 % | En `avisoTexto` |
 | Error | triángulo en `error` | `error` al 16 % | En `errorTexto` |
+| Estado sin comprobar | `questionmark` | Relleno neutro | `Estado sin comprobar`, sin reutilizar el color de un estado anterior |
 
 ## 10. Iconografía
 
@@ -549,7 +552,7 @@ Cuando está desconectada, toda la fila es un botón con `EstiloFila`. En los de
 - **VoiceOver:**
   - los botones de solo icono tienen `.accessibilityLabel`, y los iconos decorativos se ocultan;
   - cada fila de VPN expone su nombre y su estado;
-  - cada paso de la bienvenida se lee como «Paso n: título. detalle».
+  - los resultados del primer uso tienen un encabezado semántico; la etiqueta de la barra distingue un estado sin comprobar de una conexión confirmada.
 - **Reducir movimiento:** `.animacion`, `Movimiento.aparicion` y `EstiloPresion` cambian a fundidos.
 - **Reducir transparencia:** el vidrio del sistema se vuelve más opaco; el de respaldo usa `superficieElevada` o `superficieFlotante` según su nivel. El contenido ya es opaco, así que la jerarquía no cambia.
 
@@ -599,3 +602,31 @@ cd Nuvex && swift build --build-system native --disable-sandbox
 | Claro | Oscuro |
 | --- | --- |
 | ![Guía de estilo en claro](docs/guia-estilo/guia-estilo-claro.png) | ![Guía de estilo en oscuro](docs/guia-estilo/guia-estilo-oscuro.png) |
+
+
+## 16. Flujos y complejidad progresiva
+
+- **Añadir conexión:** formulario directo con servidor, usuario y contraseña. Nombre opcional derivado del servidor válido. Importar es una alternativa en la barra de acciones. **Conectar** guarda, prepara e inicia en una sola acción. El resultado y los errores permanecen en la misma ventana. No hay portada o tutorial obligatorio.
+- **Opciones del servidor:** el mismo componente `OpcionesServidor` en el alta y Ajustes. Certificado automático por defecto; huella, certificado incluido, grupo de acceso, rutas y DNS disponibles en un desplegable. Una configuración ya personalizada se presenta abierta. No se cambia un certificado o una ruta por inferencia.
+- **Guardar y conectar:** resultado de la operación concreta. Un error de Llavero conserva la contraseña y detiene la preparación del ayudante. Cancelar el permiso no provoca otro diálogo automático. Tras guardar, se muestra Conectando, código pendiente, cancelación, error o conexión confirmada. Un rechazo de credenciales ofrece Revisar datos; no un reintento automático. No usar «Todo listo» ni «Conectada» como sinónimos de guardado.
+- **Uso cotidiano:** acciones explícitas en la fila; progreso y cancelación durante conexión y reconexión. Mientras se desconecta, el control permanece bloqueado. Un error al consultar el estado se comunica como «Estado sin comprobar» y ofrece reintento.
+- **Recuperación:** optativa en General, un intento automático ejecutado por conexión manual, con breve espera cancelable y permisos existentes. Una pérdida de red durante la espera no consume ese intento. Si falla, acción manual visible. Nunca reconectar después de una desconexión voluntaria ni reponer automáticamente el presupuesto de reintentos.
+- **Cancelación:** incluye la espera de recuperación tanto en el panel como en Terminal. Una cancelación explícita impide reprogramar esa misma caída cuando vuelve la red. La detención de un túnel recién iniciado confirma el estado y bloquea cancelaciones duplicadas.
+- **Gmail:** lectura opcional. Sin cuenta, se permite escribir el código y se ofrece acceso directo para configurar Gmail. Importar el archivo de Google evita copiar campos técnicos; la entrada manual sigue accesible. Los identificadores de una cuenta configurada van en «Opciones de la cuenta».
+- **Automatización:** Configurar sigue siendo la acción principal y explica el alcance de su autorización. Diagnóstico y comandos son desplegables. Las exclusiones, revocación y política existente permanecen accesibles.
+- **Cierre y reapertura:** un formulario inicial interrumpido conserva su borrador en memoria durante la sesión. Reabrir recupera primero el código o borrador pendiente. Con perfiles guardados, muestra la conexión con error, en curso o activa; General queda como alternativa si no hay una conexión visible. No se conectan perfiles por abrir la app.
+
+La matriz de comprobación y sus límites está en [Experiencia de usuario](docs/experiencia-de-usuario.md). Las capturas usan datos ficticios y respaldos de materiales; requieren revisión manual adicional de foco, teclado, VoiceOver y ajustes de accesibilidad en una ventana real.
+
+
+### Verificación del refinamiento
+
+La prueba de componentes envía Tab, Retorno y Escape a su propia ventana con
+valores ficticios y verifica el foco editable. No usa inyección global de teclas
+ni acredita un recorrido humano. Las pruebas de paleta comprueban contraste AA
+de los textos informativos opacos en claro y oscuro. El campo de código usa
+`.animacion` para respetar Reducir movimiento también en su transición de foco.
+
+La comprobación real con servidor y permisos existentes corresponde a la copia
+instalada, y se registra por separado en `docs/experiencia-de-usuario.md`. No
+sustituye la validación interactiva de esta compilación local.

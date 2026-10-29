@@ -28,7 +28,13 @@ enum ErrorGoogle: LocalizedError, Equatable {
 /// cliente se guardan en el Llavero; el token de acceso solo vive en memoria.
 @MainActor
 final class CuentaGoogle: ObservableObject {
-    static let shared = CuentaGoogle()
+    static let shared: CuentaGoogle = {
+        if ModoDemostracion.activo {
+            return CuentaGoogle(lectorLlavero: { _ in (nil, errSecItemNotFound) },
+                                escritorLlavero: { _ in false }, borradorLlavero: { false })
+        }
+        return CuentaGoogle()
+    }()
     static let permisos = "openid email https://www.googleapis.com/auth/gmail.readonly"
 
     enum Estado: Equatable {

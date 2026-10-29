@@ -409,7 +409,7 @@ final class ControlRemoto {
         // registro solo conserva metadatos operativos y no nombres de clientes.
         Log.escribir("control origen=\(cliente.origen) estado=accion_completada accion=\(accion)")
         guard preferencias.avisarAccionesAsistentes else { return }
-        VPNNotifications.shared.accionAsistente(titulo: titulo, cuerpo: "Lo pidió desde la Terminal (proceso \(cliente.pid)).")
+        VPNNotifications.shared.accionAsistente(titulo: titulo, cuerpo: "Abre Nuvex en la barra de menús para ver tus conexiones.")
     }
 
     // MARK: Estado

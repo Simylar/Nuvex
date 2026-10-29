@@ -173,3 +173,30 @@ enum SoporteGmail {
         return formato.date(from: valor).map { max(0, $0.timeIntervalSince(ahora)) }
     }
 }
+
+/// Lee únicamente el formato de cliente de escritorio descargado de Google.
+/// No interpreta URLs del archivo ni las utiliza como destinos de red.
+struct ClienteGoogleImportado: Decodable {
+    let id: String
+    let secreto: String
+
+    init(from decoder: Decoder) throws {
+        struct Escritorio: Decodable {
+            let client_id: String
+            let client_secret: String
+        }
+        enum Clave: String, CodingKey { case installed }
+        let contenedor = try decoder.container(keyedBy: Clave.self)
+        let cliente = try contenedor.decode(Escritorio.self, forKey: .installed)
+        let id = cliente.client_id.trimmingCharacters(in: .whitespacesAndNewlines)
+        let secreto = cliente.client_secret.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard id.hasSuffix(".apps.googleusercontent.com"), !secreto.isEmpty,
+              id.unicodeScalars.allSatisfy({ $0.value > 32 && $0.value < 127 }),
+              secreto.unicodeScalars.allSatisfy({ $0.value > 32 && $0.value < 127 }) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath,
+                debugDescription: "El archivo no contiene un cliente de escritorio válido."))
+        }
+        self.id = id
+        self.secreto = secreto
+    }
+}

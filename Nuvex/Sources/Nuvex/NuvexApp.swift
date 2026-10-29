@@ -3,6 +3,25 @@ import SwiftUI
 
 /// Recibe enlaces nuvex:// y archivos .nuvexvpn aunque el panel no esté abierto.
 final class DelegadoApp: NSObject, NSApplicationDelegate {
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        guard !flag, let modelo = AppActual.modelo else { return true }
+        if let solicitud = SolicitudCodigo.abiertas.values.first {
+            VentanaCodigo.traerAlFrente(solicitud.perfilID)
+            return true
+        }
+        if Bienvenida.reanudarSiPendiente(modelo: modelo) { return true }
+        if modelo.configuracionCargada && modelo.profiles.isEmpty {
+            Bienvenida.mostrar(modelo: modelo)
+        } else {
+            if let id = modelo.conexionParaReabrir {
+                AperturaAjustes.abrir(modelo, conexion: id, pagina: .conexion(id))
+            } else {
+                AperturaAjustes.abrir(modelo, pagina: .general)
+            }
+        }
+        return true
+    }
+
     func application(_ application: NSApplication, open urls: [URL]) {
         MainActor.assumeIsolated { urls.forEach(AppActual.abrir) }
     }
@@ -47,6 +66,10 @@ struct NuvexApp: App {
     init() {
         #if DEBUG
         let args = CommandLine.arguments
+        if args.contains("--verificar-interfaz") {
+            VerificacionInterfaz.ejecutar()
+            exit(0)
+        }
         if let i = args.firstIndex(of: "--captura"), i + 1 < args.count {
             Captura.ejecutar(en: args[i + 1])
             exit(0)

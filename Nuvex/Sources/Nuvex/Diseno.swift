@@ -177,7 +177,7 @@ enum Espacio {
 
 /// Medidas fijas de componentes.
 enum Tamano {
-    static let panel: CGFloat = 320
+    static let panel: CGFloat = 360
     /// Ventana dedicada al código: admite pantallas estrechas y contenido
     /// ampliado sin crecer fuera del área visible.
     static let codigoAnchoIdeal: CGFloat = 360
@@ -554,7 +554,7 @@ private struct CampoDestacado: ViewModifier {
                     .padding(-Borde.foco / 2)
                     .opacity(enfocado || error ? 1 : 0)
             }
-            .animation(Movimiento.rapida, value: enfocado)
+            .animacion(Movimiento.rapida, value: enfocado)
     }
 }
 

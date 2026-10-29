@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - Página «Cuenta de Google»
 
@@ -9,6 +10,8 @@ struct AjustesCuentaGoogle: View {
     @State private var secreto = ""
     @State private var cambiandoCliente = false
     @State private var confirmarOlvido = false
+    @State private var errorImportacion: String?
+    @State private var clientePendiente: (id: String, secreto: String)?
 
     static let guia = URL(string: "https://github.com/Simylar/Nuvex/blob/main/docs/gmail.md")!
 
@@ -37,24 +40,28 @@ struct AjustesCuentaGoogle: View {
 
             if cuenta.estado == .sinCliente || cambiandoCliente {
                 Section {
-                    TextField("ID de cliente", text: $clienteID, prompt: Text("123…apps.googleusercontent.com"))
-                    SecureField("Secreto de cliente", text: $secreto, prompt: Text("GOCSPX-…"))
-                    HStack {
-                        Link("Cómo crear el cliente OAuth…", destination: Self.guia)
-                        Spacer()
-                        if cambiandoCliente { Button("Cancelar") { cambiandoCliente = false } }
-                        Button("Guardar") {
-                            if cuenta.guardarCliente(id: clienteID, secreto: secreto) {
-                                clienteID = ""; secreto = ""; cambiandoCliente = false
-                            }
-                        }
+                    Text("Google requiere un cliente de escritorio para permitir la lectura de códigos. Puedes importar el archivo que descargues de Google Cloud.")
+                        .foregroundStyle(Paleta.textoSecundario)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Importar archivo de Google…", action: importarCliente)
                         .estiloBoton(.principal)
+                    Link("Cómo obtener el archivo…", destination: Self.guia)
+                    DisclosureGroup("Introducir los datos manualmente") {
+                        TextField("ID de cliente", text: $clienteID, prompt: Text("123…apps.googleusercontent.com"))
+                        SecureField("Secreto de cliente", text: $secreto)
+                        Button("Guardar") {
+                            proponerCliente(id: clienteID, secreto: secreto)
+                        }
                         .disabled(clienteID.isEmpty || secreto.isEmpty)
                     }
+                    if let errorImportacion {
+                        Text(errorImportacion).foregroundStyle(Paleta.avisoTexto)
+                    }
+                    if cambiandoCliente { Button("Cancelar") { cambiandoCliente = false } }
                 } header: {
-                    Text("Cliente OAuth de Google")
+                    Text("Preparar la lectura de códigos · Opcional")
                 } footer: {
-                    Text("Créalo una vez en Google Cloud como «App de escritorio» y publica el proyecto para uso personal; si queda en modo de prueba, Google pide volver a iniciar sesión cada 7 días. El aviso «Google no verificó esta app» es normal en un cliente propio.")
+                    Text("Puedes seguir conectándote y escribir el código cuando se solicite. Importar el archivo guarda el cliente en el Llavero; el acceso a Gmail se autoriza después en Google.")
                         .foregroundStyle(Paleta.textoSecundario)
                 }
             } else if case .llaveroNoDisponible = cuenta.estado {
@@ -63,16 +70,18 @@ struct AjustesCuentaGoogle: View {
                         .foregroundStyle(Paleta.textoSecundario)
                 }
             } else {
-                Section("Cliente OAuth") {
-                    LabeledContent("ID de cliente") {
-                        Text(cuenta.clienteID ?? "").font(Tipo.monoNota).lineLimit(1).truncationMode(.middle)
-                            .textSelection(.enabled)
-                    }
-                    HStack {
-                        Button("Cambiar cliente…") { cambiandoCliente = true }
-                        Spacer()
-                        Button("Olvidar cuenta y cliente…", role: .destructive) { confirmarOlvido = true }
-                            .estiloBoton(.destructivo)
+                Section {
+                    DisclosureGroup("Opciones de la cuenta") {
+                        LabeledContent("ID de cliente") {
+                            Text(cuenta.clienteID ?? "").font(Tipo.monoNota).lineLimit(1).truncationMode(.middle)
+                                .textSelection(.enabled)
+                        }
+                        HStack {
+                            Button("Cambiar cliente…") { cambiandoCliente = true }
+                            Spacer()
+                            Button("Olvidar cuenta y cliente…", role: .destructive) { confirmarOlvido = true }
+                                .estiloBoton(.destructivo)
+                        }
                     }
                 }
             }
@@ -83,6 +92,49 @@ struct AjustesCuentaGoogle: View {
             Button("Olvidar", role: .destructive) { Task { await cuenta.olvidarCliente() } }
         } message: {
             Text("Nuvex retirará su acceso a Gmail y borrará el cliente del Llavero. Las conexiones que leen el código del correo volverán a pedírtelo.")
+        }
+        .confirmationDialog("¿Reemplazar la configuración de Google?", isPresented: Binding(
+            get: { clientePendiente != nil },
+            set: { if !$0 { clientePendiente = nil } })) {
+            Button("Reemplazar") {
+                if let cliente = clientePendiente { guardarCliente(id: cliente.id, secreto: cliente.secreto) }
+                clientePendiente = nil
+            }
+        } message: {
+            Text("Tendrás que volver a iniciar sesión en Google para leer códigos. Tus conexiones VPN se conservan.")
+        }
+        .onDisappear { secreto = ""; clientePendiente = nil }
+    }
+
+    private func proponerCliente(id: String, secreto: String) {
+        if cuenta.correo != nil { clientePendiente = (id, secreto) }
+        else { guardarCliente(id: id, secreto: secreto) }
+    }
+
+    private func guardarCliente(id: String, secreto: String) {
+        if cuenta.guardarCliente(id: id, secreto: secreto) {
+            clienteID = ""; self.secreto = ""; cambiandoCliente = false
+        }
+    }
+
+    private func importarCliente() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        panel.message = "Selecciona el archivo del cliente de escritorio descargado de Google Cloud."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        errorImportacion = nil
+        do {
+            let atributos = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+            guard atributos.isRegularFile == true, let bytes = atributos.fileSize, bytes <= 128 * 1024 else {
+                throw CocoaError(.fileReadCorruptFile)
+            }
+            let datos = try Data(contentsOf: url)
+            guard datos.count <= 128 * 1024 else { throw CocoaError(.fileReadCorruptFile) }
+            let cliente = try JSONDecoder().decode(ClienteGoogleImportado.self, from: datos)
+            proponerCliente(id: cliente.id, secreto: cliente.secreto)
+        } catch {
+            errorImportacion = "No se pudo importar. Elige el archivo JSON de un cliente de tipo «App de escritorio» de Google Cloud."
         }
     }
 
@@ -99,8 +151,8 @@ struct AjustesCuentaGoogle: View {
 
     private var subtitulo: String {
         switch cuenta.estado {
-        case .sinCliente: return "Añade tu cliente OAuth para leer los códigos que llegan por correo."
-        case .llaveroNoDisponible(let codigo): return "No se pudo leer el Llavero (código \(codigo)). No se ha comprobado la sesión de Google."
+        case .sinCliente: return "Lee automáticamente los códigos de Gmail. Puedes configurarlo cuando quieras."
+        case .llaveroNoDisponible: return "Permite el acceso al Llavero para recuperar tu cuenta guardada."
         case .desconectada: return "Inicia sesión con la cuenta de Gmail donde llegan los códigos."
         case .esperandoNavegador: return "Completa el inicio de sesión en el navegador."
         case .conectada: return "Sesión guardada · el acceso a Gmail se comprueba al leer"
@@ -168,11 +220,16 @@ struct SeccionCodigoCorreo: View {
 
     var body: some View {
         Section {
-            Picker("Cómo obtenerlo", selection: usarCorreo) {
-                Text("Preguntarme").tag(false)
-                Text("Leer de Gmail").tag(true)
+            if cuenta.correo == nil && config == nil {
+                Text("Si el servidor pide un código, podrás escribirlo al conectar.")
+                Button("Configurar lectura desde Gmail…") { AppActual.abrirAjustes(pagina: .cuentaGoogle) }
+                    .buttonStyle(.link)
+            } else {
+                Picker("Cómo obtenerlo", selection: usarCorreo) {
+                    Text("Preguntarme").tag(false)
+                    Text("Leer de Gmail").tag(true)
+                }
             }
-            .disabled(cuenta.correo == nil && config == nil)
             if let config {
                 TextField("Remitente", text: campo(\.remitente), prompt: Text("noreply@empresa.com"))
                 if config.remitente.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -208,7 +265,7 @@ struct SeccionCodigoCorreo: View {
             Text("Código de verificación")
         } footer: {
             Text(cuenta.correo == nil && config == nil
-                 ? "Para leer el código del correo, conecta tu cuenta en Ajustes › Cuenta de Google."
+                 ? "La lectura automática de Gmail es opcional."
                  : config == nil
                     ? "Si el servidor pide un código, Nuvex te lo preguntará al conectar."
                     : "Al conectar, Nuvex buscará en \(cuenta.correo ?? "Gmail") el correo del remitente y usará el código; si no llega a tiempo, te lo pedirá. Se guarda al momento.")

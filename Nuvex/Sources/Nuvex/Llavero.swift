@@ -70,7 +70,8 @@ extension VPNModel {
 
     nonisolated static func leerDelLlavero(id: String, name: String,
                                             reason: String? = nil,
-                                            intentoConexion: String? = nil) async throws -> String {
+                                            intentoConexion: String? = nil,
+                                            sinInteraccion: Bool = false) async throws -> String {
         let userResult = try ejecutar(args: ["config", "get", id, "username"])
         guard userResult.codigo == 0 else { throw ErrorVPN(mensaje: "Falta el usuario de \(id)") }
         // El comando añade un salto de línea; los espacios del usuario forman
@@ -82,9 +83,16 @@ extension VPNModel {
             throw ErrorVPN(mensaje: "No hay contraseña guardada para \(name). Agrégala en Ajustes.",
                            fallo: Fallo(titulo: "Falta la contraseña", detalle: "No hay contraseña guardada en el Llavero para esta conexión.", accion: .ajustes("Añadir…")))
         }
-        try await confirmarUsoInicial(razon: reason ?? "Usar la contraseña guardada para conectar a \(name)",
-                                      intentoConexion: intentoConexion)
+        if sinInteraccion {
+            guard !SecurityPreferences.needsInitialConfirmation() else {
+                throw ErrorVPN(mensaje: "Conecta de nuevo para confirmar el acceso con macOS.")
+            }
+        } else {
+            try await confirmarUsoInicial(razon: reason ?? "Usar la contraseña guardada para conectar a \(name)",
+                                          intentoConexion: intentoConexion)
+        }
         let context = LAContext()
+        context.interactionNotAllowed = sinInteraccion
         if let intentoConexion {
             IntentosConexion.registrarContexto(intentoConexion, contexto: context)
         }
@@ -109,6 +117,12 @@ extension VPNModel {
         if status == errSecUserCanceled {
             throw ErrorVPN(mensaje: "Se canceló el acceso al Llavero para \(name).",
                            fallo: Fallo(titulo: "Acceso al Llavero cancelado", detalle: "Vuelve a conectar cuando puedas permitir el acceso a la contraseña.", accion: .reintentar("Reintentar")))
+        }
+        if sinInteraccion, status == errSecInteractionNotAllowed || status == errSecAuthFailed {
+            throw ErrorVPN(mensaje: "El Llavero necesita tu autorización.",
+                           fallo: Fallo(titulo: "Permite el acceso a la contraseña",
+                                        detalle: "Pulsa Conectar para desbloquear el Llavero o autorizar el acceso de Nuvex.",
+                                        accion: .reintentar("Conectar")))
         }
         if status == errSecItemNotFound {
             throw ErrorVPN(mensaje: "No hay contraseña guardada para \(name). Agrégala en Ajustes.",

@@ -27,8 +27,9 @@ arbitrarios del mismo usuario.
    comparte para Nuvex, no para otros procesos.
 3. Inicia `nuvexctl connect` y entrega la contraseña por stdin.
 4. El motor emite `NUVEX_OTP_REQUIRED` si necesita un segundo factor.
-5. Se abre una ventana normal, redimensionable y limitada al `visibleFrame` de
-   la pantalla activa. No flota sobre menús y su contenido puede desplazarse.
+5. Se abre un panel flotante, por debajo de menús y alertas, redimensionable y
+   limitado al `visibleFrame` de la pantalla activa. Su contenido puede desplazarse;
+   **Código…** en la fila trae al frente la misma ventana sin crear otra solicitud.
 6. Compiten tres fuentes: entrada manual, `nuvex codigo` y Gmail. La primera
    respuesta válida cierra las demás.
 7. El intento se confirma consultando de nuevo el estado del túnel. No se
@@ -194,13 +195,55 @@ Una revocación remota pendiente tampoco puede borrar el cliente o publicar
 avisos de la sesión anterior si ya comenzó un nuevo inicio OAuth. La revocación
 admite un sustituto en pruebas para reproducir esa reentrada sin tocar Google.
 
+## Recuperación de una conexión
+
+**General › Recuperación** guarda `reconectarAutomaticamente` en preferencias de
+macOS, desactivado por defecto. No modifica las autorizaciones de asistentes.
+Dos consultas válidas consecutivas sin un túnel antes activo confirman su caída.
+Cuando haya red, `RecuperacionConexion` reserva como máximo un intento por perfil
+hasta la siguiente conexión manual. El intento se reserva al ejecutarse, después de validar la espera; una caída
+de red durante la espera no lo consume. La reserva sobrevive a una recuperación
+exitosa durante la sesión: otra caída no inicia un bucle. Cerrar la app termina
+el seguimiento; abrirla no conecta perfiles por sí solo.
+
+Antes de programar y ejecutar el intento se comprueban estado, perfil habilitado,
+ayudante vigente y operaciones incompatibles. La preparación exige una contraseña
+guardada y ninguna confirmación inicial pendiente. La espera de tres segundos es
+cancelable. La lectura del Llavero usa `LAContext.interactionNotAllowed`: una ACL
+revocada o un Llavero bloqueado producen una acción manual, sin diálogo automático.
+No se instala el ayudante en segundo plano. El servidor todavía puede pedir un
+código, con la misma ventana y lector opcional existentes.
+
+Un fallo queda en la fila con reintento explícito. Los avisos de recuperación
+respetan la preferencia de avisar de desconexiones. Cancelar el código o el intento
+vuelve a un estado neutral; agotar la espera conserva un fallo recuperable.
+La desconexión voluntaria se confirma con `list`, impide duplicados y nunca activa
+recuperación. Una revisión de estado descarta consultas iniciadas antes de esa
+confirmación. Las respuestas de conexión también deben pertenecer al intento
+actual para no reemplazar un intento posterior.
+
+La espera de recuperación forma parte de `conexionEnCurso`, de modo que una
+desconexión solicitada por Terminal también la cancela. Cancelar retira la caída
+pendiente; un cambio de red posterior no la reprograma. Cancelar un túnel cuyo
+proceso ya terminó comparte `aplicarDesconexionConfirmada` con Desconectar y
+bloquea órdenes de detención duplicadas durante la comprobación.
+
 ## Guardado, importación y restauración
 
 `VPNModel.guardarPerfiles` devuelve un `ResultadoGuardado` propio de cada
 operación, con los ID confirmados y pasos separados de perfiles, contraseñas,
-lector y ayudante. Importar espera ese resultado final; no infiere éxito del
-estado global ni de ID que ya existían. Un rechazo conserva la vista previa y
+lector y ayudante. El alta inicial, Ajustes e importación esperan su propio resultado; no infieren éxito del
+estado global ni de ID que ya existían. Una carga fallida de perfiles bloquea
+su modificación. Los formularios conservan los datos ante errores y solo limpian
+la contraseña introducida cuando su escritura se confirma. Un rechazo conserva la vista previa y
 muestra el error; un guardado parcial enumera lo pendiente.
+
+El primer uso consume ese resultado y, solo si es completo y la contraseña está
+guardada o disponible, pasa a `conectarTrasGuardar`. Puede iniciar antes del
+siguiente sondeo usando la confirmación del ayudante de ese guardado; el éxito
+del túnel sigue dependiendo de `list`. Si falla la escritura en el Llavero, la
+preparación del ayudante queda pendiente y no abre otro diálogo. Cancelar una
+autorización nunca encadena un segundo intento automático.
 
 `PreparacionRestauracion` valida todos los archivos antes de crear la copia
 previa o escribir perfiles. `AjustesDelGuardado.restaurarCorreo` recupera solo

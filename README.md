@@ -41,12 +41,22 @@ El script compila, pasa las pruebas, guarda la versión anterior en un ZIP, reem
 
 ## Primer uso
 
-1. Al abrir Nuvex sin conexiones aparece la ventana de bienvenida. También puedes abrirla con **Añadir conexión…** en el menú de Nuvex.
-2. Pulsa **Añadir primera conexión**. Escribe el nombre, el servidor Fortinet y su puerto, el usuario y la contraseña VPN. Selecciona los certificados del sistema o la CA incluida si corresponde a tu servidor. Si necesitas una huella SHA-256 verificada, configúrala en Ajustes antes de conectar.
-3. Pulsa **Guardar y continuar**. Nuvex guarda el perfil sin contraseña en `~/.config/nuvex/profiles.json`, guarda la contraseña en el Llavero y prepara el ayudante. macOS puede pedir autorización de administrador para instalarlo.
-4. Pulsa **Conectar ahora**, o el círculo de la conexión en el menú de Nuvex. Si la VPN solicita un código por correo o app, Nuvex te lo pedirá en ese momento.
+1. Al abrir Nuvex sin conexiones aparece directamente **Añadir conexión**. Escribe el servidor, el usuario y la contraseña que te dio tu organización. El nombre es opcional: si lo dejas vacío, Nuvex usa la dirección del servidor. No hace falta escribir el puerto 443.
+2. Usa **Opciones del servidor** solo si tu organización te dio un certificado, una huella verificada o un grupo de acceso (realm). Las rutas y el DNS tienen valores predeterminados y se pueden ajustar allí. Los certificados del sistema se verifican automáticamente; Nuvex no adivina ni omite la confianza TLS.
+3. Pulsa **Conectar**. Nuvex guarda el perfil y la contraseña en el Llavero, prepara el ayudante y empieza a conectar. macOS pide autorización solo cuando corresponde. Si falla guardar la contraseña, no encadena la autorización del ayudante.
+4. La misma ventana muestra el progreso, permite cancelar y ofrece **Introducir código** cuando hace falta. Solo anuncia **Conectada** al confirmar el túnel. Si cancelas un permiso o falla un paso, conserva el avance y ofrece una acción concreta; no repite el intento automáticamente. Al editar una conexión ya guardada, puedes conservar su contraseña del Llavero.
 
-Para más servidores, abre **Ajustes de Nuvex…** (⌘,) y pulsa **+** al pie de la barra lateral. Cada conexión se guarda por separado con **Guardar** (⌘S). Puedes cambiar las opciones de rutas y DNS de cada perfil. Si varias VPN anuncian las mismas redes o modifican DNS a la vez, comprueba cuál debe administrar cada recurso. Los perfiles existentes de Nuvex se conservan al actualizar la app.
+Si ya tienes un archivo de Nuvex, **Importar…** permite recuperar sus conexiones sin volver a escribirlas. Gmail y los asistentes se pueden configurar más adelante.
+
+En el uso diario, abre Nuvex en la barra de menús y pulsa **Conectar**, **Desconectar** o **Cancelar**. **Código…** trae al frente una verificación pendiente. Los atajos **⌘1–⌘9** realizan la acción correspondiente a cada fila. **Añadir conexión…** (**⌘N**) vuelve a abrir el formulario. En **Ajustes de Nuvex…** (**⌘,**) puedes editar cada conexión y guardar con **⌘S**; **+** sigue disponible en la barra lateral. Las opciones de servidor personalizadas se muestran desplegadas para que puedas revisarlas.
+
+En **General › Recuperación** puedes activar **Reconectar si se pierde la conexión**. Está desactivado por defecto. Tras una caída confirmada y cuando haya red, Nuvex programa un solo intento con los permisos existentes, que puedes cancelar. No instala el ayudante ni abre diálogos del Llavero en segundo plano. Si falta un permiso o falla el intento, ofrece reconexión manual. El servidor puede volver a pedir un código. La recuperación no se repite hasta que vuelvas a iniciar una conexión manualmente y no conecta perfiles al arrancar la app.
+
+El formulario inicial conserva los datos sin guardar al cerrar y reabrir la ventana durante la misma sesión. Cerrar la ventana no equivale a cancelar una operación; usa **Cancelar** para detener el intento. Reabrir Nuvex recupera primero una verificación o preparación pendiente; después muestra la conexión con error, en curso o activa, antes de recurrir a General. Los errores de guardado conservan la contraseña introducida para reintentar. Al terminar la app, los datos aún no guardados se pierden; las conexiones ya guardadas se recuperan normalmente. La ventana de Ajustes conserva sus borradores de perfil y descarta contraseñas introducidas al cerrarse.
+
+Los éxitos rutinarios de los asistentes no muestran avisos por defecto; puedes activarlos en Automatización. Si ya habías elegido recibirlos, se conserva esa preferencia.
+
+La revisión de flujos, decisiones y verificaciones está en [Experiencia de usuario](docs/experiencia-de-usuario.md). La posibilidad de un cliente OAuth común se analiza por separado en [Cliente OAuth de Nuvex](docs/gmail-cliente-nuvex.md); no está implementada.
 
 La confirmación local con Touch ID, cuando está disponible, se configura en **General** para Nuvex completo y se solicita una vez durante la preparación inicial. El diálogo de administrador pertenece a macOS: Nuvex no puede imponer Touch ID allí. Un ayudante vigente se reutiliza al conectar; los cambios de conexión o del motor pueden requerir una nueva autorización.
 

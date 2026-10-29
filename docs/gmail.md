@@ -18,16 +18,16 @@ Como Nuvex no es una app de Google verificada, usas tu propio cliente OAuth. Se 
 4. En **APIs y servicios › Credenciales**, pulsa **Crear credenciales › ID de cliente de OAuth**:
    - Tipo de aplicación: **App de escritorio**.
    - Nombre: «Nuvex en mi Mac».
-5. Copia el **ID de cliente** (termina en `.apps.googleusercontent.com`) y el **Secreto de cliente**.
+5. Descarga el archivo JSON del cliente de escritorio. No lo compartas: contiene su secreto.
 
 ## 2. Conecta la cuenta en Nuvex
 
-1. Abre **Ajustes de Nuvex › Cuenta de Google**, pega el ID y el secreto y pulsa **Guardar**.
+1. Abre **Ajustes de Nuvex › Cuenta de Google**, pulsa **Importar archivo de Google…** y selecciona el JSON descargado. Si ya tienes los datos separados, usa **Introducir los datos manualmente**. Nuvex admite únicamente clientes de escritorio; importar no inicia sesión ni concede acceso a Gmail.
 2. Pulsa **Iniciar sesión con Google**. Se abre el navegador.
 3. Google mostrará «Google no verificó esta app». Es normal con un cliente propio: pulsa **Configuración avanzada › Ir a Nuvex** y acepta el permiso de lectura de Gmail.
-4. Al volver, Nuvex muestra tu dirección y «Conectada · solo lectura de Gmail».
+4. Al volver, Nuvex muestra tu dirección y «Sesión guardada». La disponibilidad real de Google y el permiso se comprueban al leer un código.
 
-El secreto y el token de la sesión se guardan en el Llavero de macOS.
+El secreto y el token de la sesión se guardan en el Llavero de macOS. Cambiar una configuración con sesión guardada requiere confirmación y después volver a iniciar sesión. Los datos técnicos de la cuenta configurada están en **Opciones de la cuenta**. La lectura es opcional: puedes seguir conectándote y escribir el código sin configurar Google.
 
 ## 3. Activa la lectura en cada conexión
 

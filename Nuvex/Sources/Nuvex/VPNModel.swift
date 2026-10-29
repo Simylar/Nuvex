@@ -21,6 +21,13 @@ final class VPNModel: ObservableObject {
     /// Página de Ajustes que debe mostrarse al abrir la ventana.
     @Published var paginaDestino: PaginaAjustes?
     @Published private(set) var configuracionCargada = false
+    @Published private(set) var cargandoConfiguracion = false
+    @Published private(set) var errorCargaConfiguracion: String?
+    @Published private(set) var desconectando: Set<String> = []
+    @Published private(set) var recuperando: Set<String> = []
+    private var recuperacion = RecuperacionConexion()
+    private var redDisponible = false
+    private let permiteRecuperacion: @MainActor () -> Bool
     /// Los datos los guardó una versión más nueva de Nuvex: no se modifican.
     @Published private(set) var datosMasNuevos = false
     private(set) var actualizaciones: Actualizaciones?
@@ -31,6 +38,8 @@ final class VPNModel: ObservableObject {
     /// Modelo con datos de ejemplo para capturas: no consulta el motor.
     var esMuestra = false
 
+    func confirmarConfiguracionDeMuestra() { configuracionCargada = true }
+
     func usarActualizacionesDeMuestra(_ actualizaciones: Actualizaciones) {
         self.actualizaciones = actualizaciones
     }
@@ -38,6 +47,8 @@ final class VPNModel: ObservableObject {
 
     private var timer: Timer?
     private var refrescando = false
+    /// Descarta una consulta iniciada antes de confirmar una desconexión.
+    private var revisionEstado = 0
     /// Si se pidió otra consulta mientras había una en curso, se ejecuta en
     /// cuanto termine. Es importante al confirmar un túnel recién establecido.
     private var refrescoPendiente = false
@@ -53,8 +64,12 @@ final class VPNModel: ObservableObject {
     /// Intentos que la persona canceló (hasta el siguiente intento).
     private(set) var canceladas: Set<String> = []
 
-    /// Estado vacío sin consultar el motor; lo usan las capturas de depuración.
-    init(sinArrancar: Void) {}
+    /// Modelo vacío sin consultar el motor; permite muestras y pruebas aisladas.
+    init(sinArrancar: Void, permiteRecuperacion: @escaping @MainActor () -> Bool = {
+        UserDefaults.standard.bool(forKey: "reconectarAutomaticamente") && !SecurityPreferences.needsInitialConfirmation()
+    }) {
+        self.permiteRecuperacion = permiteRecuperacion
+    }
 
     convenience init() {
         self.init(sinArrancar: ())
@@ -144,19 +159,20 @@ final class VPNModel: ObservableObject {
     var hayConectando: Bool { estados.values.contains(.conectando) }
     /// Hay una operación que un reinicio de la app interrumpiría.
     var ocupado: Bool {
-        hayConectando || !esperandoCodigo.isEmpty || !desconexionSolicitada.isEmpty
+        hayConectando || !esperandoCodigo.isEmpty || !desconectando.isEmpty || !recuperando.isEmpty
             || guardandoConfiguracion || instalandoAyudante
     }
     var motivoBloqueoActualizacion: String {
         if guardandoConfiguracion { return "Esperando a que termine de guardar la configuración…" }
         if instalandoAyudante { return "Esperando a que termine la preparación del ayudante de red…" }
         if !esperandoCodigo.isEmpty { return "Esperando a que termine la verificación de una conexión…" }
-        if !desconexionSolicitada.isEmpty { return "Esperando a que termine la desconexión en curso…" }
+        if !desconectando.isEmpty { return "Esperando a que termine la desconexión en curso…" }
+        if !recuperando.isEmpty { return "Esperando a que termine la recuperación de la conexión…" }
         return "Esperando a que termine la conexión en curso…"
     }
     /// Una caída o un fallo de conexión: el icono de la barra lo señala.
     var requiereAtencion: Bool {
-        !desconexiones.isEmpty || errorConsulta != nil || estados.values.contains {
+        !desconexiones.isEmpty || errorConsulta != nil || errorCargaConfiguracion != nil || estados.values.contains {
             if case .error = $0 { return true } else { return false }
         }
     }
@@ -183,8 +199,15 @@ final class VPNModel: ObservableObject {
     }
 
     func estado(id: String) -> EstadoUI {
-        guard let vpn = vpns.first(where: { $0.id == id }) else { return .desconectada }
+        guard let vpn = vpns.first(where: { $0.id == id }) else { return estados[id] ?? .desconectada }
         return estado(vpn)
+    }
+
+    /// La tarea que tiene sentido revisar al reabrir; no inicia una conexión.
+    var conexionParaReabrir: String? {
+        ReaperturaNuvex.conexion(perfiles: profiles,
+            estados: Dictionary(uniqueKeysWithValues: profiles.map { ($0.id, estado(id: $0.id)) }),
+            enCurso: Set(profiles.filter { conexionEnCurso($0.id) || recuperando.contains($0.id) }.map(\.id)))
     }
 
     // MARK: Consulta de estado
@@ -198,6 +221,7 @@ final class VPNModel: ObservableObject {
             return
         }
         refrescando = true
+        let revision = revisionEstado
         Task.detached(priority: .utility) {
             let resultado: Resultado
             do {
@@ -205,16 +229,18 @@ final class VPNModel: ObservableObject {
             } catch {
                 Log.escribir("fallo al ejecutar el motor: \(error)")
                 await MainActor.run {
-                    self.errorConsulta = "No se pudo consultar el estado de las VPN: \(error.localizedDescription)"
+                    guard self.revisionEstado == revision else { self.finalizarRefresco(); return }
+                    self.errorConsulta = "No se pudo consultar el estado de las conexiones."
                     self.finalizarRefresco()
                 }
                 return
             }
-            guard let datos = resultado.salida.data(using: .utf8),
+            guard resultado.codigo == 0, let datos = resultado.salida.data(using: .utf8),
                   let decodificada = try? JSONDecoder().decode([VPNStatus].self, from: datos)
             else {
                 Log.escribir("salida no interpretable: código=\(resultado.codigo), bytes de salida=\(resultado.salida.utf8.count), bytes de error=\(resultado.error.utf8.count)")
                 await MainActor.run {
+                    guard self.revisionEstado == revision else { self.finalizarRefresco(); return }
                     self.errorConsulta = resultado.error.isEmpty
                         ? "El motor devolvió una respuesta vacía (código \(resultado.codigo))."
                         : resultado.error.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -224,6 +250,7 @@ final class VPNModel: ObservableObject {
             }
             let lista = DetallesTunel.completar(decodificada)
             await MainActor.run {
+                guard self.revisionEstado == revision else { self.finalizarRefresco(); return }
                 self.errorConsulta = nil
                 self.procesarTransiciones(lista)
                 self.vpns = lista
@@ -259,6 +286,8 @@ final class VPNModel: ObservableObject {
         for vpn in lista {
             if vpn.connected {
                 faltas.removeValue(forKey: vpn.id)
+                recuperando.remove(vpn.id)
+                reconexionesDesdeAviso.remove(vpn.id)
                 desconexiones.removeValue(forKey: vpn.id)
                 VPNNotifications.shared.clear(id: vpn.id)
                 continue
@@ -272,6 +301,7 @@ final class VPNModel: ObservableObject {
                 if faltas[vpn.id] == 2 {
                     let fecha = Date()
                     desconexiones[vpn.id] = fecha
+                    if programarRecuperacion(vpn) { continue }
                     if UserDefaults.standard.object(forKey: "avisarDesconexion") as? Bool ?? true {
                         VPNNotifications.shared.disconnected(id: vpn.id, name: vpn.name, fecha: fecha)
                     }
@@ -281,6 +311,46 @@ final class VPNModel: ObservableObject {
     }
 
     // MARK: Acciones
+
+    func actualizarDisponibilidadRed(_ disponible: Bool) {
+        redDisponible = disponible
+        guard disponible else { return }
+        for vpn in vpns where desconexiones[vpn.id] != nil {
+            _ = programarRecuperacion(vpn)
+        }
+    }
+
+    /// Recupera solo una conexión cuya caída se confirmó. No instala el
+    /// ayudante ni abre diálogos del Llavero en segundo plano.
+    private func programarRecuperacion(_ vpn: VPNStatus) -> Bool {
+        let activada = permiteRecuperacion()
+        let disponible = redDisponible && !vpn.connected && vpn.enabled && vpn.configured && vpn.helperReady
+            && configuracionCargada && errorCargaConfiguracion == nil && !cargandoConfiguracion
+            && passwordStatuses[vpn.id] == .saved
+            && !guardandoConfiguracion && !instalandoAyudante && !conexionEnCurso(vpn.id)
+            && !desconectando.contains(vpn.id) && !desconexionSolicitada.contains(vpn.id)
+        guard activada, disponible, recuperacion.puedeIntentar(vpn.id),
+              !recuperando.contains(vpn.id) else { return false }
+        let caida = desconexiones[vpn.id]
+        recuperando.insert(vpn.id)
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard let self, self.recuperando.contains(vpn.id), self.desconexiones[vpn.id] == caida else { return }
+            self.recuperando.remove(vpn.id)
+            guard self.permiteRecuperacion(), self.redDisponible,
+                  self.errorConsulta == nil, !self.guardandoConfiguracion, !self.instalandoAyudante,
+                  self.configuracionCargada, self.errorCargaConfiguracion == nil, !self.cargandoConfiguracion,
+                  !self.conexionEnCurso(vpn.id), !self.desconectando.contains(vpn.id),
+                  let actual = self.vpns.first(where: { $0.id == vpn.id }), !actual.connected,
+                  actual.enabled, actual.configured, actual.helperReady,
+                  self.profiles.contains(where: { $0.id == vpn.id && $0.enabled }),
+                  self.recuperacion.reservar(vpn.id, activada: true, disponible: true) else { return }
+            self.desconexiones.removeValue(forKey: vpn.id)
+            VPNNotifications.shared.clear(id: vpn.id)
+            self.iniciarConexion(actual, automaticamente: true)
+        }
+        return true
+    }
 
     /// La acción del botón circular de cada fila.
     func alternar(_ vpn: VPNStatus) {
@@ -292,6 +362,16 @@ final class VPNModel: ObservableObject {
     }
 
     func conectar(_ vpn: VPNStatus) {
+        guard errorConsulta == nil else {
+            ultimoError = "Vuelve a comprobar el estado antes de conectar."
+            refrescar()
+            return
+        }
+        guard !vpn.connected, estado(vpn) != .conectando,
+              !desconectando.contains(vpn.id), !instalandoAyudante else { return }
+        recuperando.remove(vpn.id)
+        recuperacion.permitirNuevoIntento(vpn.id)
+        desconexionSolicitada.remove(vpn.id)
         guard !guardandoConfiguracion else {
             ultimoError = "Espera a que termine de guardarse la configuración antes de conectar."
             return
@@ -312,7 +392,7 @@ final class VPNModel: ObservableObject {
         iniciarConexion(vpn)
     }
 
-    private func iniciarConexion(_ vpn: VPNStatus) {
+    private func iniciarConexion(_ vpn: VPNStatus, automaticamente: Bool = false) {
         guard estado(vpn) != .conectando else { return }
         let inicioIntento = Date()
         estados[vpn.id] = .conectando
@@ -321,8 +401,9 @@ final class VPNModel: ObservableObject {
         ultimoError = nil
         IntentosConexion.preparar(vpn.id)
         Task.detached(priority: .userInitiated) {
-            let resultado = await Self.conectarProceso(id: vpn.id, name: vpn.name)
+            let resultado = await Self.conectarProceso(id: vpn.id, name: vpn.name, sinInteraccion: automaticamente)
             await MainActor.run {
+                guard VigenciaIntentoConexion.corresponde(inicioIntento, al: self.inicioConexion[vpn.id]) else { return }
                 switch resultado {
                 case .success:
                     // El ayudante ya vio el túnel activo, pero el estado público
@@ -330,7 +411,7 @@ final class VPNModel: ObservableObject {
                     // abrir un hueco falso de «desconectada» entre ambas cosas.
                     self.reconexionesDesdeAviso.remove(vpn.id)
                     self.agotarConfirmacionSiNoAparece(vpn, intento: inicioIntento)
-                case .failure(let e) where e.fallo == .canceladaPorPersona:
+                case .failure(let e) where e.fallo?.codigo == .cancelada:
                     self.inicioConexion.removeValue(forKey: vpn.id)
                     self.estados.removeValue(forKey: vpn.id)
                     self.reconexionesDesdeAviso.remove(vpn.id)
@@ -338,7 +419,9 @@ final class VPNModel: ObservableObject {
                 case .failure(let e):
                     self.inicioConexion.removeValue(forKey: vpn.id)
                     self.estados[vpn.id] = .error(e.falloParaFila)
-                    if self.reconexionesDesdeAviso.remove(vpn.id) != nil {
+                    let avisarAutomaticamente = automaticamente &&
+                        (UserDefaults.standard.object(forKey: "avisarDesconexion") as? Bool ?? true)
+                    if self.reconexionesDesdeAviso.remove(vpn.id) != nil || avisarAutomaticamente {
                         VPNNotifications.shared.reconexionFallida(id: vpn.id, name: vpn.name, fallo: e.falloParaFila)
                     }
                 }
@@ -368,6 +451,15 @@ final class VPNModel: ObservableObject {
     /// Cancela un intento de conexión en curso. Detiene el túnel a medio
     /// establecer; las VPN ya conectadas no se tocan.
     func cancelarConexion(_ id: String) {
+        if recuperando.remove(id) != nil {
+            // La desconexión explícita debe impedir que otro cambio de red
+            // vuelva a programar la recuperación de esta misma caída.
+            desconexiones.removeValue(forKey: id)
+            faltas.removeValue(forKey: id)
+            canceladas.insert(id)
+            VPNNotifications.shared.clear(id: id)
+            return
+        }
         // La operación real prevalece sobre la representación visual: si un
         // error de consulta cambió la fila, la espera de OTP aún debe poder
         // cancelarse y limpiar su proceso.
@@ -390,16 +482,14 @@ final class VPNModel: ObservableObject {
         // El proceso puede haber terminado justo antes de que `list` confirme
         // el túnel. En ese intervalo ya no hay proceso que cancelar: se detiene
         // explícitamente el túnel que acaba de iniciar.
+        guard desconectando.insert(id).inserted else { return }
         Task.detached(priority: .userInitiated) {
             let detencion = try? Self.ejecutar(args: ["stop", id])
             let consulta = try? Self.ejecutar(args: ["list"])
-            let confirmada = consulta.map {
-                EstadoMotor.confirmaDesconexion([id], codigo: $0.codigo, salida: $0.salida)
-            } ?? false
             await MainActor.run {
+                self.desconectando.remove(id)
                 self.inicioConexion.removeValue(forKey: id)
-                if confirmada {
-                    self.estados.removeValue(forKey: id)
+                if self.aplicarDesconexionConfirmada(id, consulta: consulta) {
                     self.canceladas.insert(id)
                 } else {
                     let detalle = detencion?.error.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -415,7 +505,7 @@ final class VPNModel: ObservableObject {
     }
 
     func conexionEnCurso(_ id: String) -> Bool {
-        inicioConexion[id] != nil || estados[id] == .conectando || SolicitudCodigo.abiertas[id] != nil
+        recuperando.contains(id) || inicioConexion[id] != nil || estados[id] == .conectando || SolicitudCodigo.abiertas[id] != nil
     }
 
     func reconectarDesdeAviso(_ id: String) {
@@ -433,6 +523,27 @@ final class VPNModel: ObservableObject {
     func conectar(id: String) {
         guard let vpn = vpns.first(where: { $0.id == id }) else { return }
         conectar(vpn)
+    }
+
+    /// El ayudante acaba de confirmar este guardado; no se exige esperar al
+    /// siguiente sondeo para iniciar. El túnel sigue confirmándose con `list`.
+    func conectarTrasGuardar(id: String, resultado: ResultadoGuardado) {
+        guard resultado.completo, resultado.confirmaImportacion([id]),
+              let perfil = profiles.first(where: { $0.id == id }), perfil.enabled else { return }
+        let ayudanteConfirmado = resultado.resumen.ayudante == .hecho || ayudanteListo == true
+        guard ayudanteConfirmado else {
+            estados[id] = .error(Fallo(titulo: "Falta preparar la conexión",
+                detalle: "Tus datos están guardados. Pulsa Conectar para autorizar el ayudante de red.",
+                accion: .reintentar("Conectar"), codigo: .ayudante))
+            return
+        }
+        let anterior = vpns.first(where: { $0.id == id })
+        // La lista anterior puede seguir reflejando el ayudante previo al guardado.
+        let actual = VPNStatus(id: id, name: perfil.name, connected: anterior?.connected ?? false,
+            pid: anterior?.pid ?? 0, ip: anterior?.ip ?? "", iface: anterior?.iface ?? "", networks: anterior?.networks ?? [],
+            enabled: perfil.enabled, configured: Validacion.motivo(perfil) == nil, helperReady: true,
+            inicio: anterior?.inicio)
+        conectar(actual)
     }
 
     func solicitarDesdeEnlace(_ url: URL) {
@@ -515,25 +626,47 @@ final class VPNModel: ObservableObject {
     }
 
     func desconectar(_ vpn: VPNStatus) {
+        guard !desconexionSolicitada.contains(vpn.id), desconectando.insert(vpn.id).inserted else { return }
+        recuperando.remove(vpn.id)
         desconexionSolicitada.insert(vpn.id)
         desconexiones.removeValue(forKey: vpn.id)
         Task.detached(priority: .userInitiated) {
             let resultado = try? Self.ejecutar(args: ["stop", vpn.id])
+            let consulta = try? Self.ejecutar(args: ["list"])
             await MainActor.run {
-                if resultado?.codigo == 0 {
-                    self.estados[vpn.id] = .desconectada
-                } else {
+                self.desconectando.remove(vpn.id)
+                if !self.aplicarDesconexionConfirmada(vpn.id, consulta: consulta) {
                     self.desconexionSolicitada.remove(vpn.id)
                     let detail = resultado?.error.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                    self.ultimoError = detail.isEmpty ? "No se pudo desconectar \(vpn.name)." : detail
+                    self.ultimoError = detail.isEmpty ? "No se pudo confirmar la desconexión. Vuelve a intentarlo." : detail
                 }
                 self.refrescar()
             }
         }
     }
 
+    /// Cancelar un túnel recién iniciado y desconectar uno activo deben
+    /// invalidar por igual cualquier consulta anterior a su detención.
+    func aplicarDesconexionConfirmada(_ id: String, consulta: Resultado?) -> Bool {
+        guard let consulta,
+              EstadoMotor.confirmaDesconexion([id], codigo: consulta.codigo, salida: consulta.salida),
+              let datos = consulta.salida.data(using: .utf8),
+              let lista = try? JSONDecoder().decode([VPNStatus].self, from: datos),
+              let estado = lista.first(where: { $0.id == id }) else { return false }
+        revisionEstado += 1
+        if let indice = vpns.firstIndex(where: { $0.id == id }) { vpns[indice] = estado }
+        desconexionSolicitada.remove(id)
+        recuperando.remove(id)
+        desconexiones.removeValue(forKey: id)
+        faltas.removeValue(forKey: id)
+        inicioConexion.removeValue(forKey: id)
+        estados[id] = .desconectada
+        return true
+    }
+
     /// Descarta el aviso de caída o el error de una fila.
     func descartarAviso(_ id: String) {
+        recuperando.remove(id)
         desconexiones.removeValue(forKey: id)
         if case .error = estados[id] { estados.removeValue(forKey: id) }
     }
@@ -542,6 +675,10 @@ final class VPNModel: ObservableObject {
         #if DEBUG
         if esMuestra { return }
         #endif
+        guard !cargandoConfiguracion, !guardandoConfiguracion else { return }
+        cargandoConfiguracion = true
+        let errorAnterior = errorCargaConfiguracion
+        errorCargaConfiguracion = nil
         Task.detached(priority: .utility) {
             let result = try? Self.ejecutar(args: ["config", "list"])
             guard let result, result.codigo == 0,
@@ -551,10 +688,12 @@ final class VPNModel: ObservableObject {
                 // los guardó una Nuvex más nueva y no deben sobrescribirse.
                 let masNuevos = result?.error.contains("versión de configuración no compatible") == true
                 await MainActor.run {
+                    self.cargandoConfiguracion = false
                     self.datosMasNuevos = masNuevos
                     self.ultimoError = masNuevos
                         ? "Tus conexiones las guardó una versión más nueva de Nuvex. Actualiza Nuvex para usarlas; no se modificarán."
                         : "No se pudo leer la configuración."
+                    self.errorCargaConfiguracion = self.ultimoError
                 }
                 return
             }
@@ -562,6 +701,9 @@ final class VPNModel: ObservableObject {
                 ($0.id, Self.passwordStatus(id: $0.id, username: $0.username))
             })
             await MainActor.run {
+                self.cargandoConfiguracion = false
+                if self.ultimoError == errorAnterior { self.ultimoError = nil }
+                self.errorCargaConfiguracion = nil
                 let primeraCarga = !self.configuracionCargada
                 self.profiles = profiles
                 self.passwordStatuses = statuses
@@ -576,13 +718,14 @@ final class VPNModel: ObservableObject {
     }
 
     /// Guarda una sola conexión conservando las demás tal como están.
-    func guardarConexion(_ perfil: VPNProfile, password: String?) {
+    func guardarConexion(_ perfil: VPNProfile, password: String?,
+                         alFinalizar: (@MainActor @Sendable (ResultadoGuardado) -> Void)? = nil) {
         var lista = profiles
         if let i = lista.firstIndex(where: { $0.id == perfil.id }) { lista[i] = perfil }
         else { lista.append(perfil) }
         var passwords: [String: String] = [:]
         if let password, !password.isEmpty { passwords[perfil.id] = password }
-        guardarPerfiles(lista, passwords: passwords)
+        guardarPerfiles(lista, passwords: passwords, alFinalizar: alFinalizar)
     }
 
     func eliminarConexion(_ id: String) {
@@ -620,7 +763,12 @@ final class VPNModel: ObservableObject {
             alFinalizar?(ResultadoGuardado(id: operacion,
                 resumen: ResumenGuardado(conexiones: .fallo(detalle)), idsConfirmados: []))
         }
-        guard !guardandoConfiguracion, !instalandoAyudante, !hayConectando else {
+        guard configuracionCargada, errorCargaConfiguracion == nil, !cargandoConfiguracion else {
+            rechazar("Primero vuelve a cargar tus conexiones. Nuvex no puede modificarlas sin comprobar los datos guardados.")
+            return
+        }
+        guard !guardandoConfiguracion, !instalandoAyudante, !hayConectando,
+              recuperando.isEmpty, desconectando.isEmpty else {
             rechazar("Espera a que termine la operación en curso antes de cambiar las conexiones.")
             return
         }
@@ -743,9 +891,12 @@ final class VPNModel: ObservableObject {
                 let pasoContrasenas: ResumenGuardado.Paso = !keychainErrors.isEmpty
                     ? .fallo(keychainErrors.joined(separator: " ") + " Vuelve a pulsar Guardar para reintentarlo.")
                     : savedPasswordIDs.isEmpty ? .noAplica : .hecho
+                let prepararAhora = canInstallNow && keychainErrors.isEmpty
                 let pasoAyudante: ResumenGuardado.Paso = !shouldInstall ? .noAplica
-                    : canInstallNow ? .enCurso
-                    : .pendiente("Hay una VPN conectada; Nuvex lo preparará la próxima vez que conectes.")
+                    : prepararAhora ? .enCurso
+                    : .pendiente(keychainErrors.isEmpty
+                        ? "Hay una VPN conectada; Nuvex lo preparará la próxima vez que conectes."
+                        : "Primero vuelve a guardar la contraseña; después se preparará la conexión.")
                 let resumen = ResumenGuardado(conexiones: .hecho, contrasenas: pasoContrasenas,
                     ayudante: pasoAyudante, ajustes: pasoAjustes)
                 await MainActor.run {
@@ -766,7 +917,7 @@ final class VPNModel: ObservableObject {
                     self.passwordStatuses = statuses
                     for id in savedPasswordIDs { self.estados.removeValue(forKey: id) }
                     self.refrescar()
-                    if shouldInstall && canInstallNow {
+                    if shouldInstall && prepararAhora {
                         self.instalarAyudante(desdeGuardado: true, errorPrevio: keychainError, alTerminar: { paso in
                             var final = resumen
                             final.ayudante = paso

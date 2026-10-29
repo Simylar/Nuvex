@@ -30,14 +30,14 @@ extension VPNModel {
 
     /// Conecta vigilando la salida del ayudante. Cuando el servidor pide el
     /// código por correo, lo solicita y lo entrega por entrada estándar.
-    nonisolated static func conectarProceso(id: String, name: String) async -> Result<Void, ErrorVPN> {
+    nonisolated static func conectarProceso(id: String, name: String, sinInteraccion: Bool = false) async -> Result<Void, ErrorVPN> {
         // Los correos con el código se buscan a partir de este momento.
         let inicioIntento = Date()
         let acumulado = Acumulador()
         // Registrado desde ya: se puede cancelar mientras se lee el Llavero.
         IntentosConexion.registrar(id, proceso: nil, acumulado: acumulado)
         let password: String
-        do { password = try await leerDelLlavero(id: id, name: name, intentoConexion: id) }
+        do { password = try await leerDelLlavero(id: id, name: name, intentoConexion: id, sinInteraccion: sinInteraccion) }
         catch let error as ErrorVPN { IntentosConexion.retirar(id, acumulado: acumulado); return .failure(error) }
         catch {
             IntentosConexion.retirar(id, acumulado: acumulado)
@@ -72,7 +72,8 @@ extension VPNModel {
                 let necesitaCodigo = acumulado.anadir(texto)
                 guard necesitaCodigo else { return }
                 Task { @MainActor in
-                    if let codigo = await SolicitudCodigo.obtener(perfilID: id, nombre: name, inicio: inicioIntento) {
+                    if let codigo = await SolicitudCodigo.obtener(perfilID: id, nombre: name, inicio: inicioIntento,
+                                                                  alAgotarse: { acumulado.marcarAgotado() }) {
                         // Si el motor ya terminó, escribir falla sin cerrar la app.
                         try? entrada.fileHandleForWriting.write(contentsOf: Data((codigo + "\n").utf8))
                         // Cerrar es imprescindible, no cortesia: al otro lado
@@ -80,7 +81,9 @@ extension VPNModel {
                         // queda bloqueado para siempre esperando mas entrada.
                         try? entrada.fileHandleForWriting.close()
                     } else {
-                        acumulado.marcarCancelado()
+                        // El cierre de la ventana al terminar el proceso no
+                        // debe convertir un fallo del servidor en cancelación.
+                        if p.isRunning { acumulado.marcarCancelado() }
                         try? entrada.fileHandleForWriting.close()
                     }
                 }

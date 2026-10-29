@@ -13,6 +13,9 @@ struct FilaVPN: View {
     /// Inicio del intento en curso y si espera el código, para mostrar el avance.
     var conectandoDesde: Date? = nil
     var esperandoCodigo = false
+    var recuperando = false
+    var desconectando = false
+    var estadoSinConfirmar = false
     let atajo: Int?
     let bloqueada: Bool
     let alAlternar: () -> Void
@@ -30,6 +33,7 @@ struct FilaVPN: View {
     }
 
     private var situacion: Situacion {
+        if recuperando { return .conectando }
         switch estado {
         case .conectada: return .conectada
         case .conectando: return .conectando
@@ -43,6 +47,7 @@ struct FilaVPN: View {
     }
 
     private var simbolo: String {
+        if estadoSinConfirmar { return "questionmark" }
         switch situacion {
         case .conectada: return "lock.fill"
         case .conectando, .desconectada: return "lock.open.fill"
@@ -53,6 +58,7 @@ struct FilaVPN: View {
     }
 
     private var tinte: Color {
+        if estadoSinConfirmar { return .secondary }
         switch situacion {
         case .conectada, .conectando, .desconectada: return .primary
         case .error: return Paleta.error
@@ -63,6 +69,7 @@ struct FilaVPN: View {
     /// El panel ya es vidrio del sistema: el círculo es un relleno opaco,
     /// como los controles del Centro de control. Acento al conectar.
     private var fondoCirculo: Color {
+        if estadoSinConfirmar { return Paleta.rellenoIntenso }
         switch situacion {
         case .conectada: return Paleta.acento
         case .conectando, .desconectada: return Paleta.rellenoIntenso
@@ -71,6 +78,9 @@ struct FilaVPN: View {
     }
 
     private var descripcion: String {
+        if desconectando { return "Desconectando…" }
+        if estadoSinConfirmar { return "Estado sin comprobar" }
+        if recuperando { return "Reconectando en unos segundos…" }
         switch situacion {
         case .conectada:
             guard let inicio = vpn.inicio else { return "Conectada" }
@@ -90,27 +100,11 @@ struct FilaVPN: View {
     }
 
     private var colorDescripcion: Color {
+        if estadoSinConfirmar { return .secondary }
         switch situacion {
         case .error: return Paleta.errorTexto
         case .caida, .faltaContrasena, .faltaConfigurar: return Paleta.avisoTexto
         default: return .secondary
-        }
-    }
-
-    private var etiquetaCirculo: String {
-        switch situacion {
-        case .conectada: return "Desconectar \(vpn.name)"
-        case .conectando: return "\(vpn.name), conectando"
-        case .faltaConfigurar, .faltaContrasena: return "Configurar \(vpn.name)"
-        default: return "Conectar \(vpn.name)"
-        }
-    }
-
-    private func accionCirculo() {
-        switch situacion {
-        case .faltaConfigurar, .faltaContrasena: alConfigurar()
-        case .conectando: break
-        default: alAlternar()
         }
     }
 
@@ -131,19 +125,18 @@ struct FilaVPN: View {
         .background(RoundedRectangle.nuvex(Radio.m).fill(hover && !conectaDesdeFila ? Paleta.relleno : .clear))
         .onHover { hover = $0 }
         .animacion(Movimiento.rapida, value: hover)
-        .help(ayuda)
         .accessibilityElement(children: .contain)
     }
 
     @ViewBuilder
     private var encabezado: some View {
         if conectaDesdeFila {
-            Button(action: accionCirculo) {
+            Button(action: alAlternar) {
                 contenidoEncabezado
             }
             .buttonStyle(EstiloFila())
             .disabled(bloqueada)
-            .accessibilityLabel(etiquetaCirculo)
+            .accessibilityLabel("Conectar \(vpn.name)")
             .accessibilityValue(descripcion)
             .modifier(AtajoNumerico(numero: atajo))
         } else {
@@ -163,25 +156,14 @@ struct FilaVPN: View {
         .contentShape(Rectangle())
     }
 
-    @ViewBuilder
     private var textos: some View {
-        if puedeExpandir {
-            contenidoTextos
-                .contentShape(Rectangle())
-                .onTapGesture { alternarDetalles() }
-        } else {
-            contenidoTextos
-        }
-    }
-
-    private var contenidoTextos: some View {
         VStack(alignment: .leading, spacing: Espacio.xxs / 2) {
             Text(vpn.name)
                 .font(Tipo.cuerpoEnfasis)
                 .lineLimit(1)
             TimelineView(.periodic(from: .now, by: estado == .conectando ? 1 : 30)) { _ in
                 Text(descripcion)
-                    .font(Tipo.nota)
+                    .font(Tipo.apoyo)
                     .monospacedDigit()
                     .foregroundStyle(colorDescripcion)
                     .lineLimit(2)
@@ -195,11 +177,6 @@ struct FilaVPN: View {
         withAnimation(reducirMovimiento ? Movimiento.reducida : Movimiento.estandar) { expandida.toggle() }
     }
 
-    private var ayuda: String {
-        if case .error(let fallo) = situacion { return fallo.detalle }
-        return ""
-    }
-
     private var puedeExpandir: Bool {
         switch situacion {
         case .conectada, .error: return true
@@ -208,31 +185,19 @@ struct FilaVPN: View {
     }
 
     private var conectaDesdeFila: Bool {
-        if case .desconectada = situacion { return true }
+        if case .desconectada = situacion { return !estadoSinConfirmar }
         return false
     }
 
-    @ViewBuilder
     private var circulo: some View {
-        if conectaDesdeFila {
-            contenidoCirculo
-        } else {
-            Button(action: accionCirculo) {
-                contenidoCirculo
-            }
-            .buttonStyle(EstiloPresion())
-            .disabled(bloqueada || estado == .conectando)
-            .accessibilityLabel(etiquetaCirculo)
-            .accessibilityValue(descripcion)
-            .modifier(AtajoNumerico(numero: atajo))
-        }
+        contenidoCirculo.accessibilityHidden(true)
     }
 
     private var contenidoCirculo: some View {
         ZStack {
             Image(systemName: simbolo)
                 .font(.system(size: Tamano.simboloCirculo, weight: .semibold))
-                .foregroundStyle(estado == .conectada ? Color.white : tinte)
+                .foregroundStyle(estado == .conectada && !estadoSinConfirmar ? Color.white : tinte)
                 .contentTransition(.symbolEffect(.replace))
             if case .conectando = situacion { AnilloGiratorio() }
         }
@@ -246,28 +211,41 @@ struct FilaVPN: View {
     private var accesorio: some View {
         switch situacion {
         case .caida:
-            BotonFila(titulo: "Reconectar", accion: alAlternar).disabled(bloqueada)
+            BotonFila(titulo: "Reconectar", accion: alAlternar).disabled(bloqueada || estadoSinConfirmar)
+                .modifier(AtajoNumerico(numero: atajo))
         case .error(let fallo):
             switch fallo.accion {
-            case .reintentar(let titulo): BotonFila(titulo: titulo, accion: alAlternar).disabled(bloqueada)
-            case .ajustes(let titulo): BotonFila(titulo: titulo, accion: alConfigurar)
+            case .reintentar(let titulo):
+                BotonFila(titulo: titulo, accion: alAlternar).disabled(bloqueada || estadoSinConfirmar)
+                    .modifier(AtajoNumerico(numero: atajo))
+            case .ajustes(let titulo):
+                BotonFila(titulo: titulo, accion: alConfigurar).modifier(AtajoNumerico(numero: atajo))
             case .ninguna: BotonFila(titulo: "Descartar", accion: alDescartar)
             }
             chevron
-        case .faltaContrasena, .faltaConfigurar:
-            BotonFila(titulo: "Ajustes…", accion: alConfigurar)
+        case .faltaContrasena:
+            BotonFila(titulo: "Añadir…", accion: alConfigurar).modifier(AtajoNumerico(numero: atajo))
+        case .faltaConfigurar:
+            BotonFila(titulo: "Completar…", accion: alConfigurar).modifier(AtajoNumerico(numero: atajo))
         case .conectada:
+            BotonFila(titulo: desconectando ? "Desconectando…" : "Desconectar", accion: alAlternar)
+                .disabled(bloqueada || desconectando)
+                .modifier(AtajoNumerico(numero: atajo))
+                .accessibilityLabel("Desconectar \(vpn.name)")
             chevron
         case .conectando:
+            if esperandoCodigo {
+                BotonFila(titulo: "Código…") { VentanaCodigo.traerAlFrente(vpn.id) }
+                    .accessibilityLabel("Introducir el código para \(vpn.name)")
+            }
             BotonFila(titulo: "Cancelar", accion: alCancelar)
+                .accessibilityLabel("Cancelar la conexión de \(vpn.name)")
                 .help("Detiene este intento de conexión. Las demás VPN no se tocan.")
         case .desconectada:
-            if let atajo, atajo <= 9 {
-                Text("⌘\(atajo)")
-                    .font(Tipo.nota)
-                    .foregroundStyle(.tertiary)
-                    .accessibilityHidden(true)
-            }
+            Text("Conectar")
+                .font(Tipo.apoyo)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
         }
     }
 
@@ -283,7 +261,9 @@ struct FilaVPN: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(expandida ? "Ocultar detalles" : "Mostrar detalles")
+        .help(expandida ? "Ocultar detalles" : "Mostrar detalles")
+        .accessibilityLabel((expandida ? "Ocultar detalles de " : "Mostrar detalles de ") + vpn.name)
+        .accessibilityValue(expandida ? "Expandido" : "Contraído")
     }
 
     @ViewBuilder
@@ -411,6 +391,10 @@ struct PanelVPN: View {
     @ObservedObject var modelo: VPNModel
 
     private var resumen: String {
+        if modelo.errorConsulta != nil || modelo.errorCargaConfiguracion != nil { return "Requiere atención" }
+        if modelo.instalandoAyudante { return "Preparando conexión…" }
+        if !modelo.desconectando.isEmpty { return "Desconectando…" }
+        if modelo.hayConectando || !modelo.recuperando.isEmpty { return "Conectando…" }
         switch modelo.conectadas {
         case 0: return modelo.vpnsVisibles.isEmpty ? "" : "Sin conexiones activas"
         case 1: return "1 conectada"
@@ -426,8 +410,7 @@ struct PanelVPN: View {
 
     /// Un error que no corresponde a ninguna fila (por ejemplo, del ayudante).
     private var errorGeneral: String? {
-        if let error = modelo.errorConsulta { return error }
-        return modelo.ultimoError
+        modelo.ultimoError
     }
 
     var body: some View {
@@ -441,7 +424,9 @@ struct PanelVPN: View {
             .padding(.top, Espacio.s)
             .padding(.bottom, Espacio.s)
 
-            if modelo.vpnsVisibles.isEmpty {
+            if modelo.errorCargaConfiguracion != nil {
+                problemaConfiguracion
+            } else if modelo.vpnsVisibles.isEmpty {
                 vacio
             } else {
                 // Hasta 8 filas caben sin desplazamiento; con más, la lista se
@@ -456,7 +441,7 @@ struct PanelVPN: View {
             if modelo.instalandoAyudante {
                 Nota(simbolo: nil, color: .secondary,
                      texto: "Preparando el ayudante de red. Autoriza el cambio en el diálogo de macOS.")
-            } else if modelo.ayudanteListo == false && !modelo.profiles.isEmpty {
+            } else if modelo.errorConsulta == nil && modelo.ayudanteListo == false && !modelo.profiles.isEmpty {
                 NotaConAccion(simbolo: "shield.lefthalf.filled", color: Paleta.aviso,
                               texto: "El ayudante de red necesita tu autorización.",
                               accion: "Autorizar") { modelo.instalarAyudante() }
@@ -470,19 +455,48 @@ struct PanelVPN: View {
             if let aviso = modelo.avisoConvivencia {
                 Nota(simbolo: "exclamationmark.triangle.fill", color: Paleta.aviso, texto: aviso)
             }
-            if let error = errorGeneral, !modelo.vpnsVisibles.isEmpty {
-                Nota(simbolo: "exclamationmark.circle.fill", color: Paleta.error, texto: error, seleccionable: true)
+            if modelo.errorConsulta != nil, !modelo.vpnsVisibles.isEmpty {
+                NotaConAccion(simbolo: "exclamationmark.circle.fill", color: Paleta.aviso,
+                              texto: "No se pudo comprobar el estado. Vuelve a intentarlo antes de conectar.",
+                              accion: "Reintentar") { modelo.refrescar() }
+            } else if errorGeneral != nil, modelo.errorCargaConfiguracion == nil {
+                VStack(alignment: .leading, spacing: Espacio.s) {
+                    NotaConAccion(simbolo: "exclamationmark.circle.fill", color: Paleta.aviso,
+                                  texto: "No se completó la operación. Revisa los permisos o vuelve a intentarlo.",
+                                  accion: "Revisar") { abrirAjustes() }
+                    DisclosureGroup("Detalles del problema") {
+                        Text(errorGeneral ?? "").font(Tipo.nota).textSelection(.enabled)
+                        Button("Mostrar registro") { Log.mostrar() }.buttonStyle(.link)
+                    }
+                    .font(Tipo.nota).padding(.horizontal, Espacio.m)
+                }
             }
 
             Divider().padding(.horizontal, Espacio.m).padding(.vertical, Espacio.s)
             if let actualizaciones = modelo.actualizaciones, actualizaciones.configuradas {
                 ElementoMenu(titulo: "Buscar actualizaciones…", atajo: "", tecla: nil) { actualizaciones.mostrar() }
             }
+            if !modelo.profiles.isEmpty {
+                ElementoMenu(titulo: "Añadir conexión…", atajo: "⌘N", tecla: "n") { Bienvenida.mostrar(modelo: modelo) }
+            }
             ElementoMenu(titulo: "Ajustes de Nuvex…", atajo: "⌘,", tecla: ",") { abrirAjustes() }
             ElementoMenu(titulo: "Salir de Nuvex", atajo: "⌘Q", tecla: "q") { NSApp.terminate(nil) }
         }
         .padding(Espacio.s)
         .frame(width: Tamano.panel)
+    }
+
+    private var problemaConfiguracion: some View {
+        EstadoVacio("No se pudieron cargar tus conexiones",
+                    detalle: modelo.datosMasNuevos
+                        ? "Actualiza Nuvex para usar estos datos."
+                        : "Tus datos guardados se conservan. Vuelve a cargarlos para continuar.",
+                    simbolo: "exclamationmark.triangle") {
+            Button("Volver a cargar") { modelo.cargarConfiguracion(); modelo.refrescar() }
+                .estiloBoton(.principal).disabled(modelo.cargandoConfiguracion)
+            Button("Mostrar registro") { Log.mostrar() }.estiloBoton(.secundario)
+        }
+        .padding(Espacio.xl)
     }
 
     private var filas: some View {
@@ -494,8 +508,11 @@ struct PanelVPN: View {
                         caidaEn: modelo.desconexiones[vpn.id],
                         conectandoDesde: modelo.inicioConexion[vpn.id],
                         esperandoCodigo: modelo.esperandoCodigo.contains(vpn.id),
+                        recuperando: modelo.recuperando.contains(vpn.id),
+                        desconectando: modelo.desconectando.contains(vpn.id),
+                        estadoSinConfirmar: modelo.errorConsulta != nil,
                         atajo: indice + 1,
-                        bloqueada: modelo.instalandoAyudante,
+                        bloqueada: modelo.instalandoAyudante || modelo.guardandoConfiguracion,
                         alAlternar: { modelo.alternar(vpn) },
                         alConfigurar: { abrirAjustes(vpn.id) },
                         alDescartar: { modelo.descartarAviso(vpn.id) },
@@ -507,11 +524,14 @@ struct PanelVPN: View {
     @ViewBuilder
     private var vacio: some View {
         Group {
-            if let error = modelo.errorConsulta {
-                EstadoVacio("No se pudo leer el estado", detalle: error, simbolo: "network.slash") {
+            if modelo.cargandoConfiguracion || (!modelo.configuracionCargada && modelo.errorCargaConfiguracion == nil) {
+                ProgressView("Cargando conexiones…")
+            } else if modelo.errorConsulta != nil {
+                EstadoVacio("No se pudo comprobar el estado",
+                            detalle: "Tus conexiones se conservan. Vuelve a intentarlo para consultar su estado.", simbolo: "network.slash") {
+                    Button("Reintentar") { modelo.refrescar() }.estiloBoton(.principal)
                     Button("Mostrar registro") { Log.mostrar() }.estiloBoton(.secundario)
                 }
-                .textSelection(.enabled)
             } else if modelo.profiles.isEmpty {
                 EstadoVacio("Aún no hay conexiones",
                             detalle: "Añade tu servidor Fortinet para conectarte desde aquí.",

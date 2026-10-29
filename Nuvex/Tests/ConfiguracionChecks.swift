@@ -9,6 +9,45 @@ struct ConfiguracionChecks {
         defer { try? FileManager.default.removeItem(at: base) }
         let perfil = VPNProfile(id: "vpn-a", name: "Oficina", server: "vpn.example.invalid:443",
             username: "persona", trust: "system", realm: "", manageRoutes: true, manageDNS: true, enabled: true)
+        // El primer uso conserva datos ante fallos y distingue guardar de
+        // estar preparado: nunca infiere éxito de la existencia de un perfil.
+        let borrador = BorradorBienvenida()
+        borrador.perfil = perfil
+        borrador.password = "contrasena-de-prueba"
+        borrador.paso = .preparando
+        borrador.completar(ResultadoGuardado(id: UUID(),
+            resumen: .init(conexiones: .fallo("Sin acceso al archivo")), idsConfirmados: []))
+        precondition(borrador.paso == .formulario && !borrador.password.isEmpty)
+        precondition(borrador.perfil == perfil)
+        borrador.completar(ResultadoGuardado(id: UUID(),
+            resumen: .init(conexiones: .hecho, contrasenas: .fallo("Llavero bloqueado")),
+            idsConfirmados: [perfil.id]))
+        precondition(borrador.paso == .formulario && !borrador.password.isEmpty)
+        borrador.completar(ResultadoGuardado(id: UUID(),
+            resumen: .init(conexiones: .hecho, contrasenas: .hecho), idsConfirmados: ["otra"]))
+        precondition(borrador.paso == .formulario && !borrador.password.isEmpty)
+        borrador.completar(ResultadoGuardado(id: UUID(),
+            resumen: .init(conexiones: .hecho, contrasenas: .hecho, ayudante: .fallo("Autorización cancelada")),
+            idsConfirmados: [perfil.id]))
+        precondition(borrador.paso == .guardada && borrador.password.isEmpty)
+        precondition(borrador.resumen?.hayProblemas == true)
+
+        precondition(!borrador.completar(ResultadoGuardado(id: UUID(),
+            resumen: .init(conexiones: .hecho, contrasenas: .hecho, ayudante: .fallo("Cancelado")),
+            idsConfirmados: [perfil.id])), "cancelar el permiso no debe generar otro diálogo automático")
+        let completo = ResultadoGuardado(id: UUID(),
+            resumen: .init(conexiones: .hecho, contrasenas: .hecho, ayudante: .hecho), idsConfirmados: [perfil.id])
+        precondition(borrador.completar(completo), "guardar y preparar debe dar paso a conectar")
+        let reutilizada = ResultadoGuardado(id: UUID(),
+            resumen: .init(conexiones: .hecho, contrasenas: .noAplica, ayudante: .hecho), idsConfirmados: [perfil.id])
+        precondition(!borrador.completar(reutilizada), "no se puede suponer que existe una contraseña")
+        precondition(borrador.completar(reutilizada, contrasenaDisponible: true))
+        precondition(borrador.tieneAvance)
+        precondition(!BorradorBienvenida().tieneAvance)
+        let avanzado = BorradorBienvenida()
+        avanzado.perfil.manageDNS = false
+        precondition(avanzado.tieneAvance, "las opciones especiales también son avance")
+
         let copia = base.appendingPathComponent("copia")
         try FileManager.default.createDirectory(at: copia, withIntermediateDirectories: true)
         let archivoPerfiles = copia.appendingPathComponent("profiles.json")

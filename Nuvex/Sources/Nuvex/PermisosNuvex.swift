@@ -253,6 +253,16 @@ struct SeccionPermisosNuvex: View {
     }
 
     private func refrescar() async {
+        #if DEBUG
+        if modelo.esMuestra {
+            accesos = Dictionary(uniqueKeysWithValues: modelo.profiles.map { ($0.id, .disponible) })
+            comandoListo = true
+            agentes = ["codex": true, "claude": true]
+            integracionesComprobadas = true
+            comprobandoEstado = false
+            return
+        }
+        #endif
         let revision = UUID()
         revisionComprobacion = revision
         comprobandoEstado = true

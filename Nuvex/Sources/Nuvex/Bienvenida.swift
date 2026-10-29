@@ -1,31 +1,48 @@
 import AppKit
+import Combine
 import SwiftUI
 
-/// Ventana de primer uso. Se crea con AppKit porque una app de barra de menús
-/// no tiene escena desde la que abrir ventanas al arrancar.
 @MainActor
 enum Bienvenida {
     private static var ventana: NSWindow?
+    private static var borrador = BorradorBienvenida()
+    private static var observadorConexion: AnyCancellable?
 
     static func mostrar(modelo: VPNModel) {
+        if let ventana, ventana.isVisible, !borrador.conexionCompletada {
+            NSApp.activate(ignoringOtherApps: true)
+            ventana.makeKeyAndOrderFront(nil)
+            return
+        }
+        if borrador.conexionCompletada {
+            borrador = BorradorBienvenida()
+        }
+        let actual = borrador
+        // Sigue la finalización aunque la ventana se haya cerrado. Una caída
+        // posterior no convierte un primer uso terminado en un borrador pendiente.
+        observadorConexion = modelo.$estados.sink { estados in
+            if estados[actual.perfil.id] == .conectada { actual.conexionCompletada = true }
+        }
         let ventana = ventana ?? crearVentana()
         Self.ventana = ventana
-        // Cada apertura empieza desde el primer paso.
         ventana.contentViewController = NSHostingController(
-            rootView: BienvenidaView(modelo: modelo, cerrar: { ventana.close() }))
+            rootView: BienvenidaView(modelo: modelo, borrador: borrador, cerrar: { ventana.close() }))
         ventana.center()
         NSApp.activate(ignoringOtherApps: true)
         ventana.makeKeyAndOrderFront(nil)
     }
 
+    static func reanudarSiPendiente(modelo: VPNModel) -> Bool {
+        guard borrador.tieneAvance, !borrador.conexionCompletada else { return false }
+        mostrar(modelo: modelo)
+        return true
+    }
+
     private static func crearVentana() -> NSWindow {
-        let ventana = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 520),
-                               styleMask: [.titled, .closable, .fullSizeContentView],
-                               backing: .buffered, defer: false)
-        ventana.title = "Bienvenida a Nuvex"
-        ventana.titlebarAppearsTransparent = true
-        ventana.titleVisibility = .hidden
-        ventana.isMovableByWindowBackground = true
+        let ventana = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 620),
+                               styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        ventana.title = "Añadir conexión"
+        ventana.minSize = NSSize(width: 520, height: 520)
         ventana.isReleasedWhenClosed = false
         return ventana
     }
@@ -33,238 +50,260 @@ enum Bienvenida {
 
 struct BienvenidaView: View {
     @ObservedObject var modelo: VPNModel
+    @ObservedObject var borrador: BorradorBienvenida
     let cerrar: () -> Void
-
-    private enum Paso { case inicio, formulario, preparando, listo }
-
-    @State private var paso: Paso = .inicio
-    @State private var perfil = VPNProfile.nuevo()
-    @State private var password = ""
-    @State private var intento = false
-    @State private var errorGuardado: String?
-    @State private var avisoAyudante: String?
+    private enum Campo: Hashable { case servidor, usuario, password, nombre }
+    @FocusState private var foco: Campo?
+    @State private var cambiarContrasena = false
 
     private var busy: Bool { modelo.guardandoConfiguracion || modelo.instalandoAyudante }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            switch paso {
-            case .inicio: inicio
-            case .formulario: formulario
-            case .preparando: preparando
-            case .listo: listo
-            }
-        }
-        .frame(width: 460)
-        .fondoVentana()
-        .animacion(Movimiento.suave, value: paso)
-        .onChange(of: busy) { antes, ahora in
-            // Al terminar de guardar (y de instalar el ayudante), decide el paso.
-            guard paso == .preparando, antes, !ahora else { return }
-            if modelo.profiles.contains(where: { $0.id == perfil.id }) {
-                avisoAyudante = modelo.ultimoError
-                password = ""
-                paso = .listo
-            } else {
-                errorGuardado = modelo.ultimoError ?? "No se pudo guardar la conexión."
-                paso = .formulario
-            }
-        }
+    private var perfilParaGuardar: VPNProfile { borrador.perfil.conNombreSugerido }
+    private var contrasenaGuardada: Bool {
+        modelo.passwordStatuses[borrador.perfil.id] == .saved &&
+            modelo.profiles.contains { $0.id == borrador.perfil.id && $0.username == perfilParaGuardar.username }
     }
 
-    // MARK: Pasos
-
-    private var inicio: some View {
-        VStack(spacing: Espacio.l) {
-            LogoNuvex(lado: Tamano.logoPantalla)
-                .padding(.bottom, Espacio.xs)
-            Text("Te damos la bienvenida a Nuvex")
-                .font(Tipo.pantalla)
-            Text("Conecta tus VPN Fortinet desde la barra de menús. Configurarlo lleva un par de minutos.")
-                .font(Tipo.entradilla)
-                .foregroundStyle(Paleta.textoSecundario)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-            VStack(alignment: .leading, spacing: Espacio.xl) {
-                PasoBienvenida(numero: 1, simbolo: "server.rack", titulo: "Añade tu servidor y usuario",
-                               detalle: "La contraseña se guarda en el Llavero de macOS.")
-                PasoBienvenida(numero: 2, simbolo: "lock.shield", titulo: "Autoriza el ayudante de red",
-                               detalle: "macOS pedirá tu contraseña de administrador una vez.")
-                PasoBienvenida(numero: 3, simbolo: "menubar.arrow.up.rectangle", titulo: "Conecta desde la barra de menús",
-                               detalle: "Busca el icono de Nuvex arriba a la derecha.")
+    var body: some View {
+        Group {
+            switch borrador.paso {
+            case .formulario: formulario
+            case .preparando: preparando
+            case .guardada: guardada
             }
-            .padding(.horizontal, Espacio.m)
-            .padding(.vertical, Espacio.xl)
-            Button("Añadir primera conexión") { paso = .formulario }
-                .estiloBoton(.principal)
-                .controlSize(.large)
-                .keyboardShortcut(.defaultAction)
-            Button("Ahora no", action: cerrar)
-                .buttonStyle(.link)
         }
-        .padding(.horizontal, Espacio.pantalla)
-        .padding(.top, Espacio.pantalla)
-        .padding(.bottom, Espacio.xxxl)
+        .frame(minWidth: 520, idealWidth: 520, minHeight: 520, idealHeight: 620)
+        .fondoVentana()
+        .onAppear { foco = .servidor }
+        .onChange(of: borrador.paso) { _, paso in
+            if paso == .formulario { foco = contrasenaGuardada ? .servidor : .password }
+        }
     }
 
     private var formulario: some View {
-        VStack(spacing: 0) {
-            VStack(spacing: Espacio.xs) {
-                Text("Tu primera conexión").font(Tipo.titulo)
-                Text("Podrás ajustar rutas, DNS y más opciones en Ajustes.")
+        Form {
+            Section {
+                HStack(spacing: Espacio.l) {
+                    LogoNuvex(lado: Tamano.iconoCabecera)
+                    VStack(alignment: .leading, spacing: Espacio.xs) {
+                        Text("Conecta con tu trabajo o escuela").font(Tipo.titulo)
+                        Text("Añade los datos de tu VPN Fortinet. Después podrás conectarte desde la barra de menús.")
+                            .foregroundStyle(Paleta.textoSecundario)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            Section {
+                TextField("Servidor", text: $borrador.perfil.server, prompt: Text("vpn.empresa.com"))
+                    .textContentType(.URL).focused($foco, equals: .servidor)
+                    .onSubmit { foco = .usuario }
+                TextField("Usuario", text: $borrador.perfil.username)
+                    .textContentType(.username).focused($foco, equals: .usuario)
+                    .onSubmit { foco = .password }
+                if contrasenaGuardada && !cambiarContrasena && borrador.password.isEmpty {
+                    LabeledContent("Contraseña") {
+                        Text("Guardada en el Llavero").foregroundStyle(Paleta.textoSecundario)
+                        Button("Cambiar…") { cambiarContrasena = true; foco = .password }
+                    }
+                } else {
+                    SecureField("Contraseña", text: $borrador.password,
+                                prompt: Text(contrasenaGuardada ? "En blanco conserva la guardada" : "Contraseña de la VPN"))
+                        .textContentType(.password)
+                        .focused($foco, equals: .password)
+                        .onSubmit(guardar)
+                }
+            } footer: {
+                Text("Usa los datos que te dio tu organización. La contraseña se guarda en el Llavero de macOS. Si hace falta un código, te lo pediremos al conectar.")
                     .foregroundStyle(Paleta.textoSecundario)
             }
-            .padding(.top, Espacio.bloque)
-            Form {
-                Section {
-                    TextField("Nombre", text: $perfil.name, prompt: Text("Oficina"))
-                    TextField("Servidor", text: $perfil.server, prompt: Text("vpn.empresa.com:443"))
-                        .textContentType(.URL)
-                }
-                Section {
-                    TextField("Usuario", text: $perfil.username, prompt: Text("usuario"))
-                        .textContentType(.username)
-                    SecureField("Contraseña", text: $password, prompt: Text("Contraseña de la VPN"))
-                }
-                Section {
-                    Picker("Confianza TLS", selection: $perfil.trust) {
-                        Text("Certificados del sistema").tag("system")
-                        Text("Certificado incluido (Prepa)").tag("bundle")
-                    }
-                } footer: {
-                    Text("Para fijar una huella SHA-256, usa Ajustes después de guardar.")
-                        .foregroundStyle(Paleta.textoSecundario)
-                }
+            Section {
+                TextField("Nombre (opcional)", text: $borrador.perfil.name,
+                          prompt: Text(perfilParaGuardar.name.isEmpty ? "Oficina" : perfilParaGuardar.name))
+                    .focused($foco, equals: .nombre)
+            } footer: {
+                Text("Si lo dejas vacío, usaremos la dirección del servidor para reconocer la conexión.")
             }
-            .formularioNuvex()
-            .scrollDisabled(true)
-            .frame(height: 300)
-
-            VStack(alignment: .leading, spacing: Espacio.m) {
+            OpcionesServidor(perfil: $borrador.perfil)
+        }
+        .formularioNuvex()
+        .disabled(busy)
+        .barraAcciones {
+            VStack(alignment: .leading, spacing: Espacio.s) {
                 if let mensaje = mensajeFormulario {
                     Label(mensaje, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(errorGuardado != nil ? Paleta.errorTexto : Paleta.avisoTexto)
-                        .font(Tipo.apoyo)
+                        .foregroundStyle(Paleta.avisoTexto).font(Tipo.apoyo)
                         .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
                 }
+                Text("Al conectar, guardaremos tus datos. macOS puede pedir autorización para preparar la red y acceder al Llavero.")
+                    .font(Tipo.nota).foregroundStyle(Paleta.textoSecundario)
                 HStack {
-                    Button("Atrás") { paso = .inicio }
-                        .estiloBoton(.secundario)
+                    Button("Ahora no", action: cerrar).estiloBoton(.secundario)
+                        .keyboardShortcut(.cancelAction)
                     Spacer()
-                    Button("Guardar y continuar", action: guardar)
-                        .estiloBoton(.principal)
-                        .keyboardShortcut(.defaultAction)
+                    Button("Importar…") { VentanaImportar.mostrar(modelo: modelo) }
+                        .estiloBoton(.secundario)
+                        .help("Recupera conexiones desde un archivo de Nuvex.")
+                        .disabled(busy)
+                    Button("Conectar", action: guardar)
+                        .estiloBoton(.principal).keyboardShortcut(.defaultAction)
+                        .disabled(busy || !modelo.configuracionCargada || modelo.errorCargaConfiguracion != nil)
                 }
             }
-            .padding(.horizontal, Espacio.xxxl)
-            .padding(.bottom, Espacio.xxl)
         }
     }
 
     private var mensajeFormulario: String? {
-        if let errorGuardado { return errorGuardado }
-        guard intento else { return nil }
-        if let motivo = Validacion.motivo(perfil) { return motivo }
-        if password.isEmpty { return "Escribe la contraseña de la VPN." }
-        return nil
+        if let error = borrador.error { return error }
+        guard borrador.intento else { return nil }
+        if let motivo = Validacion.motivo(perfilParaGuardar) { return motivo }
+        return borrador.password.isEmpty && !contrasenaGuardada ? "Escribe la contraseña de la VPN." : nil
     }
 
     private func guardar() {
-        intento = true
-        errorGuardado = nil
-        guard Validacion.motivo(perfil) == nil, !password.isEmpty else { return }
-        paso = .preparando
-        modelo.guardarConexion(perfil, password: password)
-        // guardarPerfiles puede rechazar el cambio sin empezar a guardar.
-        if !busy {
-            errorGuardado = modelo.ultimoError ?? "No se pudo guardar la conexión."
-            paso = .formulario
+        guard !busy else { return }
+        borrador.intento = true
+        borrador.error = nil
+        guard Validacion.motivo(perfilParaGuardar) == nil, !borrador.password.isEmpty || contrasenaGuardada else {
+            if !Validacion.servidorValido(perfilParaGuardar.server) { foco = .servidor }
+            else if Validacion.vacio(perfilParaGuardar.username) { foco = .usuario }
+            else if borrador.password.isEmpty && !contrasenaGuardada { foco = .password }
+            else { foco = .nombre }
+            return
+        }
+        borrador.perfil = perfilParaGuardar
+        borrador.conexionCompletada = false
+        borrador.paso = .preparando
+        let conservarContrasena = contrasenaGuardada
+        modelo.guardarConexion(borrador.perfil, password: borrador.password) { resultado in
+            if borrador.completar(resultado, contrasenaDisponible: conservarContrasena) {
+                modelo.conectarTrasGuardar(id: borrador.perfil.id, resultado: resultado)
+            }
         }
     }
 
     private var preparando: some View {
         VStack(spacing: Espacio.l) {
             ProgressView().controlSize(.large)
-            Text(modelo.instalandoAyudante ? "Esperando la autorización de macOS…" : "Guardando la conexión…")
+            Text(modelo.instalandoAyudante ? "Autoriza la conexión en macOS" : "Guardando la conexión…")
                 .font(Tipo.encabezado)
-            Text("macOS pedirá tu contraseña de administrador para instalar el ayudante de red. Nuvex no la ve ni la guarda.")
-                .foregroundStyle(Paleta.textoSecundario)
-                .multilineTextAlignment(.center)
+            Text(modelo.instalandoAyudante
+                 ? "El ayudante permite crear la conexión de red. Usa Touch ID o tu contraseña de administrador si macOS lo ofrece. Nuvex no recibe esa contraseña."
+                 : "Estamos guardando tus datos y comprobando qué hace falta para conectar.")
+                .foregroundStyle(Paleta.textoSecundario).multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, Espacio.pantalla)
-        .padding(.vertical, Espacio.pantalla * 2)
+        .padding(Espacio.pantalla)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var listo: some View {
-        VStack(spacing: Espacio.l) {
-            let conAviso = avisoAyudante != nil || modelo.resumenGuardado?.hayProblemas == true
-            Image(systemName: conAviso ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                .font(.system(size: Tamano.simboloDestacado))
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(conAviso ? Paleta.aviso : Paleta.exito)
-            Text(conAviso ? "Conexión guardada" : "Todo listo")
-                .font(Tipo.pantalla)
-            Text("Encontrarás Nuvex en la barra de menús, arriba a la derecha. Desde ahí conectas y desconectas con un clic.")
-                .foregroundStyle(Paleta.textoSecundario)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-            if let resumen = modelo.resumenGuardado, resumen.hayProblemas {
-                GroupBox {
-                    ListaResumenGuardado(modelo: modelo, resumen: resumen)
-                        .padding(Espacio.s)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+    private var estadoConexion: EstadoUI { modelo.estado(id: borrador.perfil.id) }
+    private var esperandoCodigo: Bool { modelo.esperandoCodigo.contains(borrador.perfil.id) }
+    private var sinComprobar: Bool { modelo.errorConsulta != nil }
+
+    private var simboloResultado: String {
+        if sinComprobar { return "questionmark.circle" }
+        if case .error = estadoConexion { return "exclamationmark.triangle.fill" }
+        if estadoConexion == .conectada { return "checkmark.circle.fill" }
+        return modelo.ayudanteListo == false ? "lock.shield" : "info.circle"
+    }
+
+    private var colorResultado: Color {
+        if sinComprobar { return Paleta.aviso }
+        if case .error = estadoConexion { return Paleta.error }
+        if estadoConexion == .conectada { return Paleta.exito }
+        return modelo.ayudanteListo == false ? Paleta.aviso : .secondary
+    }
+
+    private var tituloResultado: String {
+        if modelo.instalandoAyudante { return "Autoriza la conexión en macOS" }
+        if sinComprobar { return "No se pudo comprobar la conexión" }
+        switch estadoConexion {
+        case .conectada: return "Conectada a \(borrador.perfil.name)"
+        case .conectando: return esperandoCodigo ? "Introduce el código de verificación" : "Conectando…"
+        case .error(let fallo): return fallo.titulo
+        case .desconectada:
+            return modelo.canceladas.contains(borrador.perfil.id) ? "Conexión cancelada" : "Conexión guardada"
+        }
+    }
+
+    private var explicacionResultado: String {
+        if sinComprobar { return "Tus datos están guardados. Comprueba el estado antes de volver a conectar." }
+        switch estadoConexion {
+        case .conectada: return "La próxima vez, abre Nuvex en la barra de menús para conectar o desconectar."
+        case .conectando:
+            return esperandoCodigo ? "El servidor necesita un código. Puedes abrir la ventana para introducirlo."
+                : "Puedes cancelar este intento. Tus datos guardados se conservan."
+        case .error(let fallo): return fallo.detalle
+        case .desconectada:
+            return modelo.ayudanteListo == false
+                ? "Falta autorizar el ayudante de red. Pulsa Conectar para volver a intentarlo cuando estés listo."
+                : "Puedes volver a conectar o revisar los datos sin empezar de nuevo."
+        }
+    }
+
+    private var guardada: some View {
+        GeometryReader { geometria in
+            ScrollView {
+                VStack(spacing: Espacio.l) {
+                    if estadoConexion == .conectando || modelo.instalandoAyudante {
+                        ProgressView().controlSize(.large)
+                    } else {
+                        Image(systemName: simboloResultado)
+                            .font(.system(size: Tamano.simboloDestacado))
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(colorResultado)
+                    }
+                    Text(tituloResultado).font(Tipo.pantalla).multilineTextAlignment(.center)
+                        .accessibilityAddTraits(.isHeader)
+                    Text(explicacionResultado).foregroundStyle(Paleta.textoSecundario)
+                        .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+                    accionesResultado
                 }
-            } else if let avisoAyudante {
-                Text("\(avisoAyudante) Nuvex lo intentará de nuevo al conectar.")
-                    .font(Tipo.apoyo)
-                    .foregroundStyle(Paleta.avisoTexto)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
+                .padding(Espacio.pantalla)
+                .frame(maxWidth: .infinity, minHeight: geometria.size.height)
             }
-            HStack(spacing: Espacio.m) {
-                Button("Cerrar", action: cerrar)
+        }
+    }
+
+    @ViewBuilder
+    private var accionesResultado: some View {
+        HStack(spacing: Espacio.m) {
+            if modelo.instalandoAyudante {
+                Button("Cerrar ventana", action: cerrar).estiloBoton(.secundario)
+            } else if estadoConexion == .conectando {
+                Button("Cancelar") { modelo.cancelarConexion(borrador.perfil.id) }
+                    .estiloBoton(.secundario).keyboardShortcut(.cancelAction)
+                if esperandoCodigo {
+                    Button("Introducir código") { VentanaCodigo.traerAlFrente(borrador.perfil.id) }
+                        .estiloBoton(.principal).keyboardShortcut(.defaultAction)
+                }
+            } else if estadoConexion == .conectada && !sinComprobar {
+                Button("Cerrar", action: cerrar).estiloBoton(.principal)
+                    .keyboardShortcut(.defaultAction)
+            } else if sinComprobar {
+                Button("Cerrar", action: cerrar).estiloBoton(.secundario).keyboardShortcut(.cancelAction)
+                Button("Comprobar estado") { modelo.refrescar() }.estiloBoton(.principal)
+                    .keyboardShortcut(.defaultAction)
+            } else if case .error(let fallo) = estadoConexion {
+                Button("Cerrar", action: cerrar).estiloBoton(.secundario).keyboardShortcut(.cancelAction)
+                switch fallo.accion {
+                case .ajustes:
+                    Button("Revisar datos") { borrador.paso = .formulario; foco = .servidor }
+                        .estiloBoton(.principal).keyboardShortcut(.defaultAction)
+                case .reintentar(let titulo):
+                    Button(titulo) { modelo.conectar(id: borrador.perfil.id) }
+                        .estiloBoton(.principal).keyboardShortcut(.defaultAction).disabled(busy)
+                case .ninguna:
+                    Button("Comprobar estado") { modelo.refrescar() }
+                        .estiloBoton(.principal).keyboardShortcut(.defaultAction)
+                }
+            } else {
+                Button("Editar datos") { borrador.paso = .formulario; foco = .servidor }
                     .estiloBoton(.secundario)
-                Button("Conectar ahora") {
-                    modelo.conectar(id: perfil.id)
-                    cerrar()
-                }
-                .estiloBoton(.principal)
-                .keyboardShortcut(.defaultAction)
-                .disabled(!modelo.vpns.contains { $0.id == perfil.id })
+                Button("Conectar") { modelo.conectar(id: borrador.perfil.id) }
+                    .estiloBoton(.principal).keyboardShortcut(.defaultAction)
+                    .disabled(busy || !modelo.vpns.contains { $0.id == borrador.perfil.id })
             }
-            .controlSize(.large)
-            .padding(.top, Espacio.s)
         }
-        .padding(.horizontal, Espacio.pantalla)
-        .padding(.vertical, Espacio.pantalla + Espacio.xxl)
-    }
-}
-
-/// Un paso de la presentación: símbolo en la columna del acento, título y
-/// detalle. Sin contenedor: la alineación y el espacio bastan para agruparlos.
-private struct PasoBienvenida: View {
-    let numero: Int
-    let simbolo: String
-    let titulo: String
-    let detalle: String
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Espacio.l) {
-            Image(systemName: simbolo)
-                .font(Tipo.titulo)
-                .foregroundStyle(Paleta.acento)
-                .frame(width: Espacio.bloque)
-            VStack(alignment: .leading, spacing: Espacio.xxs) {
-                Text(titulo).font(Tipo.cuerpoEnfasis)
-                Text(detalle).font(Tipo.apoyo).foregroundStyle(Paleta.textoSecundario)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Paso \(numero): \(titulo). \(detalle)")
+        .controlSize(.large)
     }
 }

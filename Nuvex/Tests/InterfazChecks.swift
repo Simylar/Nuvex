@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import SwiftUI
 
 /// Comprobaciones de la lógica de interfaz que no depende de AppKit:
 /// traducción de fallos del motor, validación de campos y duraciones.
@@ -61,7 +62,8 @@ struct InterfazChecks {
         precondition(cancelado.codigo == .cancelada)
         let generico = Fallo.interpretar("NUVEX_OTP_REQUIRED\nnuvex: perfil desactivado\n")
         precondition(generico.titulo == "No se pudo conectar")
-        precondition(generico.detalle == "perfil desactivado")
+        precondition(generico.detalle.contains("Internet"))
+        precondition(!generico.detalle.contains("perfil desactivado"))
         precondition(Fallo.interpretar("").detalle.contains("registro"))
 
         // Validación con las mismas reglas que nuvexconfig.py.
@@ -107,6 +109,77 @@ struct InterfazChecks {
         perfil.username = "ana"
         precondition(Validacion.motivo(perfil) == nil)
         precondition(VPNProfile.nuevo().id.range(of: "^[a-z][a-z0-9-]{0,47}$", options: .regularExpression) != nil)
+
+        // El nombre automático solo se propone al crear desde la interfaz.
+        var alta = VPNProfile.nuevo()
+        alta.server = " https://vpn.empresa.com:10443/ "
+        alta.username = " persona "
+        precondition(alta.conNombreSugerido.name == "vpn.empresa.com")
+        precondition(alta.conNombreSugerido.server == "https://vpn.empresa.com:10443/")
+        precondition(alta.conNombreSugerido.username == "persona")
+        precondition(alta.conNombreSugerido.trust == "system")
+        alta.name = "Mi oficina"
+        precondition(alta.conNombreSugerido.name == "Mi oficina")
+        alta.name = ""
+        alta.server = "vpn empresa"
+        precondition(alta.conNombreSugerido.name.isEmpty)
+        alta.server = String(repeating: "a", count: 61) + ".example"
+        precondition(alta.conNombreSugerido.name.count == 60)
+        alta.server = "[2001:db8::1]:443"
+        precondition(!alta.conNombreSugerido.name.isEmpty)
+
+        var recuperacion = RecuperacionConexion()
+        precondition(!recuperacion.reservar("oficina", activada: false, disponible: true))
+        precondition(!recuperacion.reservar("oficina", activada: true, disponible: false))
+        precondition(recuperacion.reservar("oficina", activada: true, disponible: true))
+        precondition(!recuperacion.reservar("oficina", activada: true, disponible: true))
+        precondition(recuperacion.reservar("escuela", activada: true, disponible: true))
+        recuperacion.permitirNuevoIntento("oficina")
+        precondition(recuperacion.reservar("oficina", activada: true, disponible: true))
+        precondition(!recuperacion.reservar("escuela", activada: true, disponible: true))
+
+        // Una recuperación aplazada sin red no consume el único intento.
+        var aplazada = RecuperacionConexion()
+        precondition(aplazada.puedeIntentar("oficina"))
+        precondition(!aplazada.reservar("oficina", activada: true, disponible: false))
+        precondition(aplazada.puedeIntentar("oficina"))
+        precondition(aplazada.reservar("oficina", activada: true, disponible: true))
+        precondition(!aplazada.puedeIntentar("oficina"))
+
+        var primera = alta
+        primera.name = "Oficina"; primera.server = "vpn.example"; primera.username = "persona"
+        var segunda = VPNProfile.nuevo()
+        segunda.name = "Escuela"; segunda.server = "vpn.example"; segunda.username = "persona"
+        let fallo = Fallo.interpretar("Operation timed out")
+        precondition(ReaperturaNuvex.conexion(perfiles: [primera, segunda],
+            estados: [primera.id: .conectada, segunda.id: .error(fallo)], enCurso: []) == segunda.id)
+        precondition(ReaperturaNuvex.conexion(perfiles: [primera, segunda],
+            estados: [primera.id: .conectada], enCurso: [segunda.id]) == segunda.id)
+        segunda.enabled = false
+        precondition(ReaperturaNuvex.conexion(perfiles: [segunda, primera],
+            estados: [segunda.id: .error(fallo)], enCurso: []) == primera.id)
+        precondition(ReaperturaNuvex.conexion(perfiles: [], estados: [:], enCurso: []) == nil)
+
+        // Colores informativos opacos con las dos apariencias reales de AppKit.
+        func luminancia(_ color: Color) -> Double {
+            let rgb = NSColor(color).usingColorSpace(.sRGB)!
+            func lineal(_ valor: Double) -> Double {
+                valor <= 0.04045 ? valor / 12.92 : pow((valor + 0.055) / 1.055, 2.4)
+            }
+            return 0.2126 * lineal(rgb.redComponent) + 0.7152 * lineal(rgb.greenComponent)
+                + 0.0722 * lineal(rgb.blueComponent)
+        }
+        for apariencia in [NSAppearance.Name.aqua, .darkAqua] {
+            NSAppearance(named: apariencia)!.performAsCurrentDrawingAppearance {
+                for fondo in [Paleta.fondo, Paleta.superficie, Paleta.superficieElevada, Paleta.superficieFlotante] {
+                    for texto in [Paleta.textoSecundario, Paleta.avisoTexto, Paleta.errorTexto, Paleta.exitoTexto] {
+                        let a = luminancia(fondo), b = luminancia(texto)
+                        precondition((max(a, b) + 0.05) / (min(a, b) + 0.05) >= 4.5,
+                                     "el texto informativo debe alcanzar contraste AA")
+                    }
+                }
+            }
+        }
 
         // Duraciones que muestra el panel.
         let inicio = Date(timeIntervalSince1970: 0)

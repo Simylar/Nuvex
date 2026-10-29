@@ -128,6 +128,9 @@ struct EtiquetaBarra: View {
     }
 
     private var descripcion: String {
+        if modelo.errorConsulta != nil || modelo.errorCargaConfiguracion != nil { return "Nuvex, estado sin comprobar" }
+        if modelo.hayConectando { return "Nuvex, conectando" }
+        if !modelo.desconectando.isEmpty { return "Nuvex, desconectando" }
         switch modelo.conectadas {
         case 0: return "Nuvex, sin VPN conectadas"
         case 1: return "Nuvex, 1 VPN conectada"

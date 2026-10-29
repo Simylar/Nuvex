@@ -281,7 +281,7 @@ enum IntegracionAsistentes {
 struct AjustesAutomatizacion: View {
     @ObservedObject var modelo: VPNModel
     @ObservedObject private var preferencias = Preferencias.shared
-    @State private var estadoComando = IntegracionAsistentes.estadoComando()
+    @State private var estadoComando: IntegracionAsistentes.EstadoComando = ModoDemostracion.activo ? .instalado : IntegracionAsistentes.estadoComando()
     @State private var estados: [String: IntegracionAsistentes.Estado] = [:]
     @State private var autorizaciones: [String: AutorizacionAgentes.Estado] = [:]
     @State private var comprobaciones: [Comprobacion]?
@@ -306,6 +306,12 @@ struct AjustesAutomatizacion: View {
     }
 
     private func refrescar() {
+        if ModoDemostracion.activo {
+            estadoComando = .instalado
+            estados = ["codex": .instalada, "claude": .instalada]
+            autorizaciones = ["codex": .instalada, "claude": .instalada]
+            return
+        }
         estadoComando = IntegracionAsistentes.estadoComando()
         estados = Dictionary(uniqueKeysWithValues: IntegracionAsistentes.destinos.map { ($0.id, IntegracionAsistentes.estado($0)) })
         autorizaciones = Dictionary(uniqueKeysWithValues: IntegracionAsistentes.destinos.map {
@@ -328,6 +334,10 @@ struct AjustesAutomatizacion: View {
         comprobando = true
         defer { comprobando = false }
         refrescar()
+        if ModoDemostracion.activo {
+            comprobaciones = [Comprobacion(nombre: "Integraciones", ok: true, detalle: "Configuradas para esta muestra.")]
+            return
+        }
         var resultado = modelo.control?.diagnostico() ?? [
             Comprobacion(nombre: "Control remoto", ok: false,
                          detalle: "El servicio de automatización todavía no está disponible."),
@@ -390,7 +400,7 @@ struct AjustesAutomatizacion: View {
                     }
                 }
             } footer: {
-                Text("Un clic instala o actualiza el CLI y las skills, crea reglas revocables limitadas a ~/.local/bin/nuvex y activa «Abrir al iniciar sesión». No reemplaza archivos ajenos ni modifica «Conectar sin preguntar».")
+                Text("Instala las integraciones de los asistentes detectados y abre Nuvex con tu sesión. Solo les permite usar el comando oficial. Puedes retirar ese acceso cuando quieras.")
                     .foregroundStyle(Paleta.textoSecundario)
             }
             Section {
@@ -460,42 +470,46 @@ struct AjustesAutomatizacion: View {
             } header: {
                 Text("Agentes")
             } footer: {
-                Text("«Configurar» instala la skill y autoriza solo el CLI oficial. «Revocar» elimina esa autorización sin afectar otras reglas del agente.")
+                Text("Cada asistente muestra su estado y permite retirar su acceso por separado.")
                     .foregroundStyle(Paleta.textoSecundario)
             }
 
             Section {
-                Button { Task { await comprobarPreparacion() } } label: {
-                    if comprobando { ProgressView().controlSize(.small) }
-                    else { Text("Volver a comprobar") }
-                }
-                .disabled(comprobando)
-                if let comprobaciones {
-                    ForEach(Array(comprobaciones.enumerated()), id: \.offset) { _, comprobacion in
-                        Label {
-                            VStack(alignment: .leading, spacing: Espacio.xxs) {
-                                Text(comprobacion.nombre)
-                                Text(comprobacion.detalle).font(Tipo.nota).foregroundStyle(Paleta.textoSecundario)
+                DisclosureGroup("Diagnóstico y comprobaciones") {
+                    Button { Task { await comprobarPreparacion() } } label: {
+                        if comprobando { ProgressView().controlSize(.small) }
+                        else { Text("Volver a comprobar") }
+                    }
+                    .disabled(comprobando)
+                    if let comprobaciones {
+                        ForEach(Array(comprobaciones.enumerated()), id: \.offset) { _, comprobacion in
+                            Label {
+                                VStack(alignment: .leading, spacing: Espacio.xxs) {
+                                    Text(comprobacion.nombre)
+                                    Text(comprobacion.detalle).font(Tipo.nota).foregroundStyle(Paleta.textoSecundario)
+                                }
+                            } icon: {
+                                Image(systemName: comprobacion.ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                    .foregroundStyle(comprobacion.ok ? Paleta.exito : Paleta.aviso)
                             }
-                        } icon: {
-                            Image(systemName: comprobacion.ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                                .foregroundStyle(comprobacion.ok ? Paleta.exito : Paleta.aviso)
                         }
                     }
                 }
             } header: {
-                Text("Diagnóstico")
+                Text("Opciones avanzadas")
             } footer: {
                 Text("Comprueba localmente permisos, ayudante, Llavero, conexiones, comando y habilidades. No intenta conectar ninguna VPN.")
                     .foregroundStyle(Paleta.textoSecundario)
             }
 
-            Section("Ejemplos") {
-                ForEach(["~/.local/bin/nuvex estado", "~/.local/bin/nuvex conectar oficina", "~/.local/bin/nuvex desconectar --todas", "~/.local/bin/nuvex diagnostico"], id: \.self) { ejemplo in
-                    HStack {
-                        Text(ejemplo).font(Tipo.mono).textSelection(.enabled)
-                        Spacer()
-                        BotonCopiar(texto: ejemplo, etiqueta: "Copiar \(ejemplo)")
+            Section {
+                DisclosureGroup("Comandos de Terminal") {
+                    ForEach(["~/.local/bin/nuvex estado", "~/.local/bin/nuvex conectar oficina", "~/.local/bin/nuvex desconectar --todas", "~/.local/bin/nuvex diagnostico"], id: \.self) { ejemplo in
+                        HStack {
+                            Text(ejemplo).font(Tipo.mono).textSelection(.enabled)
+                            Spacer()
+                            BotonCopiar(texto: ejemplo, etiqueta: "Copiar \(ejemplo)")
+                        }
                     }
                 }
             }
@@ -510,9 +524,9 @@ struct AjustesAutomatizacion: View {
         switch estado {
         case .noIncluido: return "Esta compilación no incluye el comando."
         case .ausente: return "No instalado"
-        case .instalado: return "Instalado en ~/.local/bin/nuvex"
+        case .instalado: return "Instalado"
         case .otraCopia: return "Apunta a otra copia de Nuvex; instálalo para usar esta."
-        case .ajeno: return "Ya existe un ~/.local/bin/nuvex que no creó Nuvex; no se modifica."
+        case .ajeno: return "Ya existe otro comando con ese nombre. Revisa el diagnóstico antes de configurarlo."
         }
     }
 

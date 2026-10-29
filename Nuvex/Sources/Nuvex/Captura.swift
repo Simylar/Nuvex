@@ -36,8 +36,57 @@ enum Captura {
                     nombre: "ajustes-conexion-minimo-\(sufijo)", en: carpeta, oscuro: oscuro)
             guardar(ConfigurationView(modelo: modelo, borradores: borradores).frame(width: 1180, height: 820),
                     nombre: "ajustes-conexion-amplio-\(sufijo)", en: carpeta, oscuro: oscuro)
-            guardar(BienvenidaView(modelo: modelo, cerrar: {}).background(.background),
+            guardar(BienvenidaView(modelo: modelo, borrador: BorradorBienvenida(), cerrar: {}).background(.background),
                     nombre: "bienvenida-\(sufijo)", en: carpeta, oscuro: oscuro)
+        }
+        for oscuro in [false, true] {
+            let sufijo = oscuro ? "oscuro" : "claro"
+            let borrador = BorradorBienvenida()
+            borrador.perfil.server = "vpn.empresa.example"
+            borrador.perfil.username = "persona"
+            borrador.password = "ficticia"
+            borrador.perfil.trust = "sha256:" + String(repeating: "a", count: 64)
+            guardar(BienvenidaView(modelo: modelo, borrador: borrador, cerrar: {})
+                .frame(width: 520, height: 760),
+                    nombre: "alta-avanzada-\(sufijo)", en: carpeta, oscuro: oscuro)
+            borrador.error = "No se pudo guardar la contraseña. Desbloquea el Llavero y vuelve a guardar."
+            guardar(BienvenidaView(modelo: modelo, borrador: borrador, cerrar: {})
+                .frame(width: 520, height: 620),
+                    nombre: "alta-error-\(sufijo)", en: carpeta, oscuro: oscuro)
+            borrador.perfil = borrador.perfil.conNombreSugerido
+            let modeloAlta = VPNModel(muestra: ())
+            modeloAlta.profiles = [borrador.perfil]
+            func estadoAlta(conectada: Bool, ayudante: Bool = true) -> VPNStatus {
+                VPNStatus(id: borrador.perfil.id, name: "Oficina", connected: conectada, pid: conectada ? 1 : 0,
+                          ip: "", iface: "", networks: [], enabled: true, configured: true, helperReady: ayudante)
+            }
+            modeloAlta.vpns = [estadoAlta(conectada: true)]
+            borrador.paso = .guardada
+            borrador.resumen = .init(conexiones: .hecho, contrasenas: .hecho, ayudante: .hecho)
+            guardar(BienvenidaView(modelo: modeloAlta, borrador: borrador, cerrar: {}),
+                    nombre: "alta-preparada-\(sufijo)", en: carpeta, oscuro: oscuro)
+            modeloAlta.vpns = [estadoAlta(conectada: false, ayudante: false)]
+            borrador.resumen?.ayudante = .fallo("Autorización cancelada")
+            guardar(BienvenidaView(modelo: modeloAlta, borrador: borrador, cerrar: {}),
+                    nombre: "alta-permiso-pendiente-\(sufijo)", en: carpeta, oscuro: oscuro)
+            modeloAlta.vpns = [estadoAlta(conectada: false)]
+            modeloAlta.estados[borrador.perfil.id] = .conectando
+            guardar(BienvenidaView(modelo: modeloAlta, borrador: borrador, cerrar: {}),
+                    nombre: "alta-conectando-\(sufijo)", en: carpeta, oscuro: oscuro)
+            modeloAlta.estados[borrador.perfil.id] = .error(Fallo.interpretar("Could not authenticate to gateway"))
+            guardar(BienvenidaView(modelo: modeloAlta, borrador: borrador, cerrar: {}),
+                    nombre: "alta-autenticacion-\(sufijo)", en: carpeta, oscuro: oscuro)
+            let sinEstado = VPNModel(muestra: ())
+            sinEstado.errorConsulta = "Fallo simulado"
+            guardar(PanelVPN(modelo: sinEstado).background(.background),
+                    nombre: "panel-estado-desconocido-\(sufijo)", en: carpeta, oscuro: oscuro)
+            guardar(FilaVPN(vpn: modelo.vpns[1], estado: .conectando, passwordStatus: .saved, caidaEn: nil,
+                            esperandoCodigo: true, atajo: 1, bloqueada: false,
+                            alAlternar: {}, alConfigurar: {}, alDescartar: {})
+                .frame(width: Tamano.panel).background(.background),
+                    nombre: "fila-codigo-\(sufijo)", en: carpeta, oscuro: oscuro)
+            guardar(AjustesCuentaGoogle().frame(width: 540, height: 640),
+                    nombre: "google-primer-uso-\(sufijo)", en: carpeta, oscuro: oscuro)
         }
         let modeloAtencion = VPNModel(muestra: ())
         modeloAtencion.usarActualizacionesDeMuestra(Actualizaciones(
@@ -135,13 +184,13 @@ enum Captura {
                 nombre: "actualizacion-disponible-oscuro", en: carpeta, oscuro: true)
         guardar(NovedadesView(version: "3.2.0", notas: notas, cerrar: {}), nombre: "novedades", en: carpeta, oscuro: false)
         guardar(PanelCodigoView(solicitud: .muestra(nombre: "Oficina central",
-                                                    correo: .buscando(desde: Date().addingTimeInterval(-12), cuenta: "samuel@gmail.com"))),
+                                                    correo: .buscando(desde: Date().addingTimeInterval(-12), cuenta: "persona@example.com"))),
                 nombre: "codigo-buscando", en: carpeta, oscuro: false)
         guardar(PanelCodigoView(solicitud: .muestra(nombre: "Oficina central", codigo: "482913",
                                                     correo: .encontrado(remitente: "noreply@empresa.com"), automatico: true)),
                 nombre: "codigo-recibido-oscuro", en: carpeta, oscuro: true)
         guardar(PanelCodigoView(solicitud: .muestra(nombre: "Oficina central",
-                                                    correo: .buscando(desde: Date().addingTimeInterval(-40), cuenta: "samuel@gmail.com",
+                                                    correo: .buscando(desde: Date().addingTimeInterval(-40), cuenta: "persona@example.com",
                                                                       aviso: .sinRed))),
                 nombre: "codigo-sin-red", en: carpeta, oscuro: false)
         guardar(PanelCodigoView(solicitud: .muestra(nombre: "Oficina central", correo: .problema(.apiDesactivada))),
@@ -226,6 +275,7 @@ extension VPNModel {
     convenience init(muestra: Void) {
         self.init(sinArrancar: ())
         esMuestra = true
+        confirmarConfiguracionDeMuestra()
         func estado(_ id: String, _ nombre: String, conectada: Bool = false, ip: String = "", iface: String = "",
                     rutas: Int = 0, inicio: Date? = nil, configurada: Bool = true) -> VPNStatus {
             VPNStatus(id: id, name: nombre, connected: conectada, pid: conectada ? 1 : 0, ip: ip, iface: iface,

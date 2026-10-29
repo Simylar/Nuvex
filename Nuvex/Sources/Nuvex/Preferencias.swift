@@ -63,7 +63,9 @@ struct AjustesApp: Equatable {
     var politicaAsistentes: PoliticaAsistentes = .preguntar
     /// Conexiones que los asistentes no pueden conectar aunque la política lo permita.
     var bloqueadasParaAsistentes: Set<String> = []
-    var avisarAccionesAsistentes = true
+    /// Las operaciones rutinarias se reflejan en el panel. Quien eligió
+    /// recibir avisos conserva su preferencia explícita al actualizar.
+    var avisarAccionesAsistentes = false
 
     var autorizacionGlobalCompleta: Bool {
         !autorizacionRevocada && capacidadesAutorizadas.isSuperset(of: Self.capacidadesActuales)
@@ -100,7 +102,7 @@ extension AjustesApp: Codable {
         correo = try c.decodeIfPresent([String: ConfigCorreo].self, forKey: .correo) ?? [:]
         politicaAsistentes = (try? c.decodeIfPresent(PoliticaAsistentes.self, forKey: .politicaAsistentes)) ?? .preguntar
         bloqueadasParaAsistentes = try c.decodeIfPresent(Set<String>.self, forKey: .bloqueadasParaAsistentes) ?? []
-        avisarAccionesAsistentes = try c.decodeIfPresent(Bool.self, forKey: .avisarAccionesAsistentes) ?? true
+        avisarAccionesAsistentes = try c.decodeIfPresent(Bool.self, forKey: .avisarAccionesAsistentes) ?? false
         capacidadesAutorizadas = try c.decodeIfPresent(Set<String>.self, forKey: .capacidadesAutorizadas) ?? []
         autorizacionRevocada = try c.decodeIfPresent(Bool.self, forKey: .autorizacionRevocada) ?? false
     }
@@ -202,7 +204,13 @@ enum ArchivoAjustes {
 
 @MainActor
 final class Preferencias: ObservableObject {
-    static let shared = Preferencias()
+    static let shared: Preferencias = {
+        if ModoDemostracion.activo {
+            return Preferencias(url: FileManager.default.temporaryDirectory
+                .appendingPathComponent("nuvex-muestra-\(UUID().uuidString)/ajustes.json"))
+        }
+        return Preferencias()
+    }()
 
     nonisolated static let directorio = URL(fileURLWithPath: Paths.userHome + "/Library/Application Support/Nuvex",
                                             isDirectory: true)

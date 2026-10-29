@@ -53,13 +53,14 @@ final class SolicitudCodigo: ObservableObject, Identifiable {
     private var tareaLectura: Task<Void, Never>?
 
     /// Espera el código. Devuelve nil si se cancela o se agota el tiempo.
-    static func obtener(perfilID: String, nombre: String, inicio: Date, limite: Duration = .seconds(280)) async -> String? {
+    static func obtener(perfilID: String, nombre: String, inicio: Date, limite: Duration = .seconds(280),
+                        alAgotarse: @escaping @MainActor () -> Void = {}) async -> String? {
         let solicitud = SolicitudCodigo(perfilID: perfilID, nombre: nombre, inicio: inicio)
         abiertas[perfilID] = solicitud
         NotificationCenter.default.post(name: .solicitudCodigoCambio, object: perfilID)
         return await withCheckedContinuation { continuacion in
             solicitud.continuacion = continuacion
-            solicitud.empezar(limite: limite)
+            solicitud.empezar(limite: limite, alAgotarse: alAgotarse)
         }
     }
 
@@ -80,13 +81,14 @@ final class SolicitudCodigo: ObservableObject, Identifiable {
         self.inicio = inicio
     }
 
-    private func empezar(limite: Duration) {
+    private func empezar(limite: Duration, alAgotarse: @escaping @MainActor () -> Void) {
         empezarLectura()
         // El ayudante abandona el intento a los 300 s; se cierra un poco antes.
         tareas.append(Task { [weak self] in
             try? await Task.sleep(for: limite)
             guard !Task.isCancelled else { return }
             Log.escribir("se agotó el tiempo para escribir el código de \(self?.perfilID ?? "")")
+            alAgotarse()
             self?.resolver(nil)
         })
         VentanaCodigo.mostrar(self)
@@ -214,6 +216,12 @@ extension Notification.Name {
 enum VentanaCodigo {
     private static var paneles: [String: NSPanel] = [:]
     private static var delegados: [String: Delegado] = [:]
+
+    static func traerAlFrente(_ id: String) {
+        guard let panel = paneles[id] else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        panel.makeKeyAndOrderFront(nil)
+    }
 
     /// Cerrar la ventana con el botón rojo equivale a Cancelar.
     private final class Delegado: NSObject, NSWindowDelegate {

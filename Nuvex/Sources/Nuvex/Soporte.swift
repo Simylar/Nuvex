@@ -2,6 +2,17 @@ import AppKit
 import ServiceManagement
 import Darwin
 
+enum ModoDemostracion {
+    static var activo: Bool {
+        #if DEBUG
+        CommandLine.arguments.contains("--captura") || CommandLine.arguments.contains("--guia-estilo")
+            || CommandLine.arguments.contains("--verificar-interfaz")
+        #else
+        false
+        #endif
+    }
+}
+
 /// Registro a fichero. Una app de barra de menus no tiene consola donde mirar,
 /// asi que sin esto cualquier fallo es invisible.
 enum Log {

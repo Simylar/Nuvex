@@ -4,6 +4,18 @@ import Foundation
 @main
 struct CorreoChecks {
     static func main() {
+        // Importación del archivo de escritorio sin red ni secretos reales.
+        let cliente = #"{"installed":{"client_id":"prueba.apps.googleusercontent.com","client_secret":"secreto-ficticio"}}"#
+        let importado = try! JSONDecoder().decode(ClienteGoogleImportado.self, from: Data(cliente.utf8))
+        precondition(importado.id == "prueba.apps.googleusercontent.com")
+        precondition(importado.secreto == "secreto-ficticio")
+        for invalido in ["{}", "{", cliente.replacingOccurrences(of: "installed", with: "web"),
+                         cliente.replacingOccurrences(of: "secreto-ficticio", with: ""),
+                         cliente.replacingOccurrences(of: "prueba.apps.googleusercontent.com", with: "cliente.example"),
+                         cliente.replacingOccurrences(of: "secreto-ficticio", with: "secreto\\npartido")] {
+            precondition((try? JSONDecoder().decode(ClienteGoogleImportado.self, from: Data(invalido.utf8))) == nil)
+        }
+
         // Formatos habituales de códigos por correo.
         let casos: [(String, String?)] = [
             ("AuthCode: 123456", "123456"),

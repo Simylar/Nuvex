@@ -22,7 +22,6 @@ final class BorradoresAjustes: ObservableObject {
     /// Campos editados ("id.campo"): sus avisos se muestran después de escribir.
     @Published var tocados: Set<String> = []
     @Published var editandoContrasena: Set<String> = []
-    var guardandoID: String?
     private var ultimosGuardados: [VPNProfile] = []
 
     /// Incorpora los perfiles guardados sin pisar ediciones pendientes ni
@@ -117,12 +116,6 @@ struct ConfigurationView: View {
         .onChange(of: modelo.profiles) { _, nuevos in borradores.sincronizar(con: nuevos) }
         .onChange(of: modelo.settingsTargetID) { _, id in aplicarDestino(id) }
         .onChange(of: modelo.paginaDestino) { _, pagina in aplicarPagina(pagina) }
-        .onChange(of: modelo.mensajeConfiguracion) { _, mensaje in
-            if mensaje != nil, let id = borradores.guardandoID {
-                borradores.limpiar(id)
-                borradores.guardandoID = nil
-            }
-        }
         .confirmationDialog(tituloEliminacion, isPresented: Binding(
             get: { pendingDeletion != nil },
             set: { if !$0 { pendingDeletion = nil } }
@@ -346,6 +339,7 @@ private struct AjustesGenerales: View {
     @ObservedObject var borradores: BorradoresAjustes
     @AppStorage("avisarDesconexion") private var avisarDesconexion = true
     @AppStorage("intervaloRevision") private var intervaloRevision = 5
+    @AppStorage("reconectarAutomaticamente") private var reconectarAutomaticamente = false
     @State private var inicioActivo = false
     @State private var inicioPendiente = false
     @State private var errorInicio: String?
@@ -404,16 +398,26 @@ private struct AjustesGenerales: View {
                 Toggle("Avisar cuando una VPN se desconecte", isOn: $avisarDesconexion)
                 EstiloAvisos()
                     .disabled(!avisarDesconexion)
-                Picker("Comprobar el estado", selection: $intervaloRevision) {
-                    ForEach(intervalos, id: \.self) { segundos in
-                        Text("Cada \(segundos) s").tag(segundos)
+                DisclosureGroup("Frecuencia de comprobación") {
+                    Picker("Comprobar el estado", selection: $intervaloRevision) {
+                        ForEach(intervalos, id: \.self) { segundos in
+                            Text("Cada \(segundos) s").tag(segundos)
+                        }
                     }
+                    .onChange(of: intervaloRevision) { _, _ in modelo.actualizarIntervalo() }
                 }
-                .onChange(of: intervaloRevision) { _, _ in modelo.actualizarIntervalo() }
             } header: {
                 Text("Avisos")
             } footer: {
                 Text("Con el estilo «Alertas», el aviso de desconexión se queda en pantalla hasta que lo cierres o pulses Reconectar.")
+                    .foregroundStyle(Paleta.textoSecundario)
+            }
+            Section {
+                Toggle("Reconectar si se pierde la conexión", isOn: $reconectarAutomaticamente)
+            } header: {
+                Text("Recuperación")
+            } footer: {
+                Text("Nuvex hará un solo intento cuando haya red, usando los permisos existentes. Puede pedir el código de verificación. Si falla o falta un permiso, podrás volver a conectar manualmente.")
                     .foregroundStyle(Paleta.textoSecundario)
             }
             SeccionCopias(modelo: modelo)
@@ -748,7 +752,7 @@ private struct DetalleConexion: View {
     private var necesitaContrasena: Bool { usuarioCambiado && !soloEspacios }
 
     private var motivo: String? {
-        if let motivo = Validacion.motivo(perfil) { return motivo }
+        if let motivo = Validacion.motivo(esNueva ? perfil.conNombreSugerido : perfil) { return motivo }
         if necesitaContrasena && password.wrappedValue.isEmpty { return "Escribe la contraseña del nuevo usuario." }
         return bloqueoPorConexion
     }
@@ -766,8 +770,12 @@ private struct DetalleConexion: View {
 
     private func guardar() {
         guard motivo == nil else { borradores.intentos.insert(id); return }
-        borradores.guardandoID = id
-        modelo.guardarConexion(perfil, password: password.wrappedValue)
+        let idGuardado = id
+        modelo.guardarConexion(esNueva ? perfil.conNombreSugerido : perfil, password: password.wrappedValue) { resultado in
+            guard resultado.confirmaImportacion([idGuardado]) else { return }
+            if case .fallo = resultado.resumen.contrasenas { return }
+            borradores.limpiar(idGuardado)
+        }
     }
 
     private func revertir() {
@@ -811,6 +819,9 @@ private struct DetalleConexion: View {
 
     private var estadoActual: (Color, String) {
         if esNueva { return (Paleta.aviso, "Sin guardar") }
+        if modelo.errorConsulta != nil { return (Paleta.aviso, "Estado sin comprobar") }
+        if modelo.desconectando.contains(id) { return (Paleta.acento, "Desconectando…") }
+        if modelo.recuperando.contains(id) { return (Paleta.acento, "Reconectando en unos segundos…") }
         if !perfil.enabled { return (.secondary, "Oculta en la barra de menús") }
         guard let vpn else { return (.secondary, "Desconectada") }
         switch modelo.estado(vpn) {
@@ -829,17 +840,23 @@ private struct DetalleConexion: View {
 
     @ViewBuilder
     private var botonConexion: some View {
-        if let vpn, !esNueva, perfil.enabled || vpn.connected {
+        if modelo.errorConsulta != nil {
+            Button("Comprobar estado") { modelo.refrescar() }.estiloBoton(.secundario)
+        } else if modelo.recuperando.contains(id) {
+            Button("Cancelar reconexión") { modelo.cancelarConexion(id) }.estiloBoton(.secundario)
+        } else if let vpn, !esNueva, perfil.enabled || vpn.connected {
             switch modelo.estado(vpn) {
             case .conectada:
-                Button("Desconectar") { modelo.desconectar(vpn) }
+                Button(modelo.desconectando.contains(id) ? "Desconectando…" : "Desconectar") { modelo.desconectar(vpn) }
                     .estiloBoton(.secundario)
+                    .disabled(modelo.desconectando.contains(id))
             case .conectando:
-                ProgressView().controlSize(.small)
+                Button("Cancelar") { modelo.cancelarConexion(id) }
+                    .estiloBoton(.secundario)
             default:
                 Button("Conectar") { modelo.conectar(vpn) }
                     .estiloBoton(.principal)
-                    .disabled(hayCambios || busy || !vpn.configured || modelo.passwordStatuses[id] == .missing)
+                    .disabled(hayCambios || busy || modelo.errorConsulta != nil || !vpn.configured || modelo.passwordStatuses[id] == .missing)
                     .help(hayCambios ? "Guarda los cambios antes de conectar." : "")
             }
         }
@@ -854,18 +871,19 @@ private struct DetalleConexion: View {
             Section { cabecera.padding(.vertical, Espacio.xs) }
             Group {
                 Section("Servidor") {
-                    TextField("Nombre", text: $perfil.name, prompt: Text("Oficina"))
-                    if aviso("name") && Validacion.vacio(perfil.name) {
+                    TextField(esNueva ? "Nombre (opcional)" : "Nombre", text: $perfil.name,
+                              prompt: Text(esNueva ? perfil.conNombreSugerido.name : "Oficina"))
+                    if !esNueva && aviso("name") && Validacion.vacio(perfil.name) {
                         AvisoCampo("Ponle un nombre para reconocerla en la barra de menús.")
                     }
-                    TextField("Servidor", text: $perfil.server, prompt: Text("vpn.empresa.com:443"))
+                    TextField("Servidor", text: $perfil.server, prompt: Text("vpn.empresa.com"))
                         .textContentType(.URL)
                     if aviso("server") {
                         if perfil.enabled && Validacion.vacio(perfil.server) {
                             AvisoCampo("Indica el servidor Fortinet y, si corresponde, el puerto.")
                         } else if !Validacion.vacio(perfil.server)
                                     && !Validacion.servidorValido(perfil.server.trimmingCharacters(in: .whitespaces)) {
-                            AvisoCampo("Usa la forma host:puerto, por ejemplo vpn.empresa.com:443.")
+                            AvisoCampo("Escribe una dirección como vpn.empresa.com. Añade :puerto solo si te lo indicaron.")
                         }
                     }
                 }
@@ -883,34 +901,7 @@ private struct DetalleConexion: View {
                         .foregroundStyle(Paleta.textoSecundario)
                 }
                 SeccionCodigoCorreo(perfilID: id)
-                Section {
-                    Picker("Confianza TLS", selection: seleccionConfianza) {
-                        Text("Certificados del sistema").tag("system")
-                        Text("Certificado incluido (Prepa)").tag("bundle")
-                        Text("Huella SHA-256").tag("sha256")
-                    }
-                    if perfil.trust.hasPrefix("sha256:") {
-                        TextField("Huella", text: huella, prompt: Text("64 caracteres hexadecimales"))
-                            .font(Tipo.mono)
-                        if aviso("trust") && !Validacion.huellaValida(perfil.trust) {
-                            AvisoCampo("Faltan \(max(0, 64 - huella.wrappedValue.count)) caracteres de la huella.")
-                        }
-                    }
-                } header: {
-                    Text("Seguridad")
-                } footer: {
-                    Text(textoConfianza).foregroundStyle(Paleta.textoSecundario)
-                }
-                Section {
-                    Toggle("Instalar las rutas de esta VPN", isOn: $perfil.manageRoutes)
-                    Toggle("Usar el DNS de esta VPN", isOn: $perfil.manageDNS)
-                    TextField("Realm", text: $perfil.realm, prompt: Text("Opcional"))
-                } header: {
-                    Text("Red")
-                } footer: {
-                    Text("Las rutas pueden incluir la salida general a Internet. Si varias VPN instalan rutas o DNS que se superponen, pueden entrar en conflicto.")
-                        .foregroundStyle(Paleta.textoSecundario)
-                }
+                OpcionesServidor(perfil: $perfil)
                 Section {
                     Toggle("Mostrar en la barra de menús", isOn: $perfil.enabled)
                 } footer: {
@@ -927,29 +918,6 @@ private struct DetalleConexion: View {
             .disabled(busy)
         }
         .formularioNuvex()
-    }
-
-    private var textoConfianza: String {
-        switch perfil.trust {
-        case "system": return "Verifica el certificado con las autoridades de confianza de macOS. Es la opción recomendada."
-        case "bundle": return "Usa esta CA solo si tu servidor emplea esa cadena de certificados. Para otras VPN, usa los certificados del sistema o una huella verificada."
-        default: return "Fija el certificado exacto del servidor. Confirma la huella con su administrador antes de guardarla."
-        }
-    }
-
-    private var seleccionConfianza: Binding<String> {
-        Binding(
-            get: { perfil.trust.hasPrefix("sha256:") ? "sha256" : perfil.trust },
-            set: { perfil.trust = $0 == "sha256" ? "sha256:" : $0 }
-        )
-    }
-
-    /// Acepta la huella pegada con dos puntos o espacios y la guarda en minúsculas.
-    private var huella: Binding<String> {
-        Binding(
-            get: { String(perfil.trust.dropFirst(7)) },
-            set: { perfil.trust = "sha256:" + $0.filter(\.isHexDigit).lowercased() }
-        )
     }
 
     @ViewBuilder
@@ -997,7 +965,8 @@ private struct DetalleConexion: View {
                 Label("No hay contraseña guardada para este usuario", systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(Paleta.avisoTexto)
             case .error(let code):
-                Label("No se pudo consultar el Llavero (código \(code))", systemImage: "exclamationmark.triangle.fill")
+                Label("No se pudo comprobar la contraseña. Desbloquea el Llavero y vuelve a conectar.", systemImage: "exclamationmark.triangle.fill")
+                    .help("Diagnóstico del Llavero: \(code)")
                     .foregroundStyle(Paleta.errorTexto)
             case nil:
                 HStack(spacing: Espacio.s) { ProgressView().controlSize(.small); Text("Comprobando…").foregroundStyle(Paleta.textoSecundario) }

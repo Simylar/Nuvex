@@ -14,6 +14,10 @@ struct NucleoChecks {
         // ajustes.json: valores de serie, ida y vuelta y claves desconocidas.
         let vacio = try ArchivoAjustes.leer(nil)
         precondition(vacio.ajustes == AjustesApp())
+        precondition(!vacio.ajustes.avisarAccionesAsistentes)
+        let avisosElegidos = try ArchivoAjustes.leer(Data(#"{"version":3,"avisarAccionesAsistentes":true}"#.utf8))
+        precondition(avisosElegidos.ajustes.avisarAccionesAsistentes,
+                     "la preferencia explícita de avisos debe conservarse")
         precondition(vacio.ajustes.politicaAsistentes == .preguntar)
 
         let futuro = #"{"version":1,"politicaAsistentes":"preguntar","clavesDelFuturo":{"x":1},"correo":{"vpn-a":{"remitente":"noreply@empresa.com","espera":60,"campoNuevo":true}}}"#

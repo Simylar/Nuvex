@@ -60,6 +60,44 @@ struct VPNProfile: Codable, Identifiable, Equatable {
     }
 
     var etiquetaLlavero: String { "Nuvex: \(name)" }
+
+    /// Solo para altas desde la interfaz. Los perfiles importados conservan su
+    /// validación estricta y un nombre escrito nunca se reemplaza.
+    var conNombreSugerido: VPNProfile {
+        var copia = normalizado
+        guard Validacion.vacio(name), Validacion.servidorValido(copia.server) else { return copia }
+        let direccion = copia.server.hasPrefix("https://") ? copia.server : "https://" + copia.server
+        if let host = URLComponents(string: direccion)?.host {
+            copia.name = String(host.unicodeScalars.prefix(60))
+        }
+        return copia
+    }
+}
+
+/// Un intento automático por conexión iniciada por la persona. Una reconexión
+/// exitosa no repone el presupuesto: evita bucles y bloqueos de la cuenta.
+struct RecuperacionConexion {
+    private var intentadas: Set<String> = []
+
+    mutating func permitirNuevoIntento(_ id: String) { intentadas.remove(id) }
+
+    func puedeIntentar(_ id: String) -> Bool { !intentadas.contains(id) }
+
+    mutating func reservar(_ id: String, activada: Bool, disponible: Bool) -> Bool {
+        guard activada, disponible else { return false }
+        return intentadas.insert(id).inserted
+    }
+}
+
+/// Seleccionar una tarea al reabrir nunca inicia ni cambia una VPN.
+enum ReaperturaNuvex {
+    static func conexion(perfiles: [VPNProfile], estados: [String: EstadoUI], enCurso: Set<String>) -> String? {
+        let visibles = perfiles.filter(\.enabled)
+        return visibles.first(where: { if case .error = estados[$0.id] { return true }; return false })?.id
+            ?? visibles.first(where: { enCurso.contains($0.id) })?.id
+            ?? visibles.first(where: { estados[$0.id] == .conectada })?.id
+            ?? visibles.first?.id
+    }
 }
 
 enum PasswordStatus: Equatable {
@@ -150,12 +188,8 @@ struct Fallo: Equatable {
                          detalle: "Esta VPN ya tiene un túnel en marcha. Desconéctala antes de volver a conectar.",
                          accion: .ninguna, codigo: .tunelActivo)
         }
-        let ultima = salida.split(separator: "\n")
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .last(where: { !$0.isEmpty && !$0.hasPrefix("NUVEX_") })
-            .map { $0.hasPrefix("nuvex: ") ? String($0.dropFirst(7)) : $0 }
         return Fallo(titulo: "No se pudo conectar",
-                     detalle: ultima ?? "El motor terminó sin dar detalles. Consulta el registro.",
+                     detalle: "Comprueba tu conexión a Internet y vuelve a intentarlo. Si el problema continúa, abre el registro para consultar el diagnóstico.",
                      accion: .reintentar("Reintentar"), codigo: .desconocido)
     }
 }
@@ -273,7 +307,7 @@ enum Validacion {
         if perfil.enabled && vacio(normalizado.server) { return "Falta el servidor." }
         if normalizado.server.unicodeScalars.count > 255 { return "El servidor admite hasta 255 caracteres." }
         if !vacio(normalizado.server) && !servidorValido(normalizado.server) {
-            return "El servidor debe tener la forma host:puerto, por ejemplo vpn.empresa.com:443."
+            return "Escribe la dirección del servidor, por ejemplo vpn.empresa.com. Añade :puerto solo si te lo indicaron."
         }
         if perfil.enabled && vacio(normalizado.username) { return "Falta el usuario." }
         if normalizado.username.unicodeScalars.count > 128 { return "El usuario admite hasta 128 caracteres." }

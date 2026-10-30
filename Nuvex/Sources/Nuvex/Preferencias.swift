@@ -266,6 +266,14 @@ final class Preferencias: ObservableObject {
         }
     }
 
+    /// El lector se asocia únicamente a perfiles ya persistidos.
+    @discardableResult
+    func modificarCorreo(de id: String, perfilGuardado: Bool,
+                         _ cambio: (inout ConfigCorreo?) -> Void) -> Bool {
+        guard perfilGuardado else { return false }
+        return modificar { cambio(&$0.correo[id]) }
+    }
+
     /// Borra lo asociado a una conexión eliminada.
     func olvidarConexion(_ id: String) {
         modificar {

@@ -17,6 +17,8 @@ enum VerificacionInterfaz {
         comprobarCancelacionDeRecuperacion(modelo)
         comprobarDesconexionConfirmada()
         comprobarUsoCorreoEnModelo()
+        comprobarCaidasYReintentos()
+        comprobarReconciliacionLlavero()
         let borrador = BorradorBienvenida()
         var cierres = 0
         let vista = BienvenidaView(modelo: modelo, borrador: borrador, cerrar: { cierres += 1 })
@@ -83,6 +85,111 @@ enum VerificacionInterfaz {
             else if modo < 3 { precondition(entrega != nil && entrega?.mensaje == nil) }
             else { precondition(entrega == nil) }
         }
+    }
+
+    private static func comprobarCaidasYReintentos() {
+        let perfil = VPNProfile(id: "recuperacion-muestra", name: "Muestra", server: "vpn.example.invalid:443",
+            username: "persona", trust: "system", realm: "", manageRoutes: true, manageDNS: true, enabled: true)
+        func estado(_ conectada: Bool) -> VPNStatus {
+            VPNStatus(id: perfil.id, name: perfil.name, connected: conectada, pid: 0, ip: "", iface: "",
+                      networks: [], enabled: true, configured: true, helperReady: true)
+        }
+        func preparar(_ modelo: VPNModel) {
+            modelo.esMuestra = true
+            modelo.confirmarConfiguracionDeMuestra()
+            modelo.profiles = [perfil]
+            modelo.passwordStatuses[perfil.id] = .saved
+            modelo.vpns = [estado(true)]
+            modelo.estados[perfil.id] = .conectada
+            modelo.actualizarDisponibilidadRed(true)
+        }
+        func consultar(_ modelo: VPNModel) {
+            let lista = [estado(false)]
+            modelo.procesarTransiciones(lista)
+            modelo.vpns = lista
+            modelo.aplicarEstadosConsultados(lista, consultasCorreo: [:])
+        }
+
+        var avisosManuales = 0
+        let manual = VPNModel(sinArrancar: (), permiteRecuperacion: { true }, notificarDesconexion: { _, _ in avisosManuales += 1 })
+        preparar(manual)
+        consultar(manual) // Primera ausencia: todavía no es una caída confirmada.
+        manual.conectar(estado(false))
+        precondition(manual.conexionEnCurso(perfil.id))
+        consultar(manual)
+        consultar(manual)
+        precondition(avisosManuales == 0 && manual.desconexiones.isEmpty)
+        manual.inicioConexion.removeValue(forKey: perfil.id)
+        manual.estados[perfil.id] = .error(.interpretar("fallo de prueba"))
+        manual.actualizarDisponibilidadRed(true)
+        consultar(manual)
+        precondition(manual.recuperando.isEmpty && manual.desconexiones.isEmpty && avisosManuales == 0,
+                     "un fallo manual no reactiva el contador de una caída anterior")
+
+        let descartada = VPNModel(sinArrancar: (), permiteRecuperacion: { false },
+            notificarDesconexion: { _, _ in preconditionFailure("una caída descartada no reaparece") })
+        preparar(descartada)
+        consultar(descartada)
+        descartada.descartarAviso(perfil.id)
+        consultar(descartada)
+        precondition(descartada.desconexiones.isEmpty)
+
+        for impedimento in ["red", "consulta", "guardado", "preferencia"] {
+            var activada = true
+            var avisos = 0
+            let modelo = VPNModel(sinArrancar: (), permiteRecuperacion: { activada },
+                notificarDesconexion: { _, _ in avisos += 1 })
+            preparar(modelo)
+            consultar(modelo)
+            consultar(modelo)
+            let caida = modelo.desconexiones[perfil.id]!
+            precondition(modelo.recuperando.contains(perfil.id) && avisos == 0)
+            switch impedimento {
+            case "red": modelo.actualizarDisponibilidadRed(false)
+            case "consulta": modelo.errorConsulta = "Fallo simulado"
+            case "guardado": modelo.guardandoConfiguracion = true
+            default: activada = false
+            }
+            modelo.ejecutarRecuperacionProgramada(estado(false), caida: caida)
+            consultar(modelo)
+            precondition(modelo.recuperando.isEmpty && modelo.desconexiones[perfil.id] == caida && avisos == 1,
+                         "abortar la espera conserva la caída y emite un solo aviso")
+            activada = true
+            modelo.errorConsulta = nil
+            modelo.guardandoConfiguracion = false
+            modelo.actualizarDisponibilidadRed(true)
+            consultar(modelo)
+            precondition(modelo.recuperando.contains(perfil.id), "al desaparecer el impedimento puede programarse la recuperación")
+            modelo.ejecutarRecuperacionProgramada(estado(false), caida: caida)
+            precondition(modelo.inicioConexion[perfil.id] != nil && modelo.desconexiones.isEmpty && avisos == 1,
+                         "la espera abortada no debe haber consumido el intento")
+        }
+    }
+
+    private static func comprobarReconciliacionLlavero() {
+        let dominio = "NuvexVerificacionLlavero.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: dominio)!
+        defer { defaults.removePersistentDomain(forName: dominio) }
+        defaults.set(true, forKey: ChequeoActualizacion.claveLlaveroPendiente)
+        let migracion = Migraciones.Resultado(versionNueva: false, anterior: nil, copia: nil)
+        let chequeo = ChequeoActualizacion(migracion: migracion, defaults: defaults)
+        let perfiles = ["uno", "dos"].map {
+            VPNProfile(id: $0, name: "Muestra", server: "vpn.example.invalid:443", username: "persona",
+                trust: "system", realm: "", manageRoutes: true, manageDNS: true, enabled: true)
+        }
+        chequeo.confirmarAccesosLlavero(perfiles: [], accesos: [:], configuracionCargada: false)
+        precondition(chequeo.llaveroPendiente, "una carga pendiente no equivale a no tener contraseñas")
+        chequeo.confirmarAccesosLlavero(perfiles: perfiles,
+            accesos: ["uno": .disponible], configuracionCargada: true)
+        precondition(chequeo.llaveroPendiente, "comprobar solo una entrada no acredita todas")
+        chequeo.confirmarAccesosLlavero(perfiles: perfiles,
+            accesos: ["uno": .disponible, "dos": .requiereInteraccion], configuracionCargada: true)
+        precondition(chequeo.llaveroPendiente)
+        chequeo.confirmarAccesosLlavero(perfiles: perfiles,
+            accesos: ["uno": .disponible, "dos": .disponible], configuracionCargada: true)
+        precondition(!chequeo.llaveroPendiente && !defaults.bool(forKey: ChequeoActualizacion.claveLlaveroPendiente))
+        let recargado = ChequeoActualizacion(migracion: migracion, defaults: defaults)
+        precondition(!recargado.llaveroPendiente, "el diagnóstico no debe reponer el aviso ya resuelto")
     }
 
     private static func comprobarUsoCorreoEnModelo() {

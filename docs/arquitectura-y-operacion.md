@@ -82,6 +82,10 @@ en vez de transformarse silenciosamente en otro código.
   para que dos conexiones no usen el refresh token simultáneamente. Cerrar la
   sesión o reemplazar el cliente cancela la renovación y descarta respuestas
   tardías antes de revocar el token.
+- Todos los consumidores de una renovación comparten también la traducción de
+  errores. Retirar una tarea ya terminada no invalida la sesión: la vigencia se
+  comprueba por su identidad, y una respuesta antigua no vuelve a guardar tokens
+  ni cambia el estado de otro inicio OAuth.
 - Errores permanentes (sesión revocada, cliente inválido, scope o API) detienen
   el sondeo y muestran una acción concreta; los transitorios siguen hasta el
   límite configurado.
@@ -156,6 +160,9 @@ General muestra tres acciones y permite desplegar el resto con los detalles y
 la autorización conjunta. El acceso interactivo desde una acción se limita a
 esa contraseña; el control detallado conserva la comprobación de todas. Un
 estado desconocido o una sesión guardada no acredita autorización externa.
+Tras una consulta vigente de todas las entradas, General retira el aviso de
+cambio de firma si cada contraseña está disponible o se confirmó su ausencia.
+Una consulta parcial, desconocida o con intervención pendiente no lo retira.
 
 Revocar guarda primero `noPermitir`, elimina el recibo, invalida una confirmación
 inicial en curso y retira las reglas gestionadas de todos los agentes. Informa
@@ -240,6 +247,12 @@ La desconexión voluntaria se confirma con `list`, impide duplicados y nunca act
 recuperación. Una revisión de estado descarta consultas iniciadas antes de esa
 confirmación. Las respuestas de conexión también deben pertenecer al intento
 actual para no reemplazar un intento posterior.
+Iniciar una conexión manual o descartar una caída limpia su contador anterior;
+los sondeos durante un intento no acumulan nuevas faltas. Si la espera automática
+se interrumpe por red, consulta, guardado o preferencia, se conserva la caída y se
+envía como máximo un aviso, respetando la preferencia de notificaciones. Las
+consultas válidas posteriores pueden reprogramar la espera cuando desaparezca
+el impedimento, sin consumir el intento antes de ejecutarlo.
 
 La espera de recuperación forma parte de `conexionEnCurso`, de modo que una
 desconexión solicitada por Terminal también la cancela. Cancelar retira la caída

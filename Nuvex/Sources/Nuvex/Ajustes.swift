@@ -900,7 +900,7 @@ private struct DetalleConexion: View {
                     Text("La contraseña se guarda en el Llavero de macOS.")
                         .foregroundStyle(Paleta.textoSecundario)
                 }
-                SeccionCodigoCorreo(perfilID: id)
+                SeccionCodigoCorreo(perfilID: id, perfilGuardado: !esNueva)
                 OpcionesServidor(perfil: $perfil)
                 Section {
                     Toggle("Mostrar en la barra de menús", isOn: $perfil.enabled)

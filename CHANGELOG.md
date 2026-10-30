@@ -2,6 +2,29 @@
 
 Este archivo sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y Nuvex usa [versionado semántico](https://semver.org/lang/es/). Cada sección `## [X.Y.Z]` se muestra en la app como «Novedades» y se publica como notas de la versión.
 
+## [3.4.0] - 2026-10-30
+
+### Novedades
+- **Correos con códigos a la papelera**: una opción en Cuenta de Google permite mover el mensaje después de usar su código y confirmar la conexión. Está desactivada por defecto, conserva tu elección y pide autorización adicional de Google. Los mensajes pueden recuperarse desde la papelera; no se borran definitivamente.
+- **Recuperación opcional de conexiones**: puedes activar «Reconectar si se pierde la conexión» en General. Tras una caída confirmada, Nuvex espera a tener red e intenta recuperar la conexión una vez con los permisos existentes. Puedes cancelar la espera y el servidor puede pedir otro código. Está desactivada por defecto.
+
+### Mejoras
+- El primer uso abre directamente el formulario para añadir una conexión. El nombre es opcional y **Conectar** guarda, prepara el ayudante y conecta, con las autorizaciones que macOS necesite.
+- Al corregir un error o reabrir una ventana durante la sesión, Nuvex conserva el avance y recupera primero el código o la operación pendiente.
+- General muestra primero las acciones necesarias para las funciones que utilizas y permite consultar aparte todos los permisos y capacidades.
+- Las autorizaciones válidas se reutilizan y los avisos rutinarios de los asistentes quedan desactivados por defecto, conservando las decisiones anteriores.
+
+### Correcciones
+- Varias conexiones que renuevan la misma sesión de Google reciben un resultado coherente; cerrar o cambiar la sesión descarta sus respuestas antiguas.
+- Reintentar manualmente, descartar o cancelar una caída limpia su estado anterior. Si la espera de recuperación se interrumpe, el aviso no se pierde y se vuelve a comprobar la disponibilidad sin gastar el intento antes de iniciarlo.
+- El aviso de acceso al Llavero se retira cuando una comprobación completa confirma que ya está resuelto.
+- Los ajustes de lectura de Gmail no escriben desde conexiones sin guardar ni desde una configuración bloqueada, e informan los errores de guardado.
+- Restaurar conexiones conserva las autorizaciones y exclusiones actuales; los resultados distinguen lo guardado de los pasos todavía pendientes.
+
+### Compatibilidad
+- Se conservan el identificador de la app, el protocolo del comando y los datos existentes. No se amplían permisos de Gmail sin una decisión explícita.
+- Continúan los requisitos de Apple Silicon y macOS 14 o posterior. El canal existente usa la identidad de firma «Nuvex Release» y actualizaciones firmadas con Sparkle; no equivale a una distribución notarizada por Apple.
+
 ## [3.3.0] - 2026-10-24
 
 ### Nuevo diseño

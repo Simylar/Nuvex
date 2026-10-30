@@ -199,6 +199,10 @@ struct SeccionPermisosNuvex: View {
             accesos = [:]
             Task { await refrescar() }
         }
+        .onChange(of: modelo.passwordStatuses) { _, _ in
+            accesos = [:]
+            Task { await refrescar() }
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { await refrescar() }
         }
@@ -274,13 +278,17 @@ struct SeccionPermisosNuvex: View {
         })
         integracionesComprobadas = true
         let perfiles = modelo.profiles
+        let contrasenas = modelo.passwordStatuses
         let comprobados = await Task.detached(priority: .utility) {
             Dictionary(uniqueKeysWithValues: perfiles.map { perfil in
                 (perfil.id, AccesoLlavero.comprobar(servicio: "nuvex.\(perfil.id)", cuenta: perfil.username))
             })
         }.value
-        guard revisionComprobacion == revision, perfiles == modelo.profiles else { return }
+        guard revisionComprobacion == revision, perfiles == modelo.profiles,
+              contrasenas == modelo.passwordStatuses else { return }
         accesos = comprobados
+        modelo.chequeo?.confirmarAccesosLlavero(perfiles: perfiles,
+            accesos: comprobados, configuracionCargada: modelo.configuracionCargada)
         comprobandoEstado = false
     }
 
@@ -313,9 +321,6 @@ struct SeccionPermisosNuvex: View {
                 }
                 mensaje = perfiles.isEmpty ? "No hay contraseñas guardadas comprobables en los perfiles actuales."
                     : id == nil ? "Se pudieron leer todas las contraseñas guardadas ahora." : "Se pudo leer la contraseña ahora."
-                if id == nil && (!perfiles.isEmpty || modelo.profiles.allSatisfy({ modelo.passwordStatuses[$0.id] == .missing })) {
-                    modelo.chequeo?.descartarLlavero()
-                }
             } catch { mensaje = error.localizedDescription }
             await refrescar()
         }

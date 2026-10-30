@@ -382,46 +382,47 @@ final class CuentaGoogle: ObservableObject {
     func tokenAcceso() async throws -> String {
         if case .llaveroNoDisponible = estado { throw ProblemaGmail.llaveroNoDisponible }
         if let acceso, acceso.caduca > Date().addingTimeInterval(60) { return acceso.token }
+        let sesion = idSesion
+        let actual: RenovacionEnCurso
         if let renovacionEnCurso {
-            let renovado: (token: String, caduca: Date)
-            do { renovado = try await renovacionEnCurso.tarea.value }
-            catch {
-                guard self.renovacionEnCurso?.id == renovacionEnCurso.id else { throw ErrorGoogle.sinSesion }
-                throw error
+            actual = renovacionEnCurso
+        } else {
+            guard let guardado else { throw ErrorGoogle.sinCliente }
+            guard let renovacion = guardado.tokenRenovacion else { throw ErrorGoogle.sinSesion }
+            let pedirTokens = self.pedirTokens
+            let tarea: Task<(token: String, caduca: Date), Error> = Task {
+                let tokens = try await pedirTokens([
+                    "client_id": guardado.clienteID, "client_secret": guardado.secreto,
+                    "refresh_token": renovacion, "grant_type": "refresh_token",
+                ])
+                guard let token = tokens["access_token"] as? String else {
+                    throw ErrorGoogle.respuesta("Google no devolvió un token de acceso.")
+                }
+                return (token: token, caduca: Date().addingTimeInterval(TimeInterval(tokens["expires_in"] as? Int ?? 3000)))
             }
-            guard self.renovacionEnCurso?.id == renovacionEnCurso.id else { throw ErrorGoogle.sinSesion }
-            acceso = renovado
-            return renovado.token
+            actual = RenovacionEnCurso(id: UUID(), tarea: tarea)
+            renovacionEnCurso = actual
         }
-        guard let guardado else { throw ErrorGoogle.sinCliente }
-        guard let renovacion = guardado.tokenRenovacion else { throw ErrorGoogle.sinSesion }
-        let pedirTokens = self.pedirTokens
-        let tarea: Task<(token: String, caduca: Date), Error> = Task {
-            let tokens = try await pedirTokens([
-                "client_id": guardado.clienteID, "client_secret": guardado.secreto,
-                "refresh_token": renovacion, "grant_type": "refresh_token",
-            ])
-            guard let token = tokens["access_token"] as? String else {
-                throw ErrorGoogle.respuesta("Google no devolvió un token de acceso.")
-            }
-            return (token: token, caduca: Date().addingTimeInterval(TimeInterval(tokens["expires_in"] as? Int ?? 3000)))
-        }
-        let idRenovacion = UUID()
-        renovacionEnCurso = RenovacionEnCurso(id: idRenovacion, tarea: tarea)
         defer {
-            if renovacionEnCurso?.id == idRenovacion { renovacionEnCurso = nil }
+            if renovacionEnCurso?.id == actual.id { renovacionEnCurso = nil }
         }
         do {
-            let renovado = try await tarea.value
-            guard renovacionEnCurso?.id == idRenovacion else { throw ErrorGoogle.sinSesion }
-            acceso = renovado
-            if case .caducada = estado { recalcular() }
+            let renovado = try await actual.tarea.value
+            // La retirada normal de la tarea no equivale a cerrar sesión:
+            // varios consumidores pueden reanudarse después de ese defer.
+            guard idSesion == sesion else { throw ErrorGoogle.sinSesion }
+            if renovacionEnCurso?.id == actual.id {
+                acceso = renovado
+                if case .caducada = estado { recalcular() }
+            }
             return renovado.token
         } catch {
-            guard renovacionEnCurso?.id == idRenovacion else { throw ErrorGoogle.sinSesion }
+            guard idSesion == sesion else { throw ErrorGoogle.sinSesion }
             if case ErrorGoogle.respuesta(let detalle) = error, detalle.contains("invalid_grant") {
-                Log.escribir("la sesión de Google caducó")
-                recalcular(caducada: true)
+                if renovacionEnCurso?.id == actual.id, idInicio == nil {
+                    Log.escribir("la sesión de Google caducó")
+                    recalcular(caducada: true)
+                }
                 throw ErrorGoogle.caducada
             }
             throw error

@@ -247,29 +247,43 @@ struct AjustesCuentaGoogle: View {
 /// momento en ajustes.json: no cambia la conexión ni reinstala el ayudante.
 struct SeccionCodigoCorreo: View {
     let perfilID: String
-    @ObservedObject private var preferencias = Preferencias.shared
-    @ObservedObject private var cuenta = CuentaGoogle.shared
+    let perfilGuardado: Bool
+    @ObservedObject private var preferencias: Preferencias
+    @ObservedObject private var cuenta: CuentaGoogle
     @State private var prueba: String?
     @State private var probando = false
+    @State private var errorGuardado: String?
+
+    init(perfilID: String, perfilGuardado: Bool = true,
+         preferencias: Preferencias? = nil, cuenta: CuentaGoogle? = nil) {
+        self.perfilID = perfilID
+        self.perfilGuardado = perfilGuardado
+        self.preferencias = preferencias ?? .shared
+        self.cuenta = cuenta ?? .shared
+    }
 
     private var config: ConfigCorreo? { preferencias.ajustes.correo[perfilID] }
 
+    private func guardar(_ cambio: (inout ConfigCorreo?) -> Void) {
+        let guardado = preferencias.modificarCorreo(de: perfilID, perfilGuardado: perfilGuardado, cambio)
+        errorGuardado = guardado ? nil : "No se pudo guardar la lectura de códigos. Revisa el acceso a los ajustes y vuelve a intentarlo."
+        if guardado { prueba = nil }
+    }
+
     private func cambiar(_ cambio: @escaping (inout ConfigCorreo) -> Void) {
-        preferencias.modificar { ajustes in
-            var nueva = ajustes.correo[perfilID] ?? ConfigCorreo(remitente: "")
+        guardar { config in
+            var nueva = config ?? ConfigCorreo(remitente: "")
             cambio(&nueva)
-            ajustes.correo[perfilID] = nueva
+            config = nueva
         }
-        prueba = nil
     }
 
     private var usarCorreo: Binding<Bool> {
         Binding(get: { config != nil }, set: { usar in
-            preferencias.modificar { ajustes in
+            guardar { config in
                 // Por defecto, el formato de FortiToken por correo; se puede cambiar.
-                ajustes.correo[perfilID] = usar ? ConfigCorreo.fortinet : nil
+                config = usar ? ConfigCorreo.fortinet : nil
             }
-            prueba = nil
         })
     }
 
@@ -277,57 +291,71 @@ struct SeccionCodigoCorreo: View {
         Binding(get: { config?[keyPath: ruta] ?? "" }, set: { valor in cambiar { $0[keyPath: ruta] = valor } })
     }
 
+    private var pie: String {
+        if preferencias.soloLectura != nil { return "La configuración guardada se conserva. Los cambios están bloqueados." }
+        if !perfilGuardado || (cuenta.correo == nil && config == nil) { return "La lectura automática de Gmail es opcional." }
+        if config == nil { return "Si el servidor pide un código, Nuvex te lo preguntará al conectar." }
+        return "Al conectar, Nuvex buscará en \(cuenta.correo ?? "Gmail") el correo del remitente y usará el código; si no llega a tiempo, te lo pedirá. Se guarda al momento."
+    }
+
     var body: some View {
         Section {
-            if cuenta.correo == nil && config == nil {
-                Text("Si el servidor pide un código, podrás escribirlo al conectar.")
-                Button("Configurar lectura desde Gmail…") { AppActual.abrirAjustes(pagina: .cuentaGoogle) }
-                    .buttonStyle(.link)
-            } else {
-                Picker("Cómo obtenerlo", selection: usarCorreo) {
-                    Text("Preguntarme").tag(false)
-                    Text("Leer de Gmail").tag(true)
+            Group {
+                if cuenta.correo == nil && config == nil {
+                    Text("Si el servidor pide un código, podrás escribirlo al conectar.")
+                    Button("Configurar lectura desde Gmail…") { AppActual.abrirAjustes(pagina: .cuentaGoogle) }
+                        .buttonStyle(.link)
+                } else {
+                    Picker("Cómo obtenerlo", selection: usarCorreo) {
+                        Text("Preguntarme").tag(false)
+                        Text("Leer de Gmail").tag(true)
+                    }
+                }
+                if let config {
+                    TextField("Remitente", text: campo(\.remitente), prompt: Text("noreply@empresa.com"))
+                    if config.remitente.trimmingCharacters(in: .whitespaces).isEmpty {
+                        Label("Indica quién envía el código; Nuvex solo busca sus correos.", systemImage: "exclamationmark.triangle.fill")
+                            .font(Tipo.apoyo).foregroundStyle(Paleta.avisoTexto)
+                    }
+                    TextField("Asunto contiene", text: campo(\.asunto), prompt: Text("Opcional"))
+                    if config.remitente != ConfigCorreo.fortinet.remitente || config.asunto != ConfigCorreo.fortinet.asunto {
+                        Button("Usar el formato de FortiToken (DoNotReply@notification.fortinet.net)") {
+                            cambiar { $0.remitente = ConfigCorreo.fortinet.remitente; $0.asunto = ConfigCorreo.fortinet.asunto }
+                        }
+                        .buttonStyle(.link)
+                    }
+                    Picker("Esperar el correo", selection: Binding(get: { config.espera }, set: { valor in cambiar { $0.espera = valor } })) {
+                        ForEach(Array(Set([60, 120, 180, config.espera])).sorted(), id: \.self) { Text("Hasta \($0) s").tag($0) }
+                    }
+                    DisclosureGroup("Patrón avanzado") {
+                        TextField("Expresión regular", text: campo(\.patron), prompt: Text(#"Opcional, p. ej. Código: (\d{6})"#))
+                            .font(Tipo.mono)
+                        if !ExtractorCodigo.patronValido(config.patron) {
+                            Label("La expresión regular no es válida.", systemImage: "exclamationmark.triangle.fill")
+                                .font(Tipo.apoyo).foregroundStyle(Paleta.errorTexto)
+                        }
+                    }
+                    HStack {
+                        Button("Probar con el último correo") { probar(config) }
+                            .disabled(probando || cuenta.correo == nil || config.remitente.isEmpty)
+                        if probando { ProgressView().controlSize(.small) }
+                        if let prueba { Text(prueba).font(Tipo.apoyo).foregroundStyle(Paleta.textoSecundario).textSelection(.enabled) }
+                    }
                 }
             }
-            if let config {
-                TextField("Remitente", text: campo(\.remitente), prompt: Text("noreply@empresa.com"))
-                if config.remitente.trimmingCharacters(in: .whitespaces).isEmpty {
-                    Label("Indica quién envía el código; Nuvex solo busca sus correos.", systemImage: "exclamationmark.triangle.fill")
-                        .font(Tipo.apoyo).foregroundStyle(Paleta.avisoTexto)
-                }
-                TextField("Asunto contiene", text: campo(\.asunto), prompt: Text("Opcional"))
-                if config.remitente != ConfigCorreo.fortinet.remitente || config.asunto != ConfigCorreo.fortinet.asunto {
-                    Button("Usar el formato de FortiToken (DoNotReply@notification.fortinet.net)") {
-                        cambiar { $0.remitente = ConfigCorreo.fortinet.remitente; $0.asunto = ConfigCorreo.fortinet.asunto }
-                    }
-                    .buttonStyle(.link)
-                }
-                Picker("Esperar el correo", selection: Binding(get: { config.espera }, set: { valor in cambiar { $0.espera = valor } })) {
-                    ForEach(Array(Set([60, 120, 180, config.espera])).sorted(), id: \.self) { Text("Hasta \($0) s").tag($0) }
-                }
-                DisclosureGroup("Patrón avanzado") {
-                    TextField("Expresión regular", text: campo(\.patron), prompt: Text(#"Opcional, p. ej. Código: (\d{6})"#))
-                        .font(Tipo.mono)
-                    if !ExtractorCodigo.patronValido(config.patron) {
-                        Label("La expresión regular no es válida.", systemImage: "exclamationmark.triangle.fill")
-                            .font(Tipo.apoyo).foregroundStyle(Paleta.errorTexto)
-                    }
-                }
-                HStack {
-                    Button("Probar con el último correo") { probar(config) }
-                        .disabled(probando || cuenta.correo == nil || config.remitente.isEmpty)
-                    if probando { ProgressView().controlSize(.small) }
-                    if let prueba { Text(prueba).font(Tipo.apoyo).foregroundStyle(Paleta.textoSecundario).textSelection(.enabled) }
-                }
+            .disabled(!perfilGuardado || preferencias.soloLectura != nil)
+            if let error = preferencias.soloLectura ?? errorGuardado {
+                Text(error).foregroundStyle(Paleta.errorTexto)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if !perfilGuardado {
+                Text("Guarda la conexión para configurar la lectura automática de Gmail. Podrás escribir el código al conectar.")
+                    .foregroundStyle(Paleta.textoSecundario)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         } header: {
             Text("Código de verificación")
         } footer: {
-            Text(cuenta.correo == nil && config == nil
-                 ? "La lectura automática de Gmail es opcional."
-                 : config == nil
-                    ? "Si el servidor pide un código, Nuvex te lo preguntará al conectar."
-                    : "Al conectar, Nuvex buscará en \(cuenta.correo ?? "Gmail") el correo del remitente y usará el código; si no llega a tiempo, te lo pedirá. Se guarda al momento.")
+            Text(pie)
                 .foregroundStyle(Paleta.textoSecundario)
         }
     }

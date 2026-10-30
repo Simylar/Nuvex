@@ -70,6 +70,16 @@ final class ChequeoActualizacion: ObservableObject {
         }
     }
 
+    /// Reconcilia el aviso de firma con una consulta vigente de todas las entradas.
+    func confirmarAccesosLlavero(perfiles: [VPNProfile], accesos: [String: AccesoLlavero],
+                                configuracionCargada: Bool) {
+        guard llaveroPendiente, configuracionCargada, perfiles.allSatisfy({ perfil in
+            guard let acceso = accesos[perfil.id] else { return false }
+            return acceso == .disponible || acceso == .ausente
+        }) else { return }
+        descartarLlavero()
+    }
+
     /// Provoca ahora la petición de acceso del Llavero, con la persona delante.
     func probarLlavero(_ modelo: VPNModel) {
         guard !probandoLlavero else { return }

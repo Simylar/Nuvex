@@ -9,6 +9,26 @@ struct ConfiguracionChecks {
         defer { try? FileManager.default.removeItem(at: base) }
         let perfil = VPNProfile(id: "vpn-a", name: "Oficina", server: "vpn.example.invalid:443",
             username: "persona", trust: "system", realm: "", manageRoutes: true, manageDNS: true, enabled: true)
+        let preferenciasCorreo = Preferencias(url: base.appendingPathComponent("lector/ajustes.json"))
+        precondition(!preferenciasCorreo.modificarCorreo(de: "borrador", perfilGuardado: false) { $0 = .fortinet })
+        precondition(preferenciasCorreo.ajustes.correo.isEmpty
+                     && !FileManager.default.fileExists(atPath: base.appendingPathComponent("lector/ajustes.json").path))
+        precondition(preferenciasCorreo.modificarCorreo(de: perfil.id, perfilGuardado: true) { $0 = .fortinet })
+        let recargado = Preferencias(url: base.appendingPathComponent("lector/ajustes.json"))
+        precondition(recargado.ajustes.correo[perfil.id] == .fortinet && recargado.ajustes.correo["borrador"] == nil)
+        let urlBloqueada = base.appendingPathComponent("solo-lectura.json")
+        let datosBloqueados = Data(#"{"version":999,"correo":{}}"#.utf8)
+        try datosBloqueados.write(to: urlBloqueada)
+        let preferenciasFuturas = Preferencias(url: urlBloqueada)
+        precondition(preferenciasFuturas.soloLectura != nil)
+        precondition(!preferenciasFuturas.modificarCorreo(de: perfil.id, perfilGuardado: true) { $0 = .fortinet })
+        let despuesDelRechazo = try Data(contentsOf: urlBloqueada)
+        precondition(despuesDelRechazo == datosBloqueados)
+        let urlFallo = base.appendingPathComponent("obstaculo/ajustes.json")
+        let falloEscritura = Preferencias(url: urlFallo)
+        try Data("archivo".utf8).write(to: base.appendingPathComponent("obstaculo"))
+        precondition(!falloEscritura.modificarCorreo(de: perfil.id, perfilGuardado: true) { $0 = .fortinet })
+        precondition(falloEscritura.ajustes.correo.isEmpty)
         // El primer uso conserva datos ante fallos y distingue guardar de
         // estar preparado: nunca infiere éxito de la existencia de un perfil.
         let borrador = BorradorBienvenida()

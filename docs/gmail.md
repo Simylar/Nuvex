@@ -33,6 +33,11 @@ El secreto y el token de la sesión se guardan en el Llavero de macOS. Cambiar u
 
 En **Ajustes de Nuvex › (tu conexión) › Código de verificación**:
 
+La conexión debe estar guardada. Un borrador nuevo no escribe ajustes del lector
+hasta guardarse. Si Nuvex no pudo leer los ajustes o estos requieren una versión
+posterior, los controles quedan bloqueados y se explica el motivo. Los fallos de
+escritura se muestran en la sección y no se anuncian como un guardado correcto.
+
 1. Elige **Leer de Gmail**. Los campos se rellenan con el formato de FortiToken por correo, que es el habitual:
    - Remitente: `DoNotReply@notification.fortinet.net`
    - Asunto contiene: `AuthCode`

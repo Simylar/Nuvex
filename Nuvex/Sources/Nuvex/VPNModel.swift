@@ -28,6 +28,8 @@ final class VPNModel: ObservableObject {
     private var recuperacion = RecuperacionConexion()
     private var redDisponible = false
     private let permiteRecuperacion: @MainActor () -> Bool
+    private let notificarDesconexion: @MainActor (VPNStatus, Date) -> Void
+    private var caidasNotificadas: [String: Date] = [:]
     /// Los datos los guardó una versión más nueva de Nuvex: no se modifican.
     @Published private(set) var datosMasNuevos = false
     private(set) var actualizaciones: Actualizaciones?
@@ -68,8 +70,13 @@ final class VPNModel: ObservableObject {
     /// Modelo vacío sin consultar el motor; permite muestras y pruebas aisladas.
     init(sinArrancar: Void, permiteRecuperacion: @escaping @MainActor () -> Bool = {
         UserDefaults.standard.bool(forKey: "reconectarAutomaticamente") && !SecurityPreferences.needsInitialConfirmation()
+    }, notificarDesconexion: @escaping @MainActor (VPNStatus, Date) -> Void = { vpn, fecha in
+        if UserDefaults.standard.object(forKey: "avisarDesconexion") as? Bool ?? true {
+            VPNNotifications.shared.disconnected(id: vpn.id, name: vpn.name, fecha: fecha)
+        }
     }) {
         self.permiteRecuperacion = permiteRecuperacion
+        self.notificarDesconexion = notificarDesconexion
     }
 
     convenience init() {
@@ -300,11 +307,12 @@ final class VPNModel: ObservableObject {
         refrescar()
     }
 
-    private func procesarTransiciones(_ lista: [VPNStatus]) {
+    func procesarTransiciones(_ lista: [VPNStatus]) {
         let anteriores = Dictionary(uniqueKeysWithValues: vpns.map { ($0.id, $0) })
         for vpn in lista {
             if vpn.connected {
                 faltas.removeValue(forKey: vpn.id)
+                caidasNotificadas.removeValue(forKey: vpn.id)
                 recuperando.remove(vpn.id)
                 reconexionesDesdeAviso.remove(vpn.id)
                 desconexiones.removeValue(forKey: vpn.id)
@@ -315,18 +323,27 @@ final class VPNModel: ObservableObject {
                 faltas.removeValue(forKey: vpn.id)
                 continue
             }
+            // Un intento nuevo no hereda una caída parcialmente observada.
+            guard !conexionEnCurso(vpn.id) else { continue }
+            if let caida = desconexiones[vpn.id] {
+                if !programarRecuperacion(vpn) { notificarCaidaSiHaceFalta(vpn, fecha: caida) }
+                continue
+            }
             if anteriores[vpn.id]?.connected == true || faltas[vpn.id] != nil {
                 faltas[vpn.id, default: 0] += 1
                 if faltas[vpn.id] == 2 {
                     let fecha = Date()
                     desconexiones[vpn.id] = fecha
-                    if programarRecuperacion(vpn) { continue }
-                    if UserDefaults.standard.object(forKey: "avisarDesconexion") as? Bool ?? true {
-                        VPNNotifications.shared.disconnected(id: vpn.id, name: vpn.name, fecha: fecha)
-                    }
+                    if !programarRecuperacion(vpn) { notificarCaidaSiHaceFalta(vpn, fecha: fecha) }
                 }
             }
         }
+    }
+
+    private func notificarCaidaSiHaceFalta(_ vpn: VPNStatus, fecha: Date) {
+        guard caidasNotificadas[vpn.id] != fecha else { return }
+        caidasNotificadas[vpn.id] = fecha
+        notificarDesconexion(vpn, fecha)
     }
 
     // MARK: Acciones
@@ -343,32 +360,42 @@ final class VPNModel: ObservableObject {
     /// ayudante ni abre diálogos del Llavero en segundo plano.
     private func programarRecuperacion(_ vpn: VPNStatus) -> Bool {
         let activada = permiteRecuperacion()
-        let disponible = redDisponible && !vpn.connected && vpn.enabled && vpn.configured && vpn.helperReady
+        let disponible = redDisponible && errorConsulta == nil && !vpn.connected && vpn.enabled && vpn.configured && vpn.helperReady
             && configuracionCargada && errorCargaConfiguracion == nil && !cargandoConfiguracion
             && passwordStatuses[vpn.id] == .saved
             && !guardandoConfiguracion && !instalandoAyudante && !conexionEnCurso(vpn.id)
             && !desconectando.contains(vpn.id) && !desconexionSolicitada.contains(vpn.id)
         guard activada, disponible, recuperacion.puedeIntentar(vpn.id),
               !recuperando.contains(vpn.id) else { return false }
-        let caida = desconexiones[vpn.id]
+        guard let caida = desconexiones[vpn.id] else { return false }
         recuperando.insert(vpn.id)
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(3))
-            guard let self, self.recuperando.contains(vpn.id), self.desconexiones[vpn.id] == caida else { return }
-            self.recuperando.remove(vpn.id)
-            guard self.permiteRecuperacion(), self.redDisponible,
-                  self.errorConsulta == nil, !self.guardandoConfiguracion, !self.instalandoAyudante,
-                  self.configuracionCargada, self.errorCargaConfiguracion == nil, !self.cargandoConfiguracion,
-                  !self.conexionEnCurso(vpn.id), !self.desconectando.contains(vpn.id),
-                  let actual = self.vpns.first(where: { $0.id == vpn.id }), !actual.connected,
-                  actual.enabled, actual.configured, actual.helperReady,
-                  self.profiles.contains(where: { $0.id == vpn.id && $0.enabled }),
-                  self.recuperacion.reservar(vpn.id, activada: true, disponible: true) else { return }
-            self.desconexiones.removeValue(forKey: vpn.id)
-            VPNNotifications.shared.clear(id: vpn.id)
-            self.iniciarConexion(actual, automaticamente: true)
+            self?.ejecutarRecuperacionProgramada(vpn, caida: caida)
         }
         return true
+    }
+
+    func ejecutarRecuperacionProgramada(_ vpn: VPNStatus, caida: Date) {
+        guard recuperando.contains(vpn.id), desconexiones[vpn.id] == caida else { return }
+        recuperando.remove(vpn.id)
+        guard permiteRecuperacion(), redDisponible,
+              errorConsulta == nil, !guardandoConfiguracion, !instalandoAyudante,
+              configuracionCargada, errorCargaConfiguracion == nil, !cargandoConfiguracion,
+              !conexionEnCurso(vpn.id), !desconectando.contains(vpn.id),
+              let actual = vpns.first(where: { $0.id == vpn.id }), !actual.connected,
+              actual.enabled, actual.configured, actual.helperReady,
+              passwordStatuses[vpn.id] == .saved,
+              profiles.contains(where: { $0.id == vpn.id && $0.enabled }),
+              recuperacion.reservar(vpn.id, activada: true, disponible: true) else {
+            // La espera no consume el intento si faltó un requisito. Conserva
+            // la caída para reevaluarla en otra consulta, pero no pierde el aviso.
+            notificarCaidaSiHaceFalta(vpn, fecha: caida)
+            return
+        }
+        desconexiones.removeValue(forKey: vpn.id)
+        VPNNotifications.shared.clear(id: vpn.id)
+        iniciarConexion(actual, automaticamente: true)
     }
 
     /// La acción del botón circular de cada fila.
@@ -403,6 +430,8 @@ final class VPNModel: ObservableObject {
         }
         guard estado(vpn) != .conectando else { return }
         desconexiones.removeValue(forKey: vpn.id)
+        faltas.removeValue(forKey: vpn.id)
+        caidasNotificadas.removeValue(forKey: vpn.id)
         canceladas.remove(vpn.id)
         if !vpn.helperReady {
             instalarAyudante(conectarDespues: vpn)
@@ -422,6 +451,8 @@ final class VPNModel: ObservableObject {
     private func iniciarConexion(_ vpn: VPNStatus, automaticamente: Bool = false) {
         guard estado(vpn) != .conectando else { return }
         let inicioIntento = Date()
+        faltas.removeValue(forKey: vpn.id)
+        caidasNotificadas.removeValue(forKey: vpn.id)
         let usoCorreo = prepararUsoCorreo(para: vpn.id) { mensaje in
             Task { await CuentaGoogle.shared.moverCorreoUsado(mensaje) }
         }
@@ -429,6 +460,9 @@ final class VPNModel: ObservableObject {
         inicioConexion[vpn.id] = inicioIntento
         canceladas.remove(vpn.id)
         ultimoError = nil
+        #if DEBUG
+        if esMuestra { return }
+        #endif
         IntentosConexion.preparar(vpn.id)
         Task.detached(priority: .userInitiated) {
             let resultado = await Self.conectarProceso(id: vpn.id, name: vpn.name, sinInteraccion: automaticamente,
@@ -507,6 +541,7 @@ final class VPNModel: ObservableObject {
             // vuelva a programar la recuperación de esta misma caída.
             desconexiones.removeValue(forKey: id)
             faltas.removeValue(forKey: id)
+            caidasNotificadas.removeValue(forKey: id)
             canceladas.insert(id)
             VPNNotifications.shared.clear(id: id)
             return
@@ -721,6 +756,8 @@ final class VPNModel: ObservableObject {
     func descartarAviso(_ id: String) {
         recuperando.remove(id)
         desconexiones.removeValue(forKey: id)
+        faltas.removeValue(forKey: id)
+        caidasNotificadas.removeValue(forKey: id)
         if case .error = estados[id] { estados.removeValue(forKey: id) }
     }
 

@@ -172,6 +172,7 @@ struct SecurityPreferencesChecks {
         precondition(cierreLocal && respetaInicio, "el aviso de una revocación obsoleta no debe publicarse durante el inicio nuevo")
         try await comprobarOperacionGlobal()
         try await comprobarRespuestasGoogle()
+        try await comprobarRenovacionCompartidaCaducada()
         try await comprobarCorreoUsado()
         try await comprobarCierrePermisosCorreo()
         if ProcessInfo.processInfo.environment["NUVEX_VALIDAR_LLAVERO"] == "1" {
@@ -277,6 +278,52 @@ struct SecurityPreferencesChecks {
         for _ in 0..<20 { await Task.yield() }
         precondition(navegadores == 0 && cuenta.estado == .desconectada && cuenta.error == nil,
                      "cambiar de cliente cancela el inicio anterior antes de abrir navegador o sobrescribir el estado")
+    }
+
+    @MainActor
+    private static func comprobarRenovacionCompartidaCaducada() async throws {
+        let datos = Data(#"{"clienteID":"prueba.apps.googleusercontent.com","secreto":"ficticio","tokenRenovacion":"ficticio","correo":"cuenta@example.invalid"}"#.utf8)
+        let renovacion = RenovacionSimulada()
+        let cuenta = CuentaGoogle(lectorLlavero: { _ in (datos, errSecSuccess) },
+            pedirTokens: { _ in try await renovacion.pedir() })
+        let primera = Task { try await cuenta.tokenAcceso() }
+        while renovacion.llamadas == 0 { await Task.yield() }
+        let otras = (0..<4).map { _ in Task { try await cuenta.tokenAcceso() } }
+        for _ in 0..<40 { await Task.yield() }
+        renovacion.resolver(.failure(ErrorGoogle.respuesta("invalid_grant")))
+        for tarea in [primera] + otras {
+            switch await tarea.result {
+            case .failure(ErrorGoogle.caducada): break
+            default: preconditionFailure("todos los consumidores de la renovación deben recibir sesión caducada")
+            }
+        }
+        precondition(renovacion.llamadas == 1 && cuenta.problemaParaLeerCorreo == .sesionCaducada)
+        for caso in ["exito", "red", "sesion-cambiada", "error-obsoleto"] {
+            let compartida = RenovacionSimulada()
+            let actual = CuentaGoogle(lectorLlavero: { _ in (datos, errSecSuccess) },
+                pedirTokens: { _ in try await compartida.pedir() })
+            let inicio = Task { try await actual.tokenAcceso() }
+            while compartida.llamadas == 0 { await Task.yield() }
+            let consumidores = [inicio] + (0..<6).map { _ in Task { try await actual.tokenAcceso() } }
+            for _ in 0..<40 { await Task.yield() }
+            if caso == "sesion-cambiada" || caso == "error-obsoleto" {
+                actual.recuperarDelLlavero(interactivo: false)
+            }
+            if caso == "red" { compartida.resolver(.failure(URLError(.notConnectedToInternet))) }
+            else if caso == "error-obsoleto" { compartida.resolver(.failure(ErrorGoogle.respuesta("invalid_grant"))) }
+            else { compartida.resolver(.success(["access_token": "ficticio", "expires_in": 3600])) }
+            for tarea in consumidores {
+                let resultado = await tarea.result
+                switch (caso, resultado) {
+                case ("exito", .success(let token)): precondition(token == "ficticio")
+                case ("red", .failure(let error as URLError)): precondition(error.code == .notConnectedToInternet)
+                case ("sesion-cambiada", .failure(ErrorGoogle.sinSesion)),
+                     ("error-obsoleto", .failure(ErrorGoogle.sinSesion)): break
+                default: preconditionFailure("la limpieza normal y la invalidación de sesión son hechos distintos")
+                }
+            }
+            precondition(compartida.llamadas == 1 && actual.correo != nil)
+        }
     }
 
     @MainActor

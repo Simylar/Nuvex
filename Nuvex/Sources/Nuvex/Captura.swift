@@ -126,6 +126,7 @@ enum Captura {
             }
         }
         capturarPapelera(en: carpeta)
+        capturarEditorCorreo(en: carpeta)
         borradores.seleccion = .ayudante
         guardar(ConfigurationView(modelo: modelo, borradores: borradores).frame(width: 820, height: 640),
                 nombre: "ajustes-ayudante-claro", en: carpeta, oscuro: false)
@@ -263,6 +264,36 @@ enum Captura {
             guardar(AjustesCuentaGoogle(cuenta: cuenta, preferencias: preferencias)
                 .frame(width: 540, height: 580),
                 nombre: "google-papelera-sesion-caducada-\(oscuro ? "oscuro" : "claro")", en: carpeta, oscuro: oscuro)
+        }
+    }
+
+    private static func capturarEditorCorreo(en carpeta: String) {
+        let temporal = FileManager.default.temporaryDirectory.appendingPathComponent("nuvex-editor-correo-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: temporal) }
+        let datos = Data(#"{"clienteID":"muestra.apps.googleusercontent.com","secreto":"ficticio","tokenRenovacion":"ficticio","correo":"persona@example.com"}"#.utf8)
+        let cuenta = CuentaGoogle(lectorLlavero: { _ in (datos, 0) },
+            escritorLlavero: { _ in false }, borradorLlavero: { false },
+            pedirTokens: { _ in throw ErrorGoogle.sinSesion })
+        for caso in ["guardada", "nueva", "solo-lectura"] {
+            let url = temporal.appendingPathComponent("\(caso)/ajustes.json")
+            let preferencias = Preferencias(url: url)
+            if caso != "nueva" { preferencias.modificar { $0.correo["muestra"] = .fortinet } }
+            if caso == "solo-lectura" {
+                guard let datos = try? Data(contentsOf: url),
+                      var json = try? JSONSerialization.jsonObject(with: datos) as? [String: Any] else {
+                    preconditionFailure("no se prepararon los ajustes ficticios")
+                }
+                json["version"] = 999
+                try! JSONSerialization.data(withJSONObject: json).write(to: url)
+                preferencias.cargar()
+            }
+            for oscuro in [false, true] {
+                guardar(Form {
+                    SeccionCodigoCorreo(perfilID: "muestra", perfilGuardado: caso != "nueva",
+                        preferencias: preferencias, cuenta: cuenta)
+                }.formularioNuvex().frame(width: 540, height: 580),
+                    nombre: "editor-correo-\(caso)-\(oscuro ? "oscuro" : "claro")", en: carpeta, oscuro: oscuro)
+            }
         }
     }
 

@@ -345,3 +345,48 @@ interfaz, y las compilaciones de depuración y del paquete local con firma ad ho
 Se regeneraron las capturas y se revisó la sesión caducada en claro y oscuro,
 junto con permiso pendiente y Ajustes a tamaño mínimo. `git diff --check` pasó.
 Las pruebas siguen sin usar Gmail ni VPN reales y no acreditan VoiceOver.
+
+## Revisión posterior a 3.3.0 — 30 de octubre de 2026
+
+Se contrastó una revisión externa con las fuentes y pruebas locales, sin tomar
+sus conclusiones como evidencia por sí solas. Una regresión nueva falló antes
+de corregir la renovación compartida de Google: varios consumidores de un mismo
+`invalid_grant` recibían resultados distintos. La renovación tiene ahora un
+camino común, devuelve el mismo resultado a todos y diferencia la limpieza normal
+de la tarea de un cambio de sesión. Las pruebas incluyen éxito, falta de red,
+caducidad y respuestas obsoletas tras invalidar la sesión. La clasificación del
+lector ya reconocía errores OAuth formateados; el defecto no implicaba que toda
+respuesta de caducidad se tratara siempre como un fallo de servidor.
+
+Se corrigieron también las interacciones del contador de caídas con una conexión
+manual y con la espera de recuperación. El contador se limpia al iniciar o
+descartar y no aumenta durante un intento. Abortar la espera conserva la caída,
+notifica una vez conforme a la preferencia y permite reevaluar los impedimentos
+en consultas posteriores sin gastar el intento. Las regresiones usan el modelo
+real con motor y avisos sustituidos por datos de muestra; cubren red, consulta,
+guardado, desactivación de recuperación y fallo manual antes del segundo sondeo.
+
+General reconcilia el aviso de firma con su consulta vigente de las contraseñas,
+incluidas las realizadas después de una comprobación individual. Se retira el
+aviso solo cuando todas las entradas tienen un resultado suficiente; un estado
+desconocido o con intervención pendiente lo conserva. Las pruebas comprueban la
+marca persistida con un dominio aislado de preferencias, sin leer el Llavero real.
+
+El editor de lectura de Gmail tenía un problema anterior a este rango: dejaba
+interactuar con ajustes bloqueados y escribía desde perfiles aún sin guardar.
+Ahora deshabilita esos controles, explica el motivo y comunica fallos de escritura.
+La persistencia rechaza también las solicitudes de borradores. No se añadió una
+poda indiscriminada de claves, porque podría interferir con otros borradores.
+Los lectores ya guardados siguen conservando su configuración.
+
+Verificación: 42 pruebas de Python y las 15 suites Swift/shell, compilación de
+depuración y paquete local con firma ad hoc, y revisión del diff. Las pruebas de
+sockets, procesos y actualización que lo requieren se ejecutan fuera del
+aislamiento con copias temporales. Los renderizados de edición guardada, borrador
+y solo lectura se revisan en claro y oscuro, con cuentas ficticias. Las capturas
+quedan en `.build-cache/capturas-revision-340/`.
+
+No se verificaron todavía OAuth/papelera reales, caídas físicas de red, diálogos
+del Llavero ni VoiceOver. No se instaló ni publicó una versión y no se cambió el
+identificador de la app. El candidato se prepara como 3.4.0, con sus novedades
+en `CHANGELOG.md` y los pendientes de salida en `docs/release-3.4.0.md`.

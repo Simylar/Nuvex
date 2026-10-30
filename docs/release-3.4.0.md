@@ -34,6 +34,21 @@ subir una etiqueta ni un release.
 
 ## Pendientes antes de la salida estable
 
+La prueba preliminar del candidato 3.4.0 (163), `07c46d5`, actualizó la instalación
+local 3.3.0 conservando el túnel activo. La firma instalada anterior y la nueva
+tienen el mismo requisito designado. Pasaron la lectura real de Gmail y una
+conexión posterior con OTP obtenido automáticamente, sin traslado del mensaje.
+No se provocó un corte de red; la caída observada durante la sesión no acredita
+el comportamiento de recuperación automática, que permaneció desactivada.
+
+Durante la apertura se observó una petición del Llavero clásico y una espera de
+`SecItemCopyMatching` en el actor principal. La corrección posterior carga la
+cuenta en segundo plano, muestra su comprobación y bloquea las mutaciones hasta
+terminar. Las regresiones cubren éxito, denegación y cancelación del consumidor,
+con un lector bloqueado de muestra. La intervención del Llavero en macOS 27.2
+sigue siendo una limitación: no se certifica Gmail desatendido bajo esa condición.
+Las comprobaciones preliminares no sustituyen las del paquete final corregido.
+
 - Actualización controlada desde 3.3.0, verificando perfiles, preferencias,
   acceso al Llavero y el mismo requisito de firma.
 - Gmail real: opción inicialmente desactivada, persistencia de la elección,

@@ -18,12 +18,14 @@ Este archivo sigue el formato de [Keep a Changelog](https://keepachangelog.com/e
 - Varias conexiones que renuevan la misma sesión de Google reciben un resultado coherente; cerrar o cambiar la sesión descarta sus respuestas antiguas.
 - Reintentar manualmente, descartar o cancelar una caída limpia su estado anterior. Si la espera de recuperación se interrumpe, el aviso no se pierde y se vuelve a comprobar la disponibilidad sin gastar el intento antes de iniciarlo.
 - El aviso de acceso al Llavero se retira cuando una comprobación completa confirma que ya está resuelto.
+- La lectura de la cuenta de Google se realiza fuera de la interfaz: una espera del Llavero ya no bloquea las ventanas ni el control desde Terminal. Mientras se comprueba, los cambios de cuenta quedan bloqueados para conservar los datos guardados.
 - Los ajustes de lectura de Gmail no escriben desde conexiones sin guardar ni desde una configuración bloqueada, e informan los errores de guardado.
 - Restaurar conexiones conserva las autorizaciones y exclusiones actuales; los resultados distinguen lo guardado de los pasos todavía pendientes.
 
 ### Compatibilidad
 - Se conservan el identificador de la app, el protocolo del comando y los datos existentes. No se amplían permisos de Gmail sin una decisión explícita.
 - Continúan los requisitos de Apple Silicon y macOS 14 o posterior. El canal existente usa la identidad de firma «Nuvex Release» y actualizaciones firmadas con Sparkle; no equivale a una distribución notarizada por Apple.
+- En el Llavero clásico de macOS 27.2 se observó una petición de autorización al leer la cuenta de Google pese a solicitar una lectura sin interacción. Puede requerir la intervención de la persona; no se garantiza el arranque desatendido de Gmail en esa condición.
 
 ## [3.3.0] - 2026-10-24
 

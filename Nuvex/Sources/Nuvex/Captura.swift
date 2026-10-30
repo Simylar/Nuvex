@@ -227,6 +227,17 @@ enum Captura {
         let temporal = FileManager.default.temporaryDirectory.appendingPathComponent("nuvex-papelera-muestra-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: temporal) }
         let preferencias = Preferencias(url: temporal.appendingPathComponent("ajustes.json"))
+        let continuar = DispatchSemaphore(value: 0)
+        defer { continuar.signal() }
+        let comprobando = CuentaGoogle(lectorSegundoPlano: { _ in
+            continuar.wait()
+            return (nil, errSecInteractionNotAllowed)
+        })
+        for oscuro in [false, true] {
+            guardar(AjustesCuentaGoogle(cuenta: comprobando, preferencias: preferencias)
+                .frame(width: 540, height: 580),
+                nombre: "google-comprobando-\(oscuro ? "oscuro" : "claro")", en: carpeta, oscuro: oscuro)
+        }
         let datos = Data(#"{"clienteID":"muestra.apps.googleusercontent.com","secreto":"ficticio","tokenRenovacion":"ficticio","correo":"persona@example.com","permisos":["https://www.googleapis.com/auth/gmail.modify"]}"#.utf8)
         let cuenta = CuentaGoogle(lectorLlavero: { _ in (datos, 0) },
             escritorLlavero: { _ in false }, borradorLlavero: { false },

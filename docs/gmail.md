@@ -29,6 +29,13 @@ Como Nuvex no es una app de Google verificada, usas tu propio cliente OAuth. Se 
 
 El secreto y el token de la sesión se guardan en el Llavero de macOS. Cambiar una configuración con sesión guardada requiere confirmación y después volver a iniciar sesión. Los datos técnicos de la cuenta configurada están en **Opciones de la cuenta**. La lectura es opcional: puedes seguir conectándote y escribir el código sin configurar Google.
 
+La cuenta se comprueba en segundo plano y los cambios quedan bloqueados mientras
+termina. En macOS 27.2 se observó que el Llavero clásico puede pedir autorización
+aunque Nuvex solicite una lectura sin interacción. La aplicación sigue
+respondiendo durante la espera, pero Gmail puede requerir esa intervención.
+Si no se concede el acceso, Nuvex conserva la cuenta y ofrece recuperarlo; no
+es necesario importar de nuevo el cliente.
+
 ## 3. Activa la lectura en cada conexión
 
 En **Ajustes de Nuvex › (tu conexión) › Código de verificación**:

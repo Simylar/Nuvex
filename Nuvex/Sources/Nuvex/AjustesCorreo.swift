@@ -46,7 +46,10 @@ struct AjustesCuentaGoogle: View {
                     .foregroundStyle(Paleta.textoSecundario)
             }
 
-            if cuenta.estado == .sinCliente || cambiandoCliente {
+            if cuenta.comprobandoLlavero {
+                Text("La comprobación no modifica la cuenta guardada.")
+                    .foregroundStyle(Paleta.textoSecundario)
+            } else if cuenta.estado == .sinCliente || cambiandoCliente {
                 Section {
                     Text("Google requiere un cliente de escritorio para permitir la lectura de códigos. Puedes importar el archivo que descargues de Google Cloud.")
                         .foregroundStyle(Paleta.textoSecundario)
@@ -101,7 +104,7 @@ struct AjustesCuentaGoogle: View {
                         if activar && !cuenta.puedeModificarCorreo { confirmarPapelera = true }
                         else { guardarPapelera(activar) }
                     }))
-                    .disabled(preferencias.soloLectura != nil || cuenta.estado == .esperandoNavegador)
+                    .disabled(preferencias.soloLectura != nil || cuenta.estado == .esperandoNavegador || cuenta.comprobandoLlavero)
                 if preferencias.ajustes.enviarCorreoPapelera && !cuenta.puedeModificarCorreo {
                     Text(cuenta.mensajePapeleraPendiente)
                         .foregroundStyle(Paleta.textoSecundario)
@@ -196,6 +199,7 @@ struct AjustesCuentaGoogle: View {
     }
 
     private var titulo: String {
+        if cuenta.comprobandoLlavero { return "Comprobando la cuenta…" }
         switch cuenta.estado {
         case .sinCliente: return "Sin configurar"
         case .llaveroNoDisponible: return "Cuenta guardada sin comprobar"
@@ -207,6 +211,7 @@ struct AjustesCuentaGoogle: View {
     }
 
     private var subtitulo: String {
+        if cuenta.comprobandoLlavero { return "Leyendo la cuenta guardada en el Llavero." }
         switch cuenta.estado {
         case .sinCliente: return "Lee automáticamente los códigos de Gmail. Puedes configurarlo cuando quieras."
         case .llaveroNoDisponible: return "Permite el acceso al Llavero para recuperar tu cuenta guardada."
@@ -219,24 +224,28 @@ struct AjustesCuentaGoogle: View {
 
     @ViewBuilder
     private var accionPrincipal: some View {
-        switch cuenta.estado {
-        case .sinCliente:
-            EmptyView()
-        case .llaveroNoDisponible:
-            Button("Recuperar acceso…") { cuenta.recuperarDelLlavero() }
-                .estiloBoton(.principal)
-        case .desconectada, .caducada:
-            Button("Iniciar sesión con Google") {
-                cuenta.iniciarSesion(modificarCorreo: preferencias.ajustes.enviarCorreoPapelera)
+        if cuenta.comprobandoLlavero {
+            ProgressView().controlSize(.small).accessibilityLabel("Comprobando la cuenta guardada")
+        } else {
+            switch cuenta.estado {
+            case .sinCliente:
+                EmptyView()
+            case .llaveroNoDisponible:
+                Button("Recuperar acceso…") { cuenta.recuperarDelLlavero() }
+                    .estiloBoton(.principal)
+            case .desconectada, .caducada:
+                Button("Iniciar sesión con Google") {
+                    cuenta.iniciarSesion(modificarCorreo: preferencias.ajustes.enviarCorreoPapelera)
+                }
+                    .estiloBoton(.principal)
+            case .esperandoNavegador:
+                HStack(spacing: Espacio.m) {
+                    ProgressView().controlSize(.small)
+                    Button("Cancelar") { cuenta.cancelarInicio() }
+                }
+            case .conectada:
+                Button("Cerrar sesión") { Task { await cuenta.cerrarSesion() } }
             }
-                .estiloBoton(.principal)
-        case .esperandoNavegador:
-            HStack(spacing: Espacio.m) {
-                ProgressView().controlSize(.small)
-                Button("Cancelar") { cuenta.cancelarInicio() }
-            }
-        case .conectada:
-            Button("Cerrar sesión") { Task { await cuenta.cerrarSesion() } }
         }
     }
 }

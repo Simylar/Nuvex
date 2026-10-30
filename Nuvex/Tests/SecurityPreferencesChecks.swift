@@ -172,6 +172,7 @@ struct SecurityPreferencesChecks {
         precondition(cierreLocal && respetaInicio, "el aviso de una revocación obsoleta no debe publicarse durante el inicio nuevo")
         try await comprobarOperacionGlobal()
         try await comprobarRespuestasGoogle()
+        try await comprobarLecturaLlaveroEnSegundoPlano()
         try await comprobarRenovacionCompartidaCaducada()
         try await comprobarCorreoUsado()
         try await comprobarCierrePermisosCorreo()
@@ -181,6 +182,58 @@ struct SecurityPreferencesChecks {
             print("Llavero de macOS: consulta real sin interacción sobre servicio inexistente verificada")
         }
         print("SecurityPreferences: migración, concurrencia, reapertura, revocación, recuperación y clasificación verificadas")
+    }
+
+    @MainActor
+    private static func comprobarLecturaLlaveroEnSegundoPlano() async throws {
+        let datos = Data(#"{"clienteID":"prueba.apps.googleusercontent.com","secreto":"ficticio","tokenRenovacion":"ficticio","correo":"muestra@example.invalid"}"#.utf8)
+        for caso in ["exito", "cancelada", "denegada"] {
+            let comenzo = DispatchSemaphore(value: 0)
+            let continuar = DispatchSemaphore(value: 0)
+            var renovaciones = 0
+            let cuenta = CuentaGoogle(lectorSegundoPlano: { interactivo in
+                precondition(!Thread.isMainThread && !interactivo)
+                comenzo.signal()
+                continuar.wait()
+                return caso == "denegada" ? (nil, errSecInteractionNotAllowed) : (datos, errSecSuccess)
+            }, escritorLlavero: { _ in preconditionFailure("no se modifica una cuenta pendiente de lectura") },
+                borradorLlavero: { preconditionFailure("no se borra una cuenta pendiente de lectura") },
+                pedirTokens: { _ in
+                    renovaciones += 1
+                    return ["access_token": "ficticio", "expires_in": 3600]
+                }, abrirNavegador: { _ in preconditionFailure("no se inicia OAuth durante la lectura") })
+            let esperarInicio: @Sendable () -> Void = { comenzo.wait() }
+            await Task.detached(operation: esperarInicio).value
+            precondition(cuenta.comprobandoLlavero && cuenta.correo == nil)
+            precondition(!cuenta.guardarCliente(id: "otro.apps.googleusercontent.com", secreto: "ficticio"))
+            let cerrada = await cuenta.cerrarSesion()
+            precondition(!cerrada)
+            await cuenta.olvidarCliente()
+            cuenta.iniciarSesion()
+            cuenta.recuperarDelLlavero() // No duplica una comprobación ya pendiente.
+            let token = Task { try await cuenta.tokenAcceso() }
+            for _ in 0..<20 { await Task.yield() }
+            precondition(renovaciones == 0, "la renovación espera a que termine la lectura")
+            if caso == "cancelada" {
+                token.cancel()
+                guard case .failure(is CancellationError) = await token.result else {
+                    preconditionFailure("cancelar no espera a que el sistema termine de leer el Llavero")
+                }
+                precondition(cuenta.comprobandoLlavero && renovaciones == 0)
+            }
+            continuar.signal()
+            while cuenta.comprobandoLlavero { await Task.yield() }
+            switch await token.result {
+            case .success(let valor) where caso == "exito":
+                precondition(valor == "ficticio" && renovaciones == 1 && cuenta.correo != nil)
+            case .failure(is CancellationError) where caso == "cancelada":
+                precondition(renovaciones == 0 && cuenta.correo != nil)
+            case .failure(let error as ProblemaGmail) where caso == "denegada":
+                precondition(error == .llaveroNoDisponible && renovaciones == 0)
+            default: preconditionFailure("la lectura asíncrona debe respetar su resultado y la cancelación del consumidor")
+            }
+            precondition(!cuenta.comprobandoLlavero)
+        }
     }
 
     @MainActor

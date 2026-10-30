@@ -63,6 +63,7 @@ final class CuentaGoogle: ObservableObject {
     @Published private(set) var estado: Estado = .sinCliente
     @Published private(set) var error: String?
     @Published private(set) var avisoPapelera: String?
+    @Published private(set) var comprobandoLlavero = false
     @Published private var permisoPapeleraRechazado = false
     private(set) var idSesion = UUID()
 
@@ -88,20 +89,23 @@ final class CuentaGoogle: ObservableObject {
     private var inicio: Task<Void, Never>?
     private var idInicio: UUID?
     private var servidor: ServidorRedireccion?
-    private let lectorLlavero: @MainActor (Bool) -> (datos: Data?, estado: OSStatus)
+    private let lectorLlavero: (@MainActor (Bool) -> (datos: Data?, estado: OSStatus))?
+    private let lectorSegundoPlano: @Sendable (Bool) -> (datos: Data?, estado: OSStatus)
     private let escritorLlavero: @MainActor (Data) -> Bool
     private let borradorLlavero: @MainActor () -> Bool
     private let pedirTokens: @MainActor ([String: String]) async throws -> [String: Any]
     private let abrirNavegador: @MainActor (URL) -> Bool
     private let revocarToken: @MainActor (String) async -> String?
 
-    init(lectorLlavero: @escaping @MainActor (Bool) -> (datos: Data?, estado: OSStatus) = CuentaGoogle.leerLlavero,
+    init(lectorLlavero: (@MainActor (Bool) -> (datos: Data?, estado: OSStatus))? = nil,
+         lectorSegundoPlano: @escaping @Sendable (Bool) -> (datos: Data?, estado: OSStatus) = { CuentaGoogle.leerLlavero(interactivo: $0) },
          escritorLlavero: @escaping @MainActor (Data) -> Bool = CuentaGoogle.escribirDatosLlavero,
          borradorLlavero: @escaping @MainActor () -> Bool = CuentaGoogle.borrarLlavero,
          pedirTokens: @escaping @MainActor ([String: String]) async throws -> [String: Any] = CuentaGoogle.pedirToken,
          abrirNavegador: @escaping @MainActor (URL) -> Bool = { NSWorkspace.shared.open($0) },
          revocarToken: @escaping @MainActor (String) async -> String? = CuentaGoogle.revocarEnGoogle) {
         self.lectorLlavero = lectorLlavero
+        self.lectorSegundoPlano = lectorSegundoPlano
         self.escritorLlavero = escritorLlavero
         self.borradorLlavero = borradorLlavero
         self.pedirTokens = pedirTokens
@@ -110,12 +114,29 @@ final class CuentaGoogle: ObservableObject {
         recuperarDelLlavero(interactivo: false)
     }
 
-    /// El arranque nunca provoca un diálogo ni convierte una lectura denegada
-    /// en «sin configurar». Solo una acción explícita permite interacción.
+    /// Solicita una lectura sin interacción al arrancar. El Llavero clásico
+    /// puede exigir autorización en algunas versiones de macOS: la espera
+    /// queda fuera del actor principal y nunca equivale a «sin configurar».
     func recuperarDelLlavero(interactivo: Bool = true) {
+        guard !comprobandoLlavero else { return }
         cancelarInicio()
         invalidarRenovacion()
-        let lectura = lectorLlavero(interactivo)
+        if let lectorLlavero {
+            aplicarLecturaLlavero(lectorLlavero(interactivo))
+            return
+        }
+        let sesion = idSesion
+        let lector = lectorSegundoPlano
+        comprobandoLlavero = true
+        Task { [weak self] in
+            let lectura = await Task.detached(priority: .userInitiated) { lector(interactivo) }.value
+            guard let self, self.idSesion == sesion else { return }
+            self.comprobandoLlavero = false
+            self.aplicarLecturaLlavero(lectura)
+        }
+    }
+
+    private func aplicarLecturaLlavero(_ lectura: (datos: Data?, estado: OSStatus)) {
         guard lectura.estado == errSecSuccess || lectura.estado == errSecItemNotFound else {
             estado = .llaveroNoDisponible(lectura.estado)
             return
@@ -134,15 +155,17 @@ final class CuentaGoogle: ObservableObject {
 
     var clienteID: String? { guardado?.clienteID }
     var puedeModificarCorreo: Bool {
-        correo != nil && !permisoPapeleraRechazado
+        !comprobandoLlavero && correo != nil && !permisoPapeleraRechazado
             && guardado?.permisos?.contains(Self.permisoModificar) == true
     }
     var correo: String? {
+        guard !comprobandoLlavero else { return nil }
         if case .conectada(let correo) = estado { return correo }
         return nil
     }
 
     var mensajePapeleraPendiente: String {
+        if comprobandoLlavero { return "Comprobando la cuenta guardada en el Llavero…" }
         switch estado {
         case .sinCliente:
             return "Prepara la cuenta de Google para autorizar el traslado. Mientras tanto, Nuvex conservará los correos."
@@ -160,6 +183,7 @@ final class CuentaGoogle: ObservableObject {
     }
 
     var problemaParaLeerCorreo: ProblemaGmail? {
+        if comprobandoLlavero { return .llaveroNoDisponible }
         switch estado {
         case .sinCliente, .desconectada: return .sinCuenta
         case .llaveroNoDisponible: return .llaveroNoDisponible
@@ -178,6 +202,7 @@ final class CuentaGoogle: ObservableObject {
     // MARK: Cliente OAuth
 
     func guardarCliente(id: String, secreto: String) -> Bool {
+        guard !comprobandoLlavero else { return false }
         if case .llaveroNoDisponible = estado {
             error = "Recupera primero el acceso al Llavero para conservar la cuenta guardada."
             return false
@@ -222,6 +247,7 @@ final class CuentaGoogle: ObservableObject {
     // MARK: Sesión
 
     func iniciarSesion(modificarCorreo: Bool = false) {
+        guard !comprobandoLlavero else { return }
         guard let guardado else { error = ErrorGoogle.sinCliente.localizedDescription; return }
         cancelarInicio()
         let id = UUID()
@@ -334,6 +360,7 @@ final class CuentaGoogle: ObservableObject {
     /// Revoca el acceso en Google y lo borra del Llavero. Conserva el cliente.
     @discardableResult
     func cerrarSesion() async -> Bool {
+        guard !comprobandoLlavero else { return false }
         cancelarInicio()
         guard var nuevo = guardado else {
             if case .llaveroNoDisponible = estado {
@@ -380,6 +407,8 @@ final class CuentaGoogle: ObservableObject {
 
     /// Token de acceso vigente; lo renueva si caducó.
     func tokenAcceso() async throws -> String {
+        while comprobandoLlavero { try await Task.sleep(for: .milliseconds(100)) }
+        try Task.checkCancellation()
         if case .llaveroNoDisponible = estado { throw ProblemaGmail.llaveroNoDisponible }
         if let acceso, acceso.caduca > Date().addingTimeInterval(60) { return acceso.token }
         let sesion = idSesion
@@ -497,10 +526,10 @@ final class CuentaGoogle: ObservableObject {
 
     // MARK: Llavero
 
-    private static let servicio = "nuvex.google"
-    private static let cuenta = "cuenta"
+    nonisolated private static let servicio = "nuvex.google"
+    nonisolated private static let cuenta = "cuenta"
 
-    private static func leerLlavero(interactivo: Bool) -> (datos: Data?, estado: OSStatus) {
+    nonisolated private static func leerLlavero(interactivo: Bool) -> (datos: Data?, estado: OSStatus) {
         let contexto = LAContext()
         contexto.interactionNotAllowed = !interactivo
         let consulta: [String: Any] = [kSecClass as String: kSecClassGenericPassword,

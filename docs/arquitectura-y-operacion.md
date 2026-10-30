@@ -86,6 +86,15 @@ en vez de transformarse silenciosamente en otro código.
   errores. Retirar una tarea ya terminada no invalida la sesión: la vigencia se
   comprueba por su identidad, y una respuesta antigua no vuelve a guardar tokens
   ni cambia el estado de otro inicio OAuth.
+- La cuenta se carga fuera del actor principal. Durante esa consulta no se
+  reemplaza ni borra la cuenta, no se inicia OAuth y la renovación espera su
+  resultado; cancelar el consumidor no cancela la lectura compartida. Las
+  muestras pueden inyectar una lectura inmediata sin usar el Llavero real.
+- Se solicita lectura inicial sin interacción con `LAContext`. En la validación
+  de macOS 27.2 el Llavero clásico mostró una petición de autorización pese a
+  esa política. La carga asíncrona evita bloquear la app, pero no acredita que
+  ese backend permita siempre un arranque de Gmail sin intervención. No se
+  modifican ACL, credenciales ni el backend para ocultar esa limitación.
 - Errores permanentes (sesión revocada, cliente inválido, scope o API) detienen
   el sondeo y muestran una acción concreta; los transitorios siguen hasta el
   límite configurado.

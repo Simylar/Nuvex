@@ -390,3 +390,29 @@ No se verificaron todavía OAuth/papelera reales, caídas físicas de red, diál
 del Llavero ni VoiceOver. No se instaló ni publicó una versión y no se cambió el
 identificador de la app. El candidato se prepara como 3.4.0, con sus novedades
 en `CHANGELOG.md` y los pendientes de salida en `docs/release-3.4.0.md`.
+
+### Validación local del candidato y espera del Llavero
+
+El candidato 3.4.0 (163), `07c46d5`, se instaló sobre 3.3.0 mediante el instalador
+recuperable, conservando el túnel activo y la configuración. Se comprobó el
+mismo requisito de firma de ambas instalaciones. La prueba de lectura obtuvo un
+código enmascarado y una conexión posterior recibió el OTP desde Gmail y confirmó
+el túnel. No se activaron papelera ni recuperación automática y no se provocó un
+corte de red. Esto no valida el traslado de mensajes ni la recuperación automática.
+
+La apertura de General dejó de responder mientras leía `nuvex.google` mediante
+`SecItemCopyMatching`; la persona confirmó que macOS mostraba un diálogo del
+Llavero. La corrección posterior lleva esa lectura fuera del actor principal,
+muestra «Comprobando la cuenta…» y bloquea reemplazar, olvidar, cerrar o iniciar
+la cuenta durante la consulta. La renovación espera a que termine; cancelar un
+consumidor no pierde la lectura compartida ni renueva después de su cancelación.
+Las regresiones simulan una lectura detenida, éxito, denegación y cancelación.
+Los renderizados del nuevo estado se revisan en claro y oscuro a 540 × 580.
+
+En macOS 27.2 no se acreditó la supresión de diálogos del Llavero clásico pese
+a las políticas de no interacción probadas con entradas ficticias. Las consultas
+experimentales se detuvieron y sus Llaveros temporales se retiraron. No se
+incorporaron APIs antiguas de supresión global ni cambios de ACL o backend al
+código de la app. La espera de la cuenta deja de bloquear la app; que Gmail pueda
+arrancar sin intervención en esa condición sigue pendiente y no se declara
+resuelto por compilar o por aprobar pruebas simuladas.

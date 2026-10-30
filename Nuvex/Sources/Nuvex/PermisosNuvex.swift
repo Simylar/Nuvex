@@ -246,6 +246,7 @@ struct SeccionPermisosNuvex: View {
     }
 
     private var estadoGoogle: String {
+        if cuenta.comprobandoLlavero { return "Comprobando la cuenta guardada en el Llavero…" }
         switch cuenta.estado {
         case .sinCliente: return "Opcional · falta configurar el cliente OAuth"
         case .llaveroNoDisponible: return "No se pudo leer la cuenta guardada; recupera el acceso al Llavero"

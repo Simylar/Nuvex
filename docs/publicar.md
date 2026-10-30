@@ -12,7 +12,7 @@ Nuvex/scripts/configurar-publicacion.sh
 
 El script crea dos claves en tu llavero de inicio de sesión:
 
-- **Identidad «Nuvex Release»**: certificado autofirmado de firma de código, válido 10 años. Firmar siempre con la misma identidad hace que el Llavero no vuelva a pedir permiso a Nuvex tras cada actualización.
+- **Identidad «Nuvex Release»**: certificado autofirmado de firma de código, válido 10 años. Mantiene el requisito designado entre versiones. El acceso efectivo a cada entrada sigue dependiendo del Llavero: en macOS 27.2 se observó una petición de autorización pese a conservar ese requisito; no garantiza actualizaciones sin diálogos.
 - **Clave EdDSA de Sparkle**: firma cada actualización. Su parte pública se guarda en `Nuvex/Resources/sparkle_ed_public_key` y viaja con el código.
 
 Deja una copia de cada una en el Escritorio. Guárdalas en tu gestor de contraseñas y bórralas del Escritorio. **Si se pierden**, las apps ya instaladas no aceptarán versiones firmadas con claves nuevas y habrá que reinstalar Nuvex a mano.

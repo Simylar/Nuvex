@@ -416,3 +416,27 @@ incorporaron APIs antiguas de supresión global ni cambios de ACL o backend al
 código de la app. La espera de la cuenta deja de bloquear la app; que Gmail pueda
 arrancar sin intervención en esa condición sigue pendiente y no se declara
 resuelto por compilar o por aprobar pruebas simuladas.
+
+### Prueba autorizada de papelera y recuperación
+
+En 3.4.0 (164), `1ef10d7`, se concedió modificación de Gmail con intervención de
+la persona. Se activó temporalmente la recuperación y se interrumpió solo el
+túnel de la conexión de prueba, mediante el ayudante ya instalado. Nuvex inició
+un intento automático y solicitó el código sin una nueva orden de conexión.
+La lectura agotó sus 120 segundos; al volver a buscar se encontró el correo
+nuevo. La comparación en memoria confirmó que se utilizó su código, sin
+registrarlo. El servidor rechazó la autenticación y el correo permaneció en
+Recibidos. No se determinó la causa del rechazo.
+
+Después de que la persona revisara el acceso y autorizara un único intento
+nuevo, la conexión manual obtuvo otro código de Gmail y confirmó el túnel.
+Nuvex envió a la papelera el mensaje de ese intento satisfactorio. Se seleccionó
+solo ese mensaje en Gmail, se recuperó con «Mover a Recibidos» y se comprobó su
+presencia en la bandeja. Los mensajes anteriores y el del intento fallido se
+conservaron. La recuperación automática quedó desactivada y la VPN conectada;
+se conservó la elección de papelera activada por la persona.
+
+La prueba no acredita una recuperación totalmente desatendida ante entrega
+tardía del correo, pérdida física de Internet, suspensión ni un recurso interno
+concreto. La espera y el rechazo se registran como resultados observados, sin
+atribuirlos a una caducidad del código que el servidor no confirmó.

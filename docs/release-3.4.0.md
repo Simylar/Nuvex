@@ -1,7 +1,7 @@
-# Nuvex 3.4.0 — Candidato de publicación
+# Nuvex 3.4.0 — Resumen técnico de release
 
 Las novedades para quien usa la app están en `CHANGELOG.md`. Este documento
-registra el alcance y los pendientes del candidato; no acredita su publicación.
+registra el alcance, la validación y las limitaciones; no acredita por sí solo su publicación.
 El commit, build, hashes y canal definitivos se obtienen de
 `release-manifest.txt` y `SHA256SUMS` generados por la simulación del commit
 exacto, sin copiarlos a mano aquí.
@@ -32,7 +32,7 @@ commit congelado, verifica la identidad de firma del canal y los metadatos del
 paquete, y genera y valida ZIP, deltas, appcast, notas, manifiesto y hashes sin
 subir una etiqueta ni un release.
 
-## Pendientes antes de la salida estable
+## Validación local de la actualización
 
 La prueba preliminar del candidato 3.4.0 (163), `07c46d5`, actualizó la instalación
 local 3.3.0 conservando el túnel activo. La firma instalada anterior y la nueva
@@ -47,22 +47,48 @@ cuenta en segundo plano, muestra su comprobación y bloquea las mutaciones hasta
 terminar. Las regresiones cubren éxito, denegación y cancelación del consumidor,
 con un lector bloqueado de muestra. La intervención del Llavero en macOS 27.2
 sigue siendo una limitación: no se certifica Gmail desatendido bajo esa condición.
-Las comprobaciones preliminares no sustituyen las del paquete final corregido.
+El candidato corregido 3.4.0 (164), `1ef10d7`, se instaló conservando el túnel.
+Su ZIP y delta desde 3.3.0 superaron firmas y checksums; el delta aplicado en una
+copia aislada coincidió con el paquete completo. El control y la navegación
+respondieron mientras el Llavero esperaba autorización, y la lectura real de
+Gmail pasó después de que la persona resolviera el diálogo.
 
-- Actualización controlada desde 3.3.0, verificando perfiles, preferencias,
-  acceso al Llavero y el mismo requisito de firma.
-- Gmail real: opción inicialmente desactivada, persistencia de la elección,
-  consentimiento de modificación, traslado del mensaje correcto solo tras
-  confirmar el túnel y recuperación desde la papelera. Cancelar o fallar una
-  conexión debe conservar el mensaje.
-- Caída real de red: un intento de recuperación, cancelación efectiva,
-  conservación del aviso y ausencia de diálogos inesperados en segundo plano.
-- Interacción con los diálogos del Llavero y revisión de accesibilidad con
-  VoiceOver. Las capturas y pruebas automáticas no acreditan esos resultados.
+## Papelera y recuperación con una VPN real
+
+Con consentimiento de la persona se autorizó modificación en Google y se activó
+temporalmente la recuperación. Se interrumpió solo el túnel de prueba mediante
+el ayudante existente. Nuvex inició un intento sin una orden de reconexión, pero
+la búsqueda de correo agotó sus 120 segundos. Tras «Volver a buscar» se utilizó
+el código del mensaje nuevo; el servidor rechazó la autenticación. El mensaje
+se conservó en Recibidos y no se realizó un reintento sin revisar el acceso y
+obtener la autorización de la persona. No se determinó la causa del rechazo.
+
+El intento manual posterior autorizado conectó con un código nuevo de Gmail.
+Nuvex movió automáticamente ese mensaje a la papelera tras confirmar el túnel.
+Se recuperó únicamente ese mensaje mediante «Mover a Recibidos» en Gmail y se
+comprobó su presencia en la bandeja; el mensaje del intento fallido se conservó.
+La recuperación automática volvió a quedar desactivada y la VPN quedó conectada.
+
+Esto acredita el traslado recuperable en una conexión satisfactoria y la
+conservación del correo ante un rechazo. La prueba de recuperación acredita el
+inicio de un intento y la recuperación manual posterior; **no** una reconexión
+completa desatendida cuando el correo tarda más que el tiempo configurado.
+
+## Comprobaciones físicas o externas pendientes
+
+- Pérdida y recuperación de Internet: la prueba interrumpió el túnel, no la red
+  general de la Mac. Quedan también suspensión, bloqueo y reinicio físicos.
+- Gmail desatendido cuando el Llavero clásico exige autorización en macOS 27.2.
+- VoiceOver, otros equipos, texto ampliado y configuración multimonitor. Las
+  capturas y pruebas automáticas no acreditan estos resultados.
+- Recurso interno del servidor VPN: se confirmó el túnel, sin certificar aquí
+  una aplicación o servicio privado concreto.
 
 Usa `docs/plan-validacion-produccion.md` y `docs/validacion-en-vivo.md` como
-procedimiento, adaptando la versión de origen a 3.3.0. Registra los resultados
-del candidato exacto sin incluir correos, OTP, tokens ni destinos privados.
+procedimiento, adaptando la versión de origen a 3.3.0. No registres correos,
+OTP, tokens ni destinos privados. El cierre documental posterior no modifica
+el código validado en `1ef10d7`; los metadatos del artefacto final se vuelven a
+comprobar en la simulación de su commit exacto.
 
 ## Compatibilidad y distribución
 

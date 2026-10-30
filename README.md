@@ -13,7 +13,7 @@ Nuvex es una app de barra de menús para macOS con la que puedes configurar y co
 - Contraseñas en el Llavero de macOS y códigos de verificación solicitados solo cuando el servidor los pide.
 - Instalación del ayudante de red desde la app, con autorización de macOS cuando haga falta.
 - Estado y reconexión desde la barra de menús, con un aviso de desconexión que ofrece **Reconectar**.
-- Lectura opcional del código de verificación desde Gmail, con permiso de solo lectura ([guía](docs/gmail.md)).
+- Lectura opcional del código de verificación desde Gmail. Puede enviar el correo usado a la papelera con una opción y autorización adicionales ([guía](docs/gmail.md)).
 - Comando `nuvex` y habilidad para Claude Code y Codex: conectan tus VPN cuando se lo pides, incluso fuera de casa ([guía](docs/asistentes.md)).
 - Exportación e importación de conexiones en un archivo cifrado con una frase.
 - Actualizaciones desde la app con sus novedades, sin perder conexiones, contraseñas ni ajustes ([dónde vive cada dato](docs/datos.md)).

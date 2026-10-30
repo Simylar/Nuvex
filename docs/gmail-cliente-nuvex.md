@@ -20,7 +20,8 @@ no concede acceso a una cuenta ni elimina por sí solo los avisos de verificaci�
 2. Registrar un cliente de tipo **App de escritorio**, conservar PKCE y el
    retorno local compatibles con el flujo nativo. Un cliente distribuido en una
    app de escritorio no puede tratar su secreto incluido como confidencial.
-3. Revisar la verificación exigida por `gmail.readonly`, un permiso restringido.
+3. Revisar la verificación exigida por `gmail.readonly` y por `gmail.modify`
+   para la papelera opcional, ambos permisos restringidos.
    Las excepciones y obligaciones dependen del uso y la distribución. Un cliente
    común no evita el consentimiento ni las restricciones de administradores de
    Google Workspace.

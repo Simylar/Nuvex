@@ -55,6 +55,7 @@ final class VPNModel: ObservableObject {
     private var desconexionSolicitada: Set<String> = []
     private var faltas: [String: Int] = [:]
     private var conexionPendiente: String?
+    private var usosCorreo: [String: UsoCorreoGmail] = [:]
     /// Reconexiones pedidas desde el aviso: si fallan, el aviso lo dice.
     private var reconexionesDesdeAviso: Set<String> = []
     /// Cuándo empezó cada intento de conexión en curso, para mostrar el avance.
@@ -222,6 +223,7 @@ final class VPNModel: ObservableObject {
         }
         refrescando = true
         let revision = revisionEstado
+        let consultasCorreo = usosCorreo.compactMapValues { $0.consultaPendiente }
         Task.detached(priority: .utility) {
             let resultado: Resultado
             do {
@@ -260,16 +262,33 @@ final class VPNModel: ObservableObject {
                     self.conexionPendiente = nil
                     self.confirmarConexionExterna(vpn)
                 }
-                // Si el motor ya la reporta conectada, se acabo el "conectando".
-                for v in lista {
-                    if v.connected {
-                        self.estados[v.id] = .conectada
-                        self.inicioConexion.removeValue(forKey: v.id)
-                    } else if !v.connected, self.estados[v.id] == .conectada {
-                        self.estados.removeValue(forKey: v.id)
-                    }
-                }
+                self.aplicarEstadosConsultados(lista, consultasCorreo: consultasCorreo)
                 self.finalizarRefresco()
+            }
+        }
+    }
+
+    /// Aplica una respuesta válida de list. Una caída cancela únicamente la
+    /// revisión consultada o el uso que acababa de observarse conectado.
+    func aplicarEstadosConsultados(_ lista: [VPNStatus], consultasCorreo: [String: UUID]) {
+        let presentes = Set(lista.map(\.id))
+        for (id, consulta) in consultasCorreo where !presentes.contains(id) {
+            if usosCorreo[id]?.consultaPendiente == consulta { usosCorreo[id]?.cancelar() }
+        }
+        for vpn in lista {
+            let uso = usosCorreo[vpn.id]
+            if vpn.connected {
+                uso?.confirmarTunel(consulta: consultasCorreo[vpn.id])
+                estados[vpn.id] = .conectada
+                inicioConexion.removeValue(forKey: vpn.id)
+            } else {
+                if let consulta = consultasCorreo[vpn.id], uso?.consultaPendiente == consulta {
+                    uso?.cancelar()
+                }
+                if estados[vpn.id] == .conectada {
+                    uso?.cancelar()
+                    estados.removeValue(forKey: vpn.id)
+                }
             }
         }
     }
@@ -392,42 +411,73 @@ final class VPNModel: ObservableObject {
         iniciarConexion(vpn)
     }
 
+    func prepararUsoCorreo(para id: String,
+                          alConsumir: @escaping @MainActor (MensajeCodigoGmail) -> Void) -> UsoCorreoGmail {
+        usosCorreo[id]?.cancelar()
+        let uso = UsoCorreoGmail(alConsumir: alConsumir)
+        usosCorreo[id] = uso
+        return uso
+    }
+
     private func iniciarConexion(_ vpn: VPNStatus, automaticamente: Bool = false) {
         guard estado(vpn) != .conectando else { return }
         let inicioIntento = Date()
+        let usoCorreo = prepararUsoCorreo(para: vpn.id) { mensaje in
+            Task { await CuentaGoogle.shared.moverCorreoUsado(mensaje) }
+        }
         estados[vpn.id] = .conectando
         inicioConexion[vpn.id] = inicioIntento
         canceladas.remove(vpn.id)
         ultimoError = nil
         IntentosConexion.preparar(vpn.id)
         Task.detached(priority: .userInitiated) {
-            let resultado = await Self.conectarProceso(id: vpn.id, name: vpn.name, sinInteraccion: automaticamente)
+            let resultado = await Self.conectarProceso(id: vpn.id, name: vpn.name, sinInteraccion: automaticamente,
+                alEntregarCodigo: { usoCorreo.registrarEntrega($0) })
             await MainActor.run {
-                guard VigenciaIntentoConexion.corresponde(inicioIntento, al: self.inicioConexion[vpn.id]) else { return }
-                switch resultado {
-                case .success:
-                    // El ayudante ya vio el túnel activo, pero el estado público
-                    // se confirma con `list`. Se conserva «conectando» para no
-                    // abrir un hueco falso de «desconectada» entre ambas cosas.
-                    self.reconexionesDesdeAviso.remove(vpn.id)
-                    self.agotarConfirmacionSiNoAparece(vpn, intento: inicioIntento)
-                case .failure(let e) where e.fallo?.codigo == .cancelada:
-                    self.inicioConexion.removeValue(forKey: vpn.id)
-                    self.estados.removeValue(forKey: vpn.id)
-                    self.reconexionesDesdeAviso.remove(vpn.id)
-                    self.canceladas.insert(vpn.id)
-                case .failure(let e):
-                    self.inicioConexion.removeValue(forKey: vpn.id)
-                    self.estados[vpn.id] = .error(e.falloParaFila)
-                    let avisarAutomaticamente = automaticamente &&
-                        (UserDefaults.standard.object(forKey: "avisarDesconexion") as? Bool ?? true)
-                    if self.reconexionesDesdeAviso.remove(vpn.id) != nil || avisarAutomaticamente {
-                        VPNNotifications.shared.reconexionFallida(id: vpn.id, name: vpn.name, fallo: e.falloParaFila)
-                    }
-                }
-                self.refrescar()
+                self.finalizarIntentoConexion(vpn, inicioIntento: inicioIntento, resultado: resultado,
+                                              usoCorreo: usoCorreo, automaticamente: automaticamente)
             }
         }
+    }
+
+    func finalizarIntentoConexion(_ vpn: VPNStatus, inicioIntento: Date,
+                                  resultado: Result<Void, ErrorVPN>, usoCorreo: UsoCorreoGmail,
+                                  automaticamente: Bool = false) {
+        guard self.usosCorreo[vpn.id] === usoCorreo else { usoCorreo.cancelar(); return }
+        guard VigenciaIntentoConexion.corresponde(inicioIntento, al: self.inicioConexion[vpn.id]) else {
+            // `list` puede haber confirmado antes de volver el proceso.
+            if case .success = resultado, self.estados[vpn.id] == .conectada,
+               !self.canceladas.contains(vpn.id), !self.desconectando.contains(vpn.id) {
+                usoCorreo.confirmarProceso()
+                self.refrescar()
+            } else { usoCorreo.cancelar() }
+            return
+        }
+        switch resultado {
+        case .success:
+            usoCorreo.confirmarProceso()
+            // El ayudante ya vio el túnel activo, pero el estado público
+            // se confirma con `list`. Se conserva «conectando» para no
+            // abrir un hueco falso de «desconectada» entre ambas cosas.
+            self.reconexionesDesdeAviso.remove(vpn.id)
+            self.agotarConfirmacionSiNoAparece(vpn, intento: inicioIntento)
+        case .failure(let e) where e.fallo?.codigo == .cancelada:
+            usoCorreo.cancelar()
+            self.inicioConexion.removeValue(forKey: vpn.id)
+            self.estados.removeValue(forKey: vpn.id)
+            self.reconexionesDesdeAviso.remove(vpn.id)
+            self.canceladas.insert(vpn.id)
+        case .failure(let e):
+            usoCorreo.cancelar()
+            self.inicioConexion.removeValue(forKey: vpn.id)
+            self.estados[vpn.id] = .error(e.falloParaFila)
+            let avisarAutomaticamente = automaticamente &&
+                (UserDefaults.standard.object(forKey: "avisarDesconexion") as? Bool ?? true)
+            if self.reconexionesDesdeAviso.remove(vpn.id) != nil || avisarAutomaticamente {
+                VPNNotifications.shared.reconexionFallida(id: vpn.id, name: vpn.name, fallo: e.falloParaFila)
+            }
+        }
+        self.refrescar()
     }
 
     /// Un `list` normal confirma el túnel en milisegundos. Si el motor deja de
@@ -435,10 +485,11 @@ final class VPNModel: ObservableObject {
     /// en lugar de mantener «conectando» indefinidamente.
     private func agotarConfirmacionSiNoAparece(_ vpn: VPNStatus, intento: Date) {
         Task { [weak self] in
-            try? await Task.sleep(for: .seconds(30))
+            try? await Task.sleep(for: UsoCorreoGmail.esperaConfirmacion)
             guard let self,
                   VigenciaIntentoConexion.corresponde(intento, al: self.inicioConexion[vpn.id]),
                   self.estados[vpn.id] == .conectando else { return }
+            self.usosCorreo[vpn.id]?.cancelar()
             self.inicioConexion.removeValue(forKey: vpn.id)
             self.estados[vpn.id] = .error(Fallo(
                 titulo: "No se pudo confirmar el estado",
@@ -464,6 +515,7 @@ final class VPNModel: ObservableObject {
         // error de consulta cambió la fila, la espera de OTP aún debe poder
         // cancelarse y limpiar su proceso.
         guard conexionEnCurso(id) else { return }
+        usosCorreo[id]?.cancelar()
         Log.escribir("cancelando el intento de conectar \(id)")
         SolicitudCodigo.abiertas[id]?.cancelar()
         switch IntentosConexion.cancelar(id) {
@@ -627,6 +679,7 @@ final class VPNModel: ObservableObject {
 
     func desconectar(_ vpn: VPNStatus) {
         guard !desconexionSolicitada.contains(vpn.id), desconectando.insert(vpn.id).inserted else { return }
+        usosCorreo[vpn.id]?.cancelar()
         recuperando.remove(vpn.id)
         desconexionSolicitada.insert(vpn.id)
         desconexiones.removeValue(forKey: vpn.id)

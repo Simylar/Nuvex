@@ -30,7 +30,9 @@ extension VPNModel {
 
     /// Conecta vigilando la salida del ayudante. Cuando el servidor pide el
     /// código por correo, lo solicita y lo entrega por entrada estándar.
-    nonisolated static func conectarProceso(id: String, name: String, sinInteraccion: Bool = false) async -> Result<Void, ErrorVPN> {
+    nonisolated static func conectarProceso(id: String, name: String, sinInteraccion: Bool = false,
+        alEntregarCodigo: @escaping @MainActor @Sendable (MensajeCodigoGmail?) -> Void = { _ in }
+    ) async -> Result<Void, ErrorVPN> {
         // Los correos con el código se buscan a partir de este momento.
         let inicioIntento = Date()
         let acumulado = Acumulador()
@@ -72,10 +74,15 @@ extension VPNModel {
                 let necesitaCodigo = acumulado.anadir(texto)
                 guard necesitaCodigo else { return }
                 Task { @MainActor in
-                    if let codigo = await SolicitudCodigo.obtener(perfilID: id, nombre: name, inicio: inicioIntento,
+                    if let entrega = await SolicitudCodigo.obtener(perfilID: id, nombre: name, inicio: inicioIntento,
                                                                   alAgotarse: { acumulado.marcarAgotado() }) {
                         // Si el motor ya terminó, escribir falla sin cerrar la app.
-                        try? entrada.fileHandleForWriting.write(contentsOf: Data((codigo + "\n").utf8))
+                        do {
+                            try entrada.fileHandleForWriting.write(contentsOf: Data((entrega.codigo + "\n").utf8))
+                            alEntregarCodigo(entrega.mensaje)
+                        } catch {
+                            Log.escribir("no se pudo entregar el código al motor")
+                        }
                         // Cerrar es imprescindible, no cortesia: al otro lado
                         // hay un lector alimentando al motor VPN, y sin EOF se
                         // queda bloqueado para siempre esperando mas entrada.

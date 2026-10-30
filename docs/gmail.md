@@ -2,7 +2,7 @@
 
 Algunas VPN envían un código por correo cada vez que te conectas. Nuvex puede leerlo de tu Gmail y usarlo sin que lo copies, también cuando le pides a Claude Code o a Codex que conecten estando fuera de casa.
 
-Nuvex solo pide permiso de **lectura** (`gmail.readonly`): no puede enviar, mover, marcar ni borrar correos. Solo busca correos del remitente que indiques en cada conexión, recibidos después de empezar a conectar, y nunca guarda el código ni el contenido del correo.
+Por defecto Nuvex pide permiso de **lectura** (`gmail.readonly`). Solo busca correos del remitente que indiques en cada conexión, recibidos después de empezar a conectar, y nunca guarda el código ni el contenido del correo. Opcionalmente puede enviar a la papelera el mensaje cuyo código completó una conexión, con un permiso adicional explicado más abajo.
 
 Como Nuvex no es una app de Google verificada, usas tu propio cliente OAuth. Se crea una sola vez y es gratis.
 
@@ -55,7 +55,64 @@ Nuvex revisa el árbol MIME completo, incluidas partes de texto que Gmail entreg
 
 El equipo debe estar despierto para consultar Gmail. Durante una suspensión real macOS detiene CPU y red; Nuvex reconcilia el estado al reactivarse, pero no puede recibir el correo mientras está dormido.
 
+## Enviar el correo usado a la papelera · Opcional
+
+En **Ajustes de Nuvex › Cuenta de Google › Correos con códigos**, activa
+**Enviar el correo a la papelera después de usar el código**. Está desactivado
+por defecto, también al actualizar. La elección se guarda inmediatamente y se
+conserva al reiniciar; se aplica a todas las conexiones que lean códigos de Gmail.
+No cambia la configuración del ayudante.
+
+Nuvex explica el alcance antes de activar la opción. Si la sesión solo tiene
+lectura, abre de nuevo el inicio de sesión para solicitar `gmail.modify`, el
+permiso mínimo que admite `messages.trash`. Google también permite modificar
+y enviar correo con ese permiso; no ofrece uno limitado a la papelera de los
+códigos. Nuvex usa únicamente lectura y traslado del mensaje concreto, nunca
+envío ni borrado definitivo. Google Workspace o la configuración/verificación
+del cliente OAuth pueden impedir concederlo; revisa **Acceso a datos** del
+proyecto si Google rechaza el permiso.
+
+Si aún no preparaste el cliente, la opción queda guardada para el siguiente
+inicio de sesión. Si cancelas o Google no concede modificación, queda pendiente
+de autorización y los correos se conservan. La lectura con una sesión válida
+puede seguir funcionando. **Autorizar la papelera…** permite solicitar el acceso
+de nuevo desde la cuenta conectada. Las sesiones antiguas conservan su acceso de
+lectura: no se amplían permisos al arrancar ni al conectar una VPN.
+
+El traslado requiere las tres condiciones: código de ese correo entregado por
+stdin, proceso de conexión satisfactorio y túnel confirmado por una consulta
+del mismo intento iniciada después de cumplir los dos primeros requisitos.
+Una respuesta tardía de una consulta anterior no autoriza el traslado.
+La confirmación del correo caduca a los 30 segundos del resultado satisfactorio
+del proceso. Si la consulta vigente muestra el túnel desconectado o el perfil
+ausente, se conserva el correo y una conexión posterior no reactiva ese traslado.
+Se conserva el mensaje si cancelas, falla el intento,
+no puede confirmarse el túnel, se usa otro código manual o responde Terminal.
+**Revisar** detiene el envío; si después envías el mismo código encontrado,
+mantiene su origen. **Probar con el último correo** nunca mueve mensajes.
+Solo se conserva en memoria el ID del mensaje y la identidad de la sesión,
+sin persistirlos ni escribirlos en el registro.
+
+Se realiza un traslado por intento, sin reintentos ni autorizaciones en segundo
+plano. Si Gmail no lo confirma, el aviso queda en **Cuenta de Google** y la VPN
+no se desconecta. Un fallo de red puede dejar el resultado indeterminado:
+comprueba Gmail antes de mover el mensaje manualmente. Cerrar la app antes del
+traslado puede dejar el correo en su carpeta; no hay cola persistente.
+
+Desactivar la opción detiene traslados todavía no enviados; una petición ya
+enviada puede completarse. No restaura mensajes ni revoca el permiso de Google.
+Para volver a solo lectura, cierra sesión y vuelve a entrar con la opción
+desactivada, o retira el acceso desde Google. Los mensajes pueden recuperarse
+desde la papelera mientras Gmail los conserve allí, conforme a sus políticas.
+
+Referencias: [messages.trash](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/trash),
+[alcance de gmail.modify](https://developers.google.com/workspace/gmail/api/auth/scopes) y
+[OAuth para escritorio](https://developers.google.com/identity/protocols/oauth2/native-app).
+Las apps instaladas solicitan de nuevo el conjunto de permisos; no se usa
+autorización incremental ni se solicita `https://mail.google.com/`.
+
 ## Quitar el acceso
 
 - **Cerrar sesión** en Ajustes › Cuenta de Google revoca el acceso en Google y lo borra del Llavero.
+- Al cerrar sesión se retiran también los permisos guardados de esa sesión; se conserva el cliente para volver a iniciar sesión.
 - También puedes retirarlo desde [tu cuenta de Google › Seguridad › Apps de terceros](https://myaccount.google.com/connections).

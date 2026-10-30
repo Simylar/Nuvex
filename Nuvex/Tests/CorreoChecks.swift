@@ -3,7 +3,11 @@ import Foundation
 /// Comprobaciones de la lectura de códigos de correo y del PKCE de OAuth.
 @main
 struct CorreoChecks {
-    static func main() {
+    @MainActor
+    static func main() async throws {
+        try comprobarPreferenciaPapelera()
+        comprobarUsoCorreo()
+        try await comprobarPapeleraHTTP()
         // Importación del archivo de escritorio sin red ni secretos reales.
         let cliente = #"{"installed":{"client_id":"prueba.apps.googleusercontent.com","client_secret":"secreto-ficticio"}}"#
         let importado = try! JSONDecoder().decode(ClienteGoogleImportado.self, from: Data(cliente.utf8))
@@ -197,4 +201,143 @@ struct CorreoChecks {
 
         print("Correo: comprobaciones superadas")
     }
+
+    private static func comprobarPreferenciaPapelera() throws {
+        precondition(!AjustesApp().enviarCorreoPapelera)
+        let anterior = try ArchivoAjustes.leer(Data(#"{"version":3,"correo":{},"ajusteFuturo":42}"#.utf8))
+        precondition(!anterior.ajustes.enviarCorreoPapelera)
+        var ajustes = anterior.ajustes
+        ajustes.enviarCorreoPapelera = true
+        let datos = try ArchivoAjustes.escribir(ajustes, sobre: anterior.crudo)
+        let recuperada = try ArchivoAjustes.leer(datos)
+        precondition(recuperada.ajustes.enviarCorreoPapelera && recuperada.crudo["ajusteFuturo"] as? Int == 42)
+        ajustes.enviarCorreoPapelera = false
+        let desactivada = try ArchivoAjustes.leer(ArchivoAjustes.escribir(ajustes, sobre: recuperada.crudo))
+        precondition(!desactivada.ajustes.enviarCorreoPapelera)
+    }
+
+    @MainActor
+    private static func comprobarUsoCorreo() {
+        let mensaje = MensajeCodigoGmail(id: "abc123", sesion: UUID())
+        var movidos: [MensajeCodigoGmail] = []
+        let uso = UsoCorreoGmail { movidos.append($0) }
+        let antesDeEntregar = uso.consultaPendiente
+        uso.registrarEntrega(mensaje)
+        let antesDeConfirmarProceso = uso.consultaPendiente
+        precondition(movidos.isEmpty, "encontrar y entregar no equivale a usar con éxito")
+        uso.confirmarProceso()
+        let consultaVigente = uso.consultaPendiente
+        precondition(consultaVigente != nil && movidos.isEmpty, "código cero habilita la consulta, sin confirmar el túnel")
+        uso.confirmarTunel(consulta: antesDeEntregar)
+        uso.confirmarTunel(consulta: antesDeConfirmarProceso)
+        precondition(movidos.isEmpty, "una consulta iniciada antes de entregar el código o de confirmar el proceso no mueve el correo")
+        uso.confirmarTunel(consulta: consultaVigente)
+        uso.confirmarTunel(consulta: consultaVigente)
+        uso.confirmarProceso()
+        precondition(movidos == [mensaje], "solo un traslado por intento")
+        precondition(uso.consultaPendiente == nil)
+
+        let invertido = UsoCorreoGmail { movidos.append($0) }
+        invertido.confirmarProceso()
+        let antesDeEntregaTardia = invertido.consultaPendiente
+        invertido.registrarEntrega(mensaje)
+        invertido.confirmarTunel(consulta: antesDeEntregaTardia)
+        precondition(movidos.count == 1, "la entrega tardía también requiere una consulta nueva")
+        invertido.confirmarTunel(consulta: invertido.consultaPendiente)
+        precondition(movidos.count == 2)
+
+        for confirmarProceso in [false, true] {
+            let cancelado = UsoCorreoGmail { _ in preconditionFailure("un intento cancelado no mueve correo") }
+            cancelado.registrarEntrega(mensaje)
+            if confirmarProceso { cancelado.confirmarProceso() }
+            let consultaAnterior = cancelado.consultaPendiente
+            cancelado.cancelar()
+            cancelado.confirmarTunel(consulta: consultaAnterior)
+            cancelado.confirmarProceso()
+            cancelado.registrarEntrega(mensaje)
+            precondition(cancelado.consultaPendiente == nil)
+        }
+        let manual = UsoCorreoGmail { _ in preconditionFailure("un código sin origen Gmail no mueve correo") }
+        manual.registrarEntrega(nil)
+        manual.confirmarProceso()
+        precondition(manual.consultaPendiente == nil)
+        manual.confirmarTunel(consulta: consultaVigente)
+        let otro = UsoCorreoGmail { movidos.append($0) }
+        otro.registrarEntrega(MensajeCodigoGmail(id: "def456", sesion: mensaje.sesion))
+        otro.confirmarProceso()
+        otro.confirmarTunel(consulta: consultaVigente)
+        precondition(movidos.count == 2, "una consulta de otra VPN o intento no confirma este uso")
+        let consultaAntesDeReemplazar = otro.consultaPendiente
+        otro.registrarEntrega(mensaje)
+        otro.confirmarTunel(consulta: consultaAntesDeReemplazar)
+        precondition(movidos.count == 2, "una entrega distinta invalida la consulta anterior")
+        otro.confirmarTunel(consulta: otro.consultaPendiente)
+        precondition(movidos == [mensaje, mensaje, mensaje])
+
+        var ahora = ContinuousClock.now
+        let vencido = UsoCorreoGmail(ahora: { ahora }) { _ in
+            preconditionFailure("un uso vencido no puede mover el correo")
+        }
+        vencido.registrarEntrega(mensaje)
+        vencido.confirmarProceso()
+        let consultaAntesDeVencer = vencido.consultaPendiente
+        ahora = ahora.advanced(by: .seconds(29))
+        precondition(vencido.consultaPendiente != nil)
+        vencido.confirmarProceso() // Una respuesta duplicada no renueva el plazo.
+        ahora = ahora.advanced(by: .seconds(1))
+        vencido.confirmarTunel(consulta: consultaAntesDeVencer)
+        precondition(vencido.consultaPendiente == nil)
+        vencido.registrarEntrega(mensaje)
+        vencido.confirmarProceso()
+        precondition(vencido.consultaPendiente == nil, "el vencimiento es definitivo para ese intento")
+    }
+
+    private static func comprobarPapeleraHTTP() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [ProtocoloPapeleraSimulado.self]
+        let sesion = URLSession(configuration: config)
+        defer { sesion.invalidateAndCancel() }
+        try await PapeleraGmail.mover("abc123", token: "ficticio", sesion: sesion)
+        for (id, esperado) in [("permiso", ProblemaGmail.sinPermiso), ("caducado", .sesionCaducada),
+                               ("limite", .limite), ("servidor", .servidor(503)),
+                               ("sinconfirmar", .servidor(0)), ("otromensaje", .servidor(0))] {
+            do {
+                try await PapeleraGmail.mover(id, token: "ficticio", sesion: sesion)
+                preconditionFailure("debía rechazar \(id)")
+            } catch let problema as ProblemaGmail { precondition(problema == esperado) }
+        }
+        do {
+            try await PapeleraGmail.mover("../threads/otro", token: "ficticio", sesion: sesion)
+            preconditionFailure("no debe permitir cambiar el recurso")
+        } catch let problema as ProblemaGmail { precondition(problema == .servidor(0)) }
+    }
+}
+
+private final class ProtocoloPapeleraSimulado: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        precondition(request.httpMethod == "POST" && request.httpBody == nil)
+        precondition(request.value(forHTTPHeaderField: "Authorization") == "Bearer ficticio")
+        precondition(request.url?.host == "gmail.googleapis.com")
+        let path = request.url!.path
+        precondition(path.hasPrefix("/gmail/v1/users/me/messages/") && path.hasSuffix("/trash"))
+        let id = path.split(separator: "/").dropLast().last!
+        let estado: Int
+        let cuerpo: String
+        switch id {
+        case "permiso": estado = 403; cuerpo = #"{"error":{"errors":[{"reason":"insufficientPermissions"}]}}"#
+        case "caducado": estado = 401; cuerpo = "{}"
+        case "limite": estado = 429; cuerpo = "{}"
+        case "servidor": estado = 503; cuerpo = "{}"
+        case "sinconfirmar": estado = 200; cuerpo = #"{"id":"sinconfirmar","labelIds":["INBOX"]}"#
+        case "otromensaje": estado = 200; cuerpo = #"{"id":"equivocado","labelIds":["TRASH"]}"#
+        default: estado = 200; cuerpo = #"{"id":"abc123","labelIds":["TRASH"]}"#
+        }
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: estado,
+            httpVersion: "HTTP/1.1", headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(cuerpo.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
 }

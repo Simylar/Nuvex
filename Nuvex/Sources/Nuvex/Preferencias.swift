@@ -58,6 +58,8 @@ struct AjustesApp: Equatable {
     var autorizacionRevocada = false
 
     var correo: [String: ConfigCorreo] = [:]
+    /// Solo los mensajes cuyos códigos completaron una conexión confirmada.
+    var enviarCorreoPapelera = false
     /// Una instalación nueva exige confirmación explícita. Quien ya eligió
     /// «Conectar sin preguntar» conserva ese valor al actualizar.
     var politicaAsistentes: PoliticaAsistentes = .preguntar
@@ -95,11 +97,13 @@ extension AjustesApp: Codable {
     private enum Claves: String, CodingKey {
         case version, correo, politicaAsistentes, bloqueadasParaAsistentes, avisarAccionesAsistentes
         case capacidadesAutorizadas, autorizacionRevocada
+        case enviarCorreoPapelera
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Claves.self)
         correo = try c.decodeIfPresent([String: ConfigCorreo].self, forKey: .correo) ?? [:]
+        enviarCorreoPapelera = try c.decodeIfPresent(Bool.self, forKey: .enviarCorreoPapelera) ?? false
         politicaAsistentes = (try? c.decodeIfPresent(PoliticaAsistentes.self, forKey: .politicaAsistentes)) ?? .preguntar
         bloqueadasParaAsistentes = try c.decodeIfPresent(Set<String>.self, forKey: .bloqueadasParaAsistentes) ?? []
         avisarAccionesAsistentes = try c.decodeIfPresent(Bool.self, forKey: .avisarAccionesAsistentes) ?? false
@@ -111,6 +115,7 @@ extension AjustesApp: Codable {
         var c = encoder.container(keyedBy: Claves.self)
         try c.encode(AjustesApp.versionActual, forKey: .version)
         try c.encode(correo, forKey: .correo)
+        try c.encode(enviarCorreoPapelera, forKey: .enviarCorreoPapelera)
         try c.encode(politicaAsistentes, forKey: .politicaAsistentes)
         try c.encode(bloqueadasParaAsistentes.sorted(), forKey: .bloqueadasParaAsistentes)
         try c.encode(avisarAccionesAsistentes, forKey: .avisarAccionesAsistentes)

@@ -14,7 +14,7 @@ macOS.
 | `nuvexctl.sh` y configurador | Lista, conecta, detiene y aplica perfiles | Acciones acotadas; nunca guarda la contraseña |
 | Ayudante de red | Ejecuta el motor y operaciones de red necesarias | Instalado como root; valida perfiles, hashes y acciones |
 | `openfortivpn` | Túnel Fortinet SSL VPN | Recibe contraseña y OTP por tubería privada |
-| Gmail API | Encuentra el OTP | OAuth `gmail.readonly`; cliente del propio usuario |
+| Gmail API | Encuentra el OTP y puede mover el correo usado a la papelera | OAuth `gmail.readonly` por defecto, `gmail.modify` opcional; cliente del propio usuario |
 
 La interfaz no llama directamente a operaciones privilegiadas. El ayudante no
 expone una API general y el socket de automatización no acepta binarios
@@ -42,6 +42,23 @@ en vez de transformarse silenciosamente en otro código.
 
 ### Lector de Gmail
 
+- `enviarCorreoPapelera` vive en `ajustes.json`, desactivado de serie y sin
+  ampliar el alcance de sesiones existentes. `CuentaGoogle` guarda los scopes
+  concedidos en el Llavero; su ausencia en datos antiguos equivale a solo lectura.
+  La solicitud de modificación requiere una decisión explícita desde Ajustes.
+- `EntregaCodigo` conserva el origen solo cuando se envía el código encontrado.
+  `UsoCorreoGmail` pertenece a un intento. Tras la entrega y el éxito del proceso,
+  habilita una consulta nueva del túnel, identificada por la revisión de esa
+  entrega. Cancelar, fallar o agotar la confirmación invalida el uso. Las consultas
+  anteriores a esos requisitos, de otro intento o de una entrega reemplazada no
+  autorizan mover el correo aunque sus respuestas lleguen después.
+- Un estado desconectado o un perfil ausente en una consulta vigente cancela el
+  uso pendiente. El propio uso impone un plazo de 30 segundos con reloj continuo
+  después del éxito del proceso, aunque el estado público ya estuviera conectado.
+- Después de confirmar, `CuentaGoogle` vuelve a comprobar la opción y la sesión
+  antes de `POST messages/{id}/trash`. Cambiar de cuenta o sesión invalida la
+  referencia. No hay borrado definitivo, cola persistente ni reintentos de
+  traslado. Un fallo se muestra en Cuenta de Google sin cambiar el estado VPN.
 - La preparación diferencia lector no configurado de cuenta ausente, Llavero
   inaccesible, sesión caducada, inicio OAuth pendiente y remitente vacío. La
   ventana muestra el problema desde la primera solicitud, ofrece la acción
@@ -186,6 +203,8 @@ Llavero. Si falla la escritura o el borrado, conserva el estado anterior y
 explica el fallo, evitando que una sesión aparentemente cerrada reaparezca al
 reiniciar. Si se cierra localmente pero Google no confirma la revocación remota,
 lo indica y remite al panel de la cuenta; no oculta el fallo de red.
+Cerrar sesión retira el token de renovación, el correo y los scopes de esa
+sesión. El cliente se conserva; olvidar la cuenta retira también el cliente.
 Los intentos de inicio OAuth tienen identidad propia y se cancelan al cambiar
 de cliente. Sus respuestas y errores tardíos no pueden reemplazar ni cancelar
 un inicio posterior. Lo mismo se aplica a errores de renovación: un

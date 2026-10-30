@@ -1,7 +1,8 @@
 import Foundation
 
 /// Lee de Gmail el código de verificación que envía el servidor VPN. Solo
-/// lectura: no marca, mueve ni borra correos. Nunca registra el código ni el
+/// lectura: no marca, mueve ni borra correos. El traslado opcional ocurre tras
+/// confirmar el uso del código y el túnel. Nunca registra el código ni el
 /// contenido del correo.
 enum LectorGmail {
     struct Hallazgo: Equatable {
@@ -68,6 +69,7 @@ enum LectorGmail {
         while Date() < limite, !Task.isCancelled {
             var pausa = SoporteGmail.pausaSinCorreo(segundosTranscurridos: Date().timeIntervalSince(comienzo))
             do {
+                let sesion = await CuentaGoogle.shared.idSesion
                 let token = try await CuentaGoogle.shared.tokenAcceso()
                 let excluir = await MainActor.run { usados }
                 let usarFallback = Date() >= siguienteFallback
@@ -98,10 +100,19 @@ enum LectorGmail {
                     // La selección y la reserva son una sola operación en el
                     // actor principal: dos VPN simultáneas no pueden consumir
                     // el mismo correo aunque lo hayan leído a la vez.
-                    let reservado = await MainActor.run { usados.insert(hallazgo.id).inserted }
+                    let reservado = await MainActor.run {
+                        !Task.isCancelled && CuentaGoogle.shared.idSesion == sesion
+                            && usados.insert(hallazgo.id).inserted
+                    }
                     guard reservado else { continue }
                     Log.escribir("gmail op=\(operacion) estado=codigo_encontrado segundos=\(Int(Date().timeIntervalSince(comienzo)))")
-                    return .codigo(CodigoRecibido(codigo: hallazgo.codigo, remitente: hallazgo.remitente))
+                    let mensaje = await MainActor.run {
+                        Preferencias.shared.soloLectura == nil && Preferencias.shared.ajustes.enviarCorreoPapelera
+                            && CuentaGoogle.shared.idSesion == sesion && CuentaGoogle.shared.puedeModificarCorreo
+                            ? MensajeCodigoGmail(id: hallazgo.id, sesion: sesion) : nil
+                    }
+                    return .codigo(CodigoRecibido(codigo: hallazgo.codigo, remitente: hallazgo.remitente,
+                                                  mensaje: mensaje))
                 }
             } catch {
                 if Task.isCancelled { return .sinCorreo }

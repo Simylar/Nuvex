@@ -22,7 +22,7 @@ enum ErrorGoogle: LocalizedError, Equatable {
     }
 }
 
-/// Cuenta de Google con permiso de solo lectura de Gmail, para leer los
+/// Cuenta de Google con lectura de Gmail y modificación opcional, para leer los
 /// códigos de verificación. Usa el cliente OAuth «App de escritorio» del
 /// propio usuario (docs/gmail.md). El token de renovación y el secreto del
 /// cliente se guardan en el Llavero; el token de acceso solo vive en memoria.
@@ -35,7 +35,21 @@ final class CuentaGoogle: ObservableObject {
         }
         return CuentaGoogle()
     }()
-    static let permisos = "openid email https://www.googleapis.com/auth/gmail.readonly"
+    static let permisoLeer = "https://www.googleapis.com/auth/gmail.readonly"
+    static let permisos = "openid email \(permisoLeer)"
+    static let permisoModificar = "https://www.googleapis.com/auth/gmail.modify"
+
+    static func permisosOAuth(modificar: Bool) -> String {
+        modificar ? "openid email \(permisoModificar)" : permisos
+    }
+
+    static func permisosConcedidos(_ respuesta: String?, solicitados: String) throws -> Set<String> {
+        let concedidos = Set((respuesta ?? solicitados).split(separator: " ").map(String.init))
+        guard concedidos.contains(permisoLeer) || concedidos.contains(permisoModificar) else {
+            throw ErrorGoogle.respuesta("Google no concedió acceso para leer Gmail. Vuelve a iniciar sesión y permite la lectura de códigos. La sesión anterior se conserva si estaba guardada.")
+        }
+        return concedidos
+    }
 
     enum Estado: Equatable {
         case sinCliente
@@ -48,12 +62,17 @@ final class CuentaGoogle: ObservableObject {
 
     @Published private(set) var estado: Estado = .sinCliente
     @Published private(set) var error: String?
+    @Published private(set) var avisoPapelera: String?
+    @Published private var permisoPapeleraRechazado = false
+    private(set) var idSesion = UUID()
 
     private struct Guardado: Codable, Equatable {
         var clienteID: String
         var secreto: String
         var tokenRenovacion: String?
         var correo: String?
+        /// Ausente en cuentas antiguas: se conserva el alcance de solo lectura.
+        var permisos: Set<String>?
     }
 
     private var guardado: Guardado?
@@ -114,9 +133,30 @@ final class CuentaGoogle: ObservableObject {
     }
 
     var clienteID: String? { guardado?.clienteID }
+    var puedeModificarCorreo: Bool {
+        correo != nil && !permisoPapeleraRechazado
+            && guardado?.permisos?.contains(Self.permisoModificar) == true
+    }
     var correo: String? {
         if case .conectada(let correo) = estado { return correo }
         return nil
+    }
+
+    var mensajePapeleraPendiente: String {
+        switch estado {
+        case .sinCliente:
+            return "Prepara la cuenta de Google para autorizar el traslado. Mientras tanto, Nuvex conservará los correos."
+        case .llaveroNoDisponible:
+            return "Recupera el acceso al Llavero para comprobar la cuenta. Mientras tanto, Nuvex conservará los correos."
+        case .desconectada:
+            return "Inicia sesión con Google para autorizar el traslado. Mientras tanto, Nuvex conservará los correos."
+        case .esperandoNavegador:
+            return "Completa el inicio de sesión en el navegador. Mientras tanto, Nuvex conservará los correos."
+        case .caducada:
+            return "La sesión de Google caducó. Vuelve a iniciar sesión; mientras tanto, Nuvex conservará los correos."
+        case .conectada:
+            return "Falta autorizar el traslado en Google. Mientras tanto, Nuvex conservará los correos."
+        }
     }
 
     var problemaParaLeerCorreo: ProblemaGmail? {
@@ -165,6 +205,7 @@ final class CuentaGoogle: ObservableObject {
         var esperado = guardado
         esperado?.tokenRenovacion = nil
         esperado?.correo = nil
+        esperado?.permisos = nil
         guard await cerrarSesion() else { return }
         guard guardado == esperado, idInicio == nil else {
             error = "La cuenta cambió mientras se cerraba la sesión. Revisa la cuenta actual antes de olvidarla."
@@ -180,13 +221,14 @@ final class CuentaGoogle: ObservableObject {
 
     // MARK: Sesión
 
-    func iniciarSesion() {
+    func iniciarSesion(modificarCorreo: Bool = false) {
         guard let guardado else { error = ErrorGoogle.sinCliente.localizedDescription; return }
         cancelarInicio()
         let id = UUID()
         idInicio = id
         let pedirTokens = self.pedirTokens
         let abrirNavegador = self.abrirNavegador
+        let permisosSolicitados = Self.permisosOAuth(modificar: modificarCorreo)
         error = nil
         estado = .esperandoNavegador
         inicio = Task { [weak self] in
@@ -201,7 +243,7 @@ final class CuentaGoogle: ObservableObject {
                     URLQueryItem(name: "client_id", value: guardado.clienteID),
                     URLQueryItem(name: "redirect_uri", value: servidor.direccion),
                     URLQueryItem(name: "response_type", value: "code"),
-                    URLQueryItem(name: "scope", value: Self.permisos),
+                    URLQueryItem(name: "scope", value: permisosSolicitados),
                     URLQueryItem(name: "code_challenge", value: ExtractorCodigo.desafioPKCE(verificador)),
                     URLQueryItem(name: "code_challenge_method", value: "S256"),
                     URLQueryItem(name: "state", value: estadoOAuth),
@@ -229,7 +271,8 @@ final class CuentaGoogle: ObservableObject {
                     throw ErrorGoogle.respuesta("Google no entregó un token de renovación. Quita el acceso de Nuvex en tu cuenta de Google y vuelve a intentarlo.")
                 }
                 let correo = (tokens["id_token"] as? String).flatMap(ExtractorCodigo.correoDeIDToken) ?? "tu cuenta"
-                self?.completarInicio(renovacion: renovacion, correo: correo, tokens: tokens)
+                self?.completarInicio(renovacion: renovacion, correo: correo, tokens: tokens,
+                                     permisosSolicitados: permisosSolicitados)
             } catch {
                 guard self?.idInicio == id else { return }
                 self?.fallarInicio(error)
@@ -246,10 +289,19 @@ final class CuentaGoogle: ObservableObject {
         if estado == .esperandoNavegador { recalcular() }
     }
 
-    private func completarInicio(renovacion: String, correo: String, tokens: [String: Any]) {
+    private func completarInicio(renovacion: String, correo: String, tokens: [String: Any],
+                                permisosSolicitados: String) {
         guard var guardado else { return }
         guardado.tokenRenovacion = renovacion
         guardado.correo = correo
+        // OAuth permite omitir scope si coincide con lo solicitado. Si Google
+        // devuelve una concesión parcial, se respeta exclusivamente esa lista.
+        do {
+            guardado.permisos = try Self.permisosConcedidos(tokens["scope"] as? String, solicitados: permisosSolicitados)
+        } catch {
+            fallarInicio(error)
+            return
+        }
         guard escribirLlavero(guardado) else {
             fallarInicio(ErrorGoogle.respuesta("No se pudo guardar la sesión en el Llavero."))
             return
@@ -294,6 +346,7 @@ final class CuentaGoogle: ObservableObject {
         invalidarRenovacion()
         nuevo.tokenRenovacion = nil
         nuevo.correo = nil
+        nuevo.permisos = nil
         guard escribirLlavero(nuevo) else {
             error = "No se pudo cerrar la sesión guardada en el Llavero. Se conserva la cuenta; recupera el acceso y reintenta."
             return false
@@ -381,7 +434,40 @@ final class CuentaGoogle: ObservableObject {
         renovacionEnCurso?.tarea.cancel()
         renovacionEnCurso = nil
         acceso = nil
+        idSesion = UUID()
+        avisoPapelera = nil
+        permisoPapeleraRechazado = false
     }
+
+    /// Operación secundaria: nunca cambia el resultado de la conexión VPN ni
+    /// abre OAuth. La referencia impide usar un ID en otra cuenta o sesión.
+    func moverCorreoUsado(_ mensaje: MensajeCodigoGmail,
+                         preferencias: Preferencias? = nil,
+                         mover: (String, String) async throws -> Void = PapeleraGmail.mover) async {
+        let preferencias = preferencias ?? .shared
+        guard mensaje.sesion == idSesion, preferencias.soloLectura == nil,
+              preferencias.ajustes.enviarCorreoPapelera, puedeModificarCorreo else { return }
+        do {
+            let token = try await tokenAcceso()
+            guard mensaje.sesion == idSesion, preferencias.soloLectura == nil,
+                  preferencias.ajustes.enviarCorreoPapelera, puedeModificarCorreo else { return }
+            try await mover(mensaje.id, token)
+            guard mensaje.sesion == idSesion else { return }
+            Log.escribir("gmail estado=correo_en_papelera")
+        } catch {
+            guard mensaje.sesion == idSesion else { return }
+            if let problema = error as? ProblemaGmail, problema == .sesionCaducada { invalidarAcceso() }
+            if let problema = error as? ProblemaGmail, problema == .sinPermiso {
+                permisoPapeleraRechazado = true
+                avisoPapelera = "Falta permiso para mover el correo utilizado. Autoriza la papelera en Cuenta de Google."
+            } else {
+                avisoPapelera = "Gmail no confirmó el traslado de un correo utilizado. Revisa el mensaje en Gmail y muévelo a la papelera si sigue allí."
+            }
+            Log.escribir("gmail estado=papelera_sin_confirmar")
+        }
+    }
+
+    func descartarAvisoPapelera() { avisoPapelera = nil }
 
     // MARK: Red
 

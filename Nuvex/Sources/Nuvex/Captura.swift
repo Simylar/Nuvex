@@ -118,6 +118,14 @@ enum Captura {
         borradores.seleccion = .cuentaGoogle
         guardar(ConfigurationView(modelo: modelo, borradores: borradores).frame(width: 820, height: 640),
                 nombre: "ajustes-cuenta-google-claro", en: carpeta, oscuro: false)
+        for oscuro in [false, true] {
+            for (ancho, alto) in [(CGFloat(780), CGFloat(580)), (CGFloat(1180), CGFloat(820))] {
+                guardar(ConfigurationView(modelo: modelo, borradores: borradores).frame(width: ancho, height: alto),
+                        nombre: "ajustes-cuenta-google-\(Int(ancho))-\(oscuro ? "oscuro" : "claro")",
+                        en: carpeta, oscuro: oscuro)
+            }
+        }
+        capturarPapelera(en: carpeta)
         borradores.seleccion = .ayudante
         guardar(ConfigurationView(modelo: modelo, borradores: borradores).frame(width: 820, height: 640),
                 nombre: "ajustes-ayudante-claro", en: carpeta, oscuro: false)
@@ -211,6 +219,50 @@ enum Captura {
             guardar(HojaIconos(), nombre: "iconos-barra-\(oscuro ? "oscuro" : "claro")", en: carpeta, oscuro: oscuro)
             guardar(GuiaEstiloView(desplazable: false), nombre: "guia-estilo-\(oscuro ? "oscuro" : "claro")",
                     en: carpeta, oscuro: oscuro)
+        }
+    }
+
+    private static func capturarPapelera(en carpeta: String) {
+        let temporal = FileManager.default.temporaryDirectory.appendingPathComponent("nuvex-papelera-muestra-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: temporal) }
+        let preferencias = Preferencias(url: temporal.appendingPathComponent("ajustes.json"))
+        let datos = Data(#"{"clienteID":"muestra.apps.googleusercontent.com","secreto":"ficticio","tokenRenovacion":"ficticio","correo":"persona@example.com","permisos":["https://www.googleapis.com/auth/gmail.modify"]}"#.utf8)
+        let cuenta = CuentaGoogle(lectorLlavero: { _ in (datos, 0) },
+            escritorLlavero: { _ in false }, borradorLlavero: { false },
+            pedirTokens: { _ in throw ErrorGoogle.respuesta("invalid_grant") })
+        for activar in [false, true] {
+            preferencias.modificar { $0.enviarCorreoPapelera = activar }
+            for oscuro in [false, true] {
+                for (ancho, alto) in [(CGFloat(540), CGFloat(580)), (CGFloat(880), CGFloat(820))] {
+                    guardar(AjustesCuentaGoogle(cuenta: cuenta, preferencias: preferencias)
+                        .frame(width: ancho, height: alto),
+                        nombre: "google-papelera-\(activar ? "activa" : "inactiva")-\(Int(ancho))-\(oscuro ? "oscuro" : "claro")",
+                        en: carpeta, oscuro: oscuro)
+                }
+            }
+        }
+        let soloLectura = CuentaGoogle(lectorLlavero: { _ in
+            (Data(#"{"clienteID":"muestra.apps.googleusercontent.com","secreto":"ficticio","tokenRenovacion":"ficticio","correo":"persona@example.com"}"#.utf8), 0)
+        }, escritorLlavero: { _ in false }, borradorLlavero: { false })
+        for oscuro in [false, true] {
+            guardar(AjustesCuentaGoogle(cuenta: soloLectura, preferencias: preferencias)
+                .frame(width: 540, height: 580),
+                nombre: "google-papelera-permiso-pendiente-\(oscuro ? "oscuro" : "claro")", en: carpeta, oscuro: oscuro)
+        }
+        var caducidadComprobada = false
+        Task {
+            _ = try? await cuenta.tokenAcceso() // Renovación ficticia: no contacta Google.
+            caducidadComprobada = true
+        }
+        let limite = Date().addingTimeInterval(5)
+        while !caducidadComprobada && Date() < limite {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
+        precondition(caducidadComprobada)
+        for oscuro in [false, true] {
+            guardar(AjustesCuentaGoogle(cuenta: cuenta, preferencias: preferencias)
+                .frame(width: 540, height: 580),
+                nombre: "google-papelera-sesion-caducada-\(oscuro ? "oscuro" : "claro")", en: carpeta, oscuro: oscuro)
         }
     }
 

@@ -5,15 +5,23 @@ import UniformTypeIdentifiers
 // MARK: - Página «Cuenta de Google»
 
 struct AjustesCuentaGoogle: View {
-    @ObservedObject private var cuenta = CuentaGoogle.shared
+    @ObservedObject private var cuenta: CuentaGoogle
+    @ObservedObject private var preferencias: Preferencias
     @State private var clienteID = ""
     @State private var secreto = ""
     @State private var cambiandoCliente = false
     @State private var confirmarOlvido = false
     @State private var errorImportacion: String?
     @State private var clientePendiente: (id: String, secreto: String)?
+    @State private var confirmarPapelera = false
+    @State private var errorPreferencia: String?
 
     static let guia = URL(string: "https://github.com/Simylar/Nuvex/blob/main/docs/gmail.md")!
+
+    init(cuenta: CuentaGoogle? = nil, preferencias: Preferencias? = nil) {
+        self.cuenta = cuenta ?? .shared
+        self.preferencias = preferencias ?? .shared
+    }
 
     var body: some View {
         Form {
@@ -34,7 +42,7 @@ struct AjustesCuentaGoogle: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             } footer: {
-                Text("Nuvex solo pide permiso para leer Gmail: no puede enviar, mover ni borrar correos. Busca únicamente los correos del remitente que indiques en cada conexión, recibidos después de empezar a conectar.")
+                Text("Nuvex busca los correos del remitente que indiques en cada conexión, recibidos después de empezar a conectar. Por defecto solo solicita lectura. Mover los correos usados a la papelera requiere tu autorización adicional.")
                     .foregroundStyle(Paleta.textoSecundario)
             }
 
@@ -85,9 +93,51 @@ struct AjustesCuentaGoogle: View {
                     }
                 }
             }
+
+            Section {
+                Toggle("Enviar el correo a la papelera después de usar el código", isOn: Binding(
+                    get: { preferencias.ajustes.enviarCorreoPapelera },
+                    set: { activar in
+                        if activar && !cuenta.puedeModificarCorreo { confirmarPapelera = true }
+                        else { guardarPapelera(activar) }
+                    }))
+                    .disabled(preferencias.soloLectura != nil || cuenta.estado == .esperandoNavegador)
+                if preferencias.ajustes.enviarCorreoPapelera && !cuenta.puedeModificarCorreo {
+                    Text(cuenta.mensajePapeleraPendiente)
+                        .foregroundStyle(Paleta.textoSecundario)
+                    if cuenta.clienteID != nil && cuenta.correo != nil {
+                        Button("Autorizar la papelera…") { confirmarPapelera = true }
+                    }
+                }
+                if let aviso = cuenta.avisoPapelera {
+                    Label(aviso, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(Paleta.avisoTexto)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Ocultar aviso") { cuenta.descartarAvisoPapelera() }
+                        .buttonStyle(.link)
+                }
+                if let error = errorPreferencia ?? preferencias.soloLectura {
+                    Text(error).foregroundStyle(Paleta.errorTexto)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } header: {
+                Text("Correos con códigos")
+            } footer: {
+                Text("Se aplica a todas las conexiones que leen de Gmail, solo tras confirmar la VPN. Probar la lectura no mueve correos. Puedes recuperarlos desde la papelera de Gmail. Desactivar esta opción no revoca el permiso ya concedido en Google.")
+                    .foregroundStyle(Paleta.textoSecundario)
+            }
         }
         .formularioNuvex()
         .navigationTitle("Cuenta de Google")
+        .confirmationDialog("¿Permitir mover los correos usados a la papelera?", isPresented: $confirmarPapelera) {
+            Button(cuenta.clienteID == nil ? "Activar" : "Activar y autorizar en Google…") {
+                guard guardarPapelera(true) else { return }
+                if case .llaveroNoDisponible = cuenta.estado { return }
+                if cuenta.clienteID != nil { cuenta.iniciarSesion(modificarCorreo: true) }
+            }
+        } message: {
+            Text("Google requiere un permiso que también permite modificar y enviar correo. Nuvex lo usará solo para leer códigos y enviar a la papelera el mensaje utilizado tras confirmar la VPN. No borrará mensajes definitivamente. Si cancelas Google, la opción quedará pendiente de autorización.")
+        }
         .confirmationDialog("¿Olvidar la cuenta de Google?", isPresented: $confirmarOlvido) {
             Button("Olvidar", role: .destructive) { Task { await cuenta.olvidarCliente() } }
         } message: {
@@ -104,6 +154,13 @@ struct AjustesCuentaGoogle: View {
             Text("Tendrás que volver a iniciar sesión en Google para leer códigos. Tus conexiones VPN se conservan.")
         }
         .onDisappear { secreto = ""; clientePendiente = nil }
+    }
+
+    @discardableResult
+    private func guardarPapelera(_ activar: Bool) -> Bool {
+        let guardado = preferencias.modificar { $0.enviarCorreoPapelera = activar }
+        errorPreferencia = guardado ? nil : "No se pudo guardar la opción. Revisa el acceso a los ajustes y vuelve a intentarlo."
+        return guardado
     }
 
     private func proponerCliente(id: String, secreto: String) {
@@ -169,7 +226,9 @@ struct AjustesCuentaGoogle: View {
             Button("Recuperar acceso…") { cuenta.recuperarDelLlavero() }
                 .estiloBoton(.principal)
         case .desconectada, .caducada:
-            Button("Iniciar sesión con Google") { cuenta.iniciarSesion() }
+            Button("Iniciar sesión con Google") {
+                cuenta.iniciarSesion(modificarCorreo: preferencias.ajustes.enviarCorreoPapelera)
+            }
                 .estiloBoton(.principal)
         case .esperandoNavegador:
             HStack(spacing: Espacio.m) {

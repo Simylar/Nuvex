@@ -172,6 +172,8 @@ struct SecurityPreferencesChecks {
         precondition(cierreLocal && respetaInicio, "el aviso de una revocación obsoleta no debe publicarse durante el inicio nuevo")
         try await comprobarOperacionGlobal()
         try await comprobarRespuestasGoogle()
+        try await comprobarCorreoUsado()
+        try await comprobarCierrePermisosCorreo()
         if ProcessInfo.processInfo.environment["NUVEX_VALIDAR_LLAVERO"] == "1" {
             let resultado = AccesoLlavero.comprobar(servicio: "nuvex.prueba.\(UUID().uuidString)", cuenta: "inexistente")
             precondition(resultado == .ausente, "la consulta real sin diálogos debe distinguir una entrada inexistente: \(resultado)")
@@ -275,5 +277,128 @@ struct SecurityPreferencesChecks {
         for _ in 0..<20 { await Task.yield() }
         precondition(navegadores == 0 && cuenta.estado == .desconectada && cuenta.error == nil,
                      "cambiar de cliente cancela el inicio anterior antes de abrir navegador o sobrescribir el estado")
+    }
+
+    @MainActor
+    private static func comprobarCorreoUsado() async throws {
+        let carpeta = FileManager.default.temporaryDirectory.appendingPathComponent("nuvex-papelera-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: carpeta) }
+        let preferencias = Preferencias(url: carpeta.appendingPathComponent("ajustes.json"))
+        func datos(modificar: Bool) -> Data {
+            let permisos = modificar ? #", "permisos":["https://www.googleapis.com/auth/gmail.modify"]"# : ""
+            return Data((#"{"clienteID":"prueba.apps.googleusercontent.com","secreto":"ficticio","tokenRenovacion":"ficticio","correo":"cuenta@example.invalid""#
+                + permisos + "}").utf8)
+        }
+        var renovaciones = 0
+        var traslados = 0
+        let antigua = CuentaGoogle(lectorLlavero: { _ in (datos(modificar: false), errSecSuccess) },
+            pedirTokens: { _ in preconditionFailure("no debe renovar sin permiso") })
+        precondition(!antigua.puedeModificarCorreo)
+        precondition(preferencias.modificar { $0.enviarCorreoPapelera = true })
+        await antigua.moverCorreoUsado(.init(id: "abc123", sesion: antigua.idSesion), preferencias: preferencias,
+            mover: { _, _ in preconditionFailure("una sesión anterior conserva solo lectura") })
+
+        let cuenta = CuentaGoogle(lectorLlavero: { _ in (datos(modificar: true), errSecSuccess) },
+            pedirTokens: { _ in renovaciones += 1; return ["access_token": "ficticio", "expires_in": 3600] })
+        precondition(cuenta.puedeModificarCorreo)
+        precondition(antigua.mensajePapeleraPendiente.contains("Falta autorizar"))
+        let mensaje = MensajeCodigoGmail(id: "abc123", sesion: cuenta.idSesion)
+        precondition(preferencias.modificar { $0.enviarCorreoPapelera = false })
+        await cuenta.moverCorreoUsado(mensaje, preferencias: preferencias,
+            mover: { _, _ in preconditionFailure("desactivado no toca Gmail") })
+        precondition(renovaciones == 0)
+        precondition(preferencias.modificar { $0.enviarCorreoPapelera = true })
+        await cuenta.moverCorreoUsado(mensaje, preferencias: preferencias, mover: { id, token in
+            precondition(id == "abc123" && token == "ficticio")
+            traslados += 1
+        })
+        precondition(renovaciones == 1 && traslados == 1 && cuenta.avisoPapelera == nil)
+        await cuenta.moverCorreoUsado(mensaje, preferencias: preferencias, mover: { _, _ in
+            throw URLError(.notConnectedToInternet)
+        })
+        precondition(cuenta.avisoPapelera != nil && cuenta.correo != nil, "un fallo secundario no cierra la sesión")
+        await cuenta.moverCorreoUsado(mensaje, preferencias: preferencias, mover: { _, _ in })
+        precondition(cuenta.avisoPapelera != nil, "un éxito posterior no oculta un traslado anterior sin confirmar")
+        cuenta.descartarAvisoPapelera()
+        precondition(cuenta.avisoPapelera == nil)
+        await cuenta.moverCorreoUsado(mensaje, preferencias: preferencias, mover: { _, _ in throw ProblemaGmail.sinPermiso })
+        precondition(!cuenta.puedeModificarCorreo && cuenta.avisoPapelera != nil && cuenta.problemaParaLeerCorreo == nil)
+
+        let renovacion = RenovacionSimulada()
+        let concurrente = CuentaGoogle(lectorLlavero: { _ in (datos(modificar: true), errSecSuccess) },
+            pedirTokens: { _ in try await renovacion.pedir() })
+        let pendiente = Task {
+            await concurrente.moverCorreoUsado(.init(id: "abc123", sesion: concurrente.idSesion), preferencias: preferencias,
+                mover: { _, _ in preconditionFailure("desactivar durante la renovación impide el traslado") })
+        }
+        while renovacion.llamadas == 0 { await Task.yield() }
+        precondition(preferencias.modificar { $0.enviarCorreoPapelera = false })
+        renovacion.resolver(.success(["access_token": "ficticio", "expires_in": 3600]))
+        await pendiente.value
+        precondition(preferencias.modificar { $0.enviarCorreoPapelera = true })
+        let anterior = MensajeCodigoGmail(id: "abc123", sesion: concurrente.idSesion)
+        concurrente.recuperarDelLlavero(interactivo: false)
+        await concurrente.moverCorreoUsado(anterior, preferencias: preferencias,
+            mover: { _, _ in preconditionFailure("otra sesión no puede usar el ID anterior") })
+        precondition(renovacion.llamadas == 1)
+
+        let tardia = Task {
+            await concurrente.moverCorreoUsado(.init(id: "abc123", sesion: concurrente.idSesion), preferencias: preferencias,
+                mover: { _, _ in preconditionFailure("un cambio de cuenta invalida una renovación pendiente") })
+        }
+        while renovacion.llamadas < 2 { await Task.yield() }
+        concurrente.recuperarDelLlavero(interactivo: false)
+        renovacion.resolver(.success(["access_token": "obsoleto", "expires_in": 3600]))
+        await tardia.value
+        precondition(concurrente.avisoPapelera == nil)
+
+        let soloLectura = CuentaGoogle.permisosOAuth(modificar: false)
+        let modificar = CuentaGoogle.permisosOAuth(modificar: true)
+        precondition(soloLectura == CuentaGoogle.permisos && !soloLectura.contains("gmail.modify"))
+        precondition(modificar.contains(CuentaGoogle.permisoModificar) && !modificar.contains("mail.google.com/"))
+        let completa = try CuentaGoogle.permisosConcedidos(nil, solicitados: modificar)
+        precondition(completa.contains(CuentaGoogle.permisoModificar), "scope omitido equivale al solicitado según OAuth")
+        let parcial = try CuentaGoogle.permisosConcedidos(soloLectura, solicitados: modificar)
+        precondition(!parcial.contains(CuentaGoogle.permisoModificar), "una concesión parcial nunca hereda la modificación solicitada")
+        do {
+            _ = try CuentaGoogle.permisosConcedidos("openid email", solicitados: modificar)
+            preconditionFailure("una concesión sin acceso a Gmail no debe reemplazar la sesión anterior")
+        } catch is ErrorGoogle {}
+    }
+
+    @MainActor
+    private static func comprobarCierrePermisosCorreo() async throws {
+        let original = Data(#"{"clienteID":"prueba.apps.googleusercontent.com","secreto":"ficticio","tokenRenovacion":"ficticio","correo":"cuenta@example.invalid","permisos":["https://www.googleapis.com/auth/gmail.modify"]}"#.utf8)
+        var persistido = original
+        var borrados = 0
+        let cuenta = CuentaGoogle(lectorLlavero: { _ in (persistido, errSecSuccess) },
+            escritorLlavero: { persistido = $0; return true },
+            borradorLlavero: { borrados += 1; return true }, revocarToken: { _ in nil })
+        let cerrada = await cuenta.cerrarSesion()
+        let contenido = try JSONSerialization.jsonObject(with: persistido) as! [String: Any]
+        precondition(cerrada && cuenta.estado == .desconectada && !cuenta.puedeModificarCorreo)
+        precondition(contenido["permisos"] == nil && contenido["tokenRenovacion"] == nil && contenido["correo"] == nil)
+        precondition(contenido["clienteID"] != nil && contenido["secreto"] != nil, "cerrar conserva el cliente")
+        cuenta.recuperarDelLlavero(interactivo: false)
+        precondition(cuenta.estado == .desconectada && !cuenta.puedeModificarCorreo)
+
+        persistido = original
+        cuenta.recuperarDelLlavero(interactivo: false)
+        await cuenta.olvidarCliente()
+        precondition(borrados == 1 && cuenta.estado == .sinCliente, "olvidar debe comparar también los permisos limpiados")
+
+        let denegada = CuentaGoogle(lectorLlavero: { _ in (original, errSecSuccess) },
+            escritorLlavero: { _ in false }, revocarToken: { _ in preconditionFailure("no revoca si no pudo cerrar localmente") })
+        let rechazo = await denegada.cerrarSesion()
+        precondition(!rechazo && denegada.correo != nil && denegada.puedeModificarCorreo,
+                     "un guardado fallido conserva la sesión y sus metadatos reales")
+
+        let caducada = CuentaGoogle(lectorLlavero: { _ in (original, errSecSuccess) },
+            pedirTokens: { _ in throw ErrorGoogle.respuesta("invalid_grant") })
+        do { _ = try await caducada.tokenAcceso(); preconditionFailure("se esperaba caducidad") }
+        catch ErrorGoogle.caducada {}
+        precondition(!caducada.puedeModificarCorreo && caducada.mensajePapeleraPendiente.contains("caducó")
+                     && caducada.mensajePapeleraPendiente.contains("iniciar sesión"))
+        precondition(!caducada.mensajePapeleraPendiente.contains("Falta autorizar"))
     }
 }

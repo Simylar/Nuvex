@@ -6,7 +6,8 @@ Nada de lo que configuras vive dentro de `Nuvex.app`. Por eso actualizar, reinst
 | --- | --- | --- |
 | Conexiones (servidor, usuario, opciones) | `~/.config/nuvex/profiles.json` | Sin contraseñas. Lo valida `nuvexconfig.py` y su huella forma parte del ayudante. |
 | Contraseñas VPN | Llavero de inicio de sesión, servicio `nuvex.<id>` | Etiqueta visible `Nuvex: <nombre de la VPN>`. Nunca en archivos ni en argumentos de procesos. |
-| Ajustes propios de la app | `~/Library/Application Support/Nuvex/ajustes.json` | Esquema 3: correo, política, exclusiones y recibo/revocación de capacidades internas. Carpeta 0700, archivo 0600. |
+| Ajustes propios de la app | `~/Library/Application Support/Nuvex/ajustes.json` | Esquema 3: correo, opción global `enviarCorreoPapelera` (false por defecto), política, exclusiones y recibo/revocación de capacidades internas. Carpeta 0700, archivo 0600. |
+| Cuenta de Google | Llavero, servicio `nuvex.google` | Cliente, sesión y permisos concedidos. Los tokens de acceso y las referencias de mensajes pendientes viven solo en memoria. |
 | Copias de seguridad | `~/Library/Application Support/Nuvex/Copias/` | Una antes de cada versión nueva; se conservan 10. Sin contraseñas. |
 | Versiones anteriores de la app | `~/Library/Application Support/Nuvex/Versiones/` | Archivos ZIP guardados por `scripts/instalar.sh`; se conservan 3. |
 | Preferencias de la interfaz | UserDefaults `local.gertcode.nuvex` | Avisos, intervalo, Touch ID, actualizaciones. |

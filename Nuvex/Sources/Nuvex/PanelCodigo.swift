@@ -6,6 +6,7 @@ struct CodigoRecibido: Equatable, Sendable {
     let codigo: String
     /// Quién lo envió, para mostrarlo ("noreply@empresa.com").
     let remitente: String
+    var mensaje: MensajeCodigoGmail? = nil
 }
 
 /// Pide el código de verificación de una conexión. Compiten varias fuentes y
@@ -47,14 +48,15 @@ final class SolicitudCodigo: ObservableObject, Identifiable {
     /// Código del correo a punto de enviarse; se puede detener.
     @Published private(set) var envioAutomatico: CodigoRecibido?
 
-    private var continuacion: CheckedContinuation<String?, Never>?
+    private var continuacion: CheckedContinuation<EntregaCodigo?, Never>?
+    private var codigoDelCorreo: CodigoRecibido?
     private var tareas: [Task<Void, Never>] = []
     private var lectura: Task<LectorGmail.Resultado, Never>?
     private var tareaLectura: Task<Void, Never>?
 
     /// Espera el código. Devuelve nil si se cancela o se agota el tiempo.
     static func obtener(perfilID: String, nombre: String, inicio: Date, limite: Duration = .seconds(280),
-                        alAgotarse: @escaping @MainActor () -> Void = {}) async -> String? {
+                        alAgotarse: @escaping @MainActor () -> Void = {}) async -> EntregaCodigo? {
         let solicitud = SolicitudCodigo(perfilID: perfilID, nombre: nombre, inicio: inicio)
         abiertas[perfilID] = solicitud
         NotificationCenter.default.post(name: .solicitudCodigoCambio, object: perfilID)
@@ -65,6 +67,17 @@ final class SolicitudCodigo: ObservableObject, Identifiable {
     }
 
     #if DEBUG
+    /// Ejercita las acciones reales con un código ficticio, sin ventana ni red.
+    static func obtenerDeMuestra(_ recibido: CodigoRecibido,
+                                 accion: (SolicitudCodigo) -> Void) async -> EntregaCodigo? {
+        let solicitud = SolicitudCodigo(perfilID: "verificacion-correo", nombre: "Muestra", inicio: Date())
+        return await withCheckedContinuation { continuacion in
+            solicitud.continuacion = continuacion
+            solicitud.usarDelCorreo(recibido)
+            accion(solicitud)
+        }
+    }
+
     /// Solicitud de ejemplo para las capturas: no abre ventanas ni espera.
     static func muestra(nombre: String, codigo: String = "", correo: EstadoCorreo, automatico: Bool = false) -> SolicitudCodigo {
         let solicitud = SolicitudCodigo(perfilID: "muestra", nombre: nombre, inicio: Date())
@@ -144,20 +157,23 @@ final class SolicitudCodigo: ObservableObject, Identifiable {
     func reintentarCorreo() {
         guard continuacion != nil else { return }
         envioAutomatico = nil
+        codigoDelCorreo = nil
         empezarLectura()
     }
 
     private func usarDelCorreo(_ recibido: CodigoRecibido) {
-        let recibido = CodigoRecibido(codigo: Self.limpiar(recibido.codigo), remitente: recibido.remitente)
+        let recibido = CodigoRecibido(codigo: Self.limpiar(recibido.codigo), remitente: recibido.remitente,
+                                      mensaje: recibido.mensaje)
         guard ExtractorCodigo.codigoValido(recibido.codigo) else { return }
         codigo = recibido.codigo
         estadoCorreo = .encontrado(remitente: recibido.remitente)
         envioAutomatico = recibido
+        codigoDelCorreo = recibido
         Log.escribir("código de \(perfilID) recibido por correo")
         tareas.append(Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(800))
             guard let self, !Task.isCancelled, self.envioAutomatico == recibido else { return }
-            self.resolver(recibido.codigo)
+            self.resolver(recibido.codigo, mensaje: recibido.mensaje)
         })
     }
 
@@ -166,7 +182,7 @@ final class SolicitudCodigo: ObservableObject, Identifiable {
     func enviar() {
         let limpio = Self.limpiar(codigo)
         guard ExtractorCodigo.codigoValido(limpio) else { return }
-        resolver(limpio)
+        resolver(limpio, mensaje: codigoDelCorreo?.codigo == limpio ? codigoDelCorreo?.mensaje : nil)
     }
 
     func cancelar() { resolver(nil) }
@@ -183,7 +199,7 @@ final class SolicitudCodigo: ObservableObject, Identifiable {
         return true
     }
 
-    private func resolver(_ resultado: String?) {
+    private func resolver(_ resultado: String?, mensaje: MensajeCodigoGmail? = nil) {
         guard let continuacion else { return }
         self.continuacion = nil
         tareas.forEach { $0.cancel() }
@@ -194,10 +210,11 @@ final class SolicitudCodigo: ObservableObject, Identifiable {
         tareaLectura = nil
         codigo = ""
         envioAutomatico = nil
+        codigoDelCorreo = nil
         if Self.abiertas[perfilID] === self { Self.abiertas[perfilID] = nil }
         NotificationCenter.default.post(name: .solicitudCodigoCambio, object: perfilID)
         VentanaCodigo.cerrar(self)
-        continuacion.resume(returning: resultado)
+        continuacion.resume(returning: resultado.map { EntregaCodigo(codigo: $0, mensaje: mensaje) })
     }
 
     /// Misma regla que el lector y la Terminal, sin alterar tokens alfanuméricos.

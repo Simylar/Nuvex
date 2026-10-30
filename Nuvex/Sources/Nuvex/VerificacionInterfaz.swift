@@ -16,6 +16,7 @@ enum VerificacionInterfaz {
                      "un intento recién guardado se muestra antes del siguiente sondeo")
         comprobarCancelacionDeRecuperacion(modelo)
         comprobarDesconexionConfirmada()
+        comprobarUsoCorreoEnModelo()
         let borrador = BorradorBienvenida()
         var cierres = 0
         let vista = BienvenidaView(modelo: modelo, borrador: borrador, cerrar: { cierres += 1 })
@@ -52,7 +53,99 @@ enum VerificacionInterfaz {
         _ = ventana.performKeyEquivalent(with: escape)
         precondition(cierres == 1, "Escape debe ofrecer salir del formulario")
         ventana.orderOut(nil)
+        var origenComprobado = false
+        Task {
+            await comprobarOrigenCodigo()
+            origenComprobado = true
+        }
+        let limite = Date().addingTimeInterval(5)
+        while !origenComprobado && Date() < limite {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
+        precondition(origenComprobado, "la comprobación del origen del código debe terminar")
         print("Componentes de interfaz: foco editable, navegación, Retorno y Escape comprobados con eventos locales; sin VPN ni Llavero reales")
+    }
+
+    private static func comprobarOrigenCodigo() async {
+        let mensaje = MensajeCodigoGmail(id: "abc123", sesion: UUID())
+        let recibido = CodigoRecibido(codigo: "123456", remitente: "muestra@example.invalid", mensaje: mensaje)
+        for modo in 0...3 {
+            let entrega = await SolicitudCodigo.obtenerDeMuestra(recibido) { solicitud in
+                solicitud.detenerEnvio()
+                switch modo {
+                case 0: solicitud.enviar()
+                case 1: solicitud.codigo = "654321"; solicitud.enviar()
+                case 2: precondition(solicitud.recibirExterno("123456"))
+                default: solicitud.cancelar()
+                }
+            }
+            if modo == 0 { precondition(entrega?.mensaje == mensaje && entrega?.codigo == "123456") }
+            else if modo < 3 { precondition(entrega != nil && entrega?.mensaje == nil) }
+            else { precondition(entrega == nil) }
+        }
+    }
+
+    private static func comprobarUsoCorreoEnModelo() {
+        let id = "correo-muestra"
+        let mensaje = MensajeCodigoGmail(id: "abc123", sesion: UUID())
+        func estado(_ conectada: Bool) -> VPNStatus {
+            VPNStatus(id: id, name: "Muestra", connected: conectada, pid: 0, ip: "", iface: "",
+                      networks: [], enabled: true, configured: true, helperReady: true)
+        }
+        for seAdelantaList in [false, true] {
+            for desaparece in [false, true] {
+                let modelo = VPNModel(sinArrancar: ())
+                modelo.esMuestra = true
+                let inicio = Date()
+                modelo.inicioConexion[id] = inicio
+                modelo.estados[id] = .conectando
+                let uso = modelo.prepararUsoCorreo(para: id) { _ in
+                    preconditionFailure("una caída o un perfil ausente no autoriza trasladar el mensaje anterior")
+                }
+                uso.registrarEntrega(mensaje)
+                if seAdelantaList {
+                    modelo.aplicarEstadosConsultados([estado(true)], consultasCorreo: [:])
+                    precondition(modelo.inicioConexion[id] == nil)
+                }
+                modelo.finalizarIntentoConexion(estado(false), inicioIntento: inicio, resultado: .success(()), usoCorreo: uso)
+                let consulta = uso.consultaPendiente!
+                modelo.aplicarEstadosConsultados(desaparece ? [] : [estado(false)], consultasCorreo: [id: consulta])
+                precondition(uso.consultaPendiente == nil, "la caída debe invalidar incluso la rama donde list llegó primero")
+                modelo.aplicarEstadosConsultados([estado(true)], consultasCorreo: [id: consulta])
+            }
+        }
+
+        let modelo = VPNModel(sinArrancar: ())
+        modelo.esMuestra = true
+        var trasladados = 0
+        let anterior = modelo.prepararUsoCorreo(para: id) { _ in preconditionFailure("intento reemplazado") }
+        anterior.registrarEntrega(mensaje)
+        anterior.confirmarProceso()
+        let consultaAnterior = anterior.consultaPendiente!
+        let actual = modelo.prepararUsoCorreo(para: id) { _ in trasladados += 1 }
+        actual.registrarEntrega(mensaje)
+        actual.confirmarProceso()
+        modelo.estados[id] = .conectando
+        modelo.aplicarEstadosConsultados([estado(false)], consultasCorreo: [id: consultaAnterior])
+        precondition(actual.consultaPendiente != nil, "una respuesta negativa de otro intento no cancela el actual")
+        let consultaActual = actual.consultaPendiente!
+        modelo.aplicarEstadosConsultados([estado(true)], consultasCorreo: [id: consultaActual])
+        modelo.aplicarEstadosConsultados([estado(true)], consultasCorreo: [id: consultaActual])
+        precondition(trasladados == 1)
+
+        let cancelado = modelo.prepararUsoCorreo(para: id) { _ in preconditionFailure("intento cancelado") }
+        cancelado.registrarEntrega(mensaje)
+        cancelado.confirmarProceso()
+        let consultaCancelada = cancelado.consultaPendiente!
+        modelo.inicioConexion[id] = Date()
+        modelo.estados[id] = .conectando
+        let acumulado = Acumulador()
+        IntentosConexion.preparar(id)
+        IntentosConexion.registrar(id, proceso: nil, acumulado: acumulado)
+        modelo.cancelarConexion(id)
+        IntentosConexion.retirar(id, acumulado: acumulado)
+        modelo.aplicarEstadosConsultados([estado(true)], consultasCorreo: [id: consultaCancelada])
+        precondition(cancelado.consultaPendiente == nil)
     }
 
     private static func comprobarCancelacionDeRecuperacion(_ muestra: VPNModel) {

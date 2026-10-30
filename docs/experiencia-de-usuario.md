@@ -245,3 +245,103 @@ sin implementación ni servicios externos.
 
 No se afirma una prueba de usabilidad con personas. Las versiones mínimas de
 macOS 14/15 siguen pendientes de comprobación.
+
+## Papelera opcional de Gmail — 29 de octubre de 2026
+
+Cuenta de Google incorpora un interruptor nativo para enviar el correo usado a
+la papelera. Se mantiene desactivado en instalaciones nuevas y al actualizar.
+La elección se guarda en `ajustes.json`; los permisos concedidos quedan con la
+cuenta en el Llavero. Activar con una sesión de solo lectura explica y confirma
+la ampliación antes de abrir Google. Cancelar el consentimiento conserva la
+sesión anterior y deja la opción pendiente de autorización. Una concesión sin
+lectura de Gmail no reemplaza la sesión anterior.
+
+La comprobación del uso está separada de la lectura: requiere entregar el código
+del mensaje, finalizar el proceso y confirmar el túnel del mismo intento. La
+prueba desde Ajustes, otro código manual, Terminal, cancelaciones y errores no
+autorizan un traslado. El aviso de un traslado fallido aparece en Cuenta de
+Google, se puede ocultar y no cambia el resultado de la VPN. Un traslado correcto
+de otra conexión no oculta un fallo anterior.
+
+Verificación local:
+
+- Compilaciones de depuración y del paquete local con firma ad hoc, sin instalar.
+- 42 pruebas de Python y las 15 suites Swift/shell. Las pruebas de actualización,
+  ciclo de app y control que requieren sockets o inspección de procesos se
+  completaron fuera del aislamiento, usando únicamente copias temporales y datos
+  ficticios. La prueba de componentes conserva sus eventos locales de teclado.
+- Regresiones de preferencia ausente, activada y desactivada; persistencia y claves
+  desconocidas; entrega y proceso en distinto orden, una sola acción,
+  cancelación y separación de intentos; scopes solicitados y concesión parcial;
+  sesión antigua, cambio de sesión y desactivación durante la renovación; fallos
+  de red y permiso sin cerrar la sesión de lectura.
+- HTTP simulado mediante `URLProtocol`: POST de un solo mensaje a `messages.trash`,
+  cuerpo vacío, respuesta con el ID correcto y etiqueta TRASH; rechazo de falta
+  de permiso, sesión caducada, cuota, servidor y confirmaciones incompletas. No
+  se realizan peticiones a Gmail en estas pruebas.
+- Renderizados en `.build-cache/capturas-papelera/`: Cuenta de Google en Ajustes
+  a 780 × 580 y 1180 × 820, y detalle a 540 × 580 y 880 × 820. Se revisaron claro
+  y oscuro, opción activa/inactiva y autorización pendiente, con cuentas ficticias.
+
+Pendiente: consentimiento OAuth con una cuenta real, traslado y recuperación de
+un correo real después de una conexión VPN real, VoiceOver y recorrido completo
+con teclado en este nuevo apartado. Los renderizados usan respaldos de materiales
+y no acreditan interacción, diálogos de Google ni el comportamiento de versiones
+anteriores de macOS. No se instaló ni publicó una versión ni se modificaron
+correos o VPN reales.
+
+No hay cola persistente ni reintentos del traslado. Una petición ya enviada puede
+completarse tras desactivar la opción; un fallo de red puede dejar su resultado
+indeterminado. La [guía de Gmail](gmail.md) explica permisos, recuperación y límites.
+
+### Revisión previa al commit
+
+La revisión detectó que una consulta de estado iniciada durante la espera del
+código podía contarse como confirmación para mover el mensaje al llegar tarde.
+Ahora la consulta captura una revisión solo después de entregar el código y
+confirmar el proceso. Una respuesta anterior, de otra VPN/intento o de una entrega
+reemplazada no puede autorizar el traslado. La cancelación invalida también una
+consulta que ya estuviera en curso. Si el estado público se confirmó antes de
+terminar el proceso, su resultado satisfactorio solicita una consulta nueva.
+
+La regresión usa estados y mensajes ficticios para esas secuencias, sin Gmail ni
+VPN reales. Esta corrección no modifica la pantalla ni amplía los permisos.
+Después de corregirla pasaron nuevamente las suites de correo, preferencias de
+seguridad y componentes de interfaz, la compilación de depuración y el paquete
+local con firma ad hoc. `git diff --check` no encontró errores. Las 42 pruebas de
+Python y las 15 suites completas corresponden a la validación previa descrita
+arriba; no se repitió toda la batería para esta corrección localizada.
+
+### Caída antes de confirmar el correo y cierre de sesión
+
+Una revisión adicional reprodujo con un modelo ficticio la secuencia en que
+`list` observa el túnel antes de terminar el proceso, retira `inicioConexion` y
+la siguiente consulta ya muestra una caída. El uso del correo quedaba pendiente.
+Ahora una consulta vigente desconectada o sin el perfil lo invalida; una respuesta
+de otro intento no cancela el uso actual. El propio uso vence a los 30 segundos
+del éxito del proceso con un reloj continuo, incluso si el estado público se
+adelantó y el temporizador de la fila ya no aplica. Las respuestas duplicadas no
+renuevan ese plazo. Una conexión posterior no recupera un traslado cancelado.
+
+Se separaron la aplicación de estados y la finalización del intento en métodos
+del modelo utilizados por el flujo real y por el verificador. Las regresiones
+ejercitan ambas secuencias de respuesta, perfil ausente, respuesta de otro intento,
+confirmación única y cancelación mediante un intento ficticio sin proceso.
+El plazo se comprueba con reloj inyectado, sin esperar 30 segundos reales.
+
+Cerrar sesión limpia también los scopes del registro del Llavero; antes quedaban
+como metadatos sin habilitar acceso, porque no existía una sesión conectada.
+Olvidar compara el registro ya limpiado antes de retirar el cliente. Las pruebas
+comprueban persistencia, recarga, borrado y conservación de la cuenta si falla
+la escritura. El apartado de papelera explica ahora si falta preparar la cuenta,
+recuperar el Llavero, iniciar sesión, completar el navegador o autorizar el permiso.
+
+La prueba de componentes también usa las acciones reales de `SolicitudCodigo`
+con un código ficticio y sin ventana: Revisar y enviar el mismo código conserva
+el origen; cambiarlo, responder por Terminal o cancelar lo descarta.
+
+Pasaron las suites de correo, seguridad, interacción, núcleo, configuración e
+interfaz, y las compilaciones de depuración y del paquete local con firma ad hoc.
+Se regeneraron las capturas y se revisó la sesión caducada en claro y oscuro,
+junto con permiso pendiente y Ajustes a tamaño mínimo. `git diff --check` pasó.
+Las pruebas siguen sin usar Gmail ni VPN reales y no acreditan VoiceOver.

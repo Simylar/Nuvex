@@ -22,6 +22,8 @@ swiftc -sdk "$SDKROOT" -module-cache-path "$CLANG_MODULE_CACHE_PATH" \
   "$ROOT/Nuvex/Sources/Nuvex/ExtractorCodigo.swift" \
   "$ROOT/Nuvex/Sources/Nuvex/ProblemaGmail.swift" \
   "$ROOT/Nuvex/Sources/Nuvex/Soporte.swift" \
+  "$ROOT/Nuvex/Sources/Nuvex/UsoCorreoGmail.swift" \
+  "$ROOT/Nuvex/Sources/Nuvex/PapeleraGmail.swift" \
   "$ROOT/Nuvex/Tests/SecurityPreferencesChecks.swift" \
   -o "$tmp/security-preferences-checks"
 "$tmp/security-preferences-checks"
